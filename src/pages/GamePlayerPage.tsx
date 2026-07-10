@@ -37,6 +37,7 @@ interface GamePlayerPageProps {
 
 export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, onBack }) => {
   const [game, setGame] = useState<Game | null>(null);
+  const [globalSettings, setGlobalSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<{ sessionId: string } | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -48,6 +49,7 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
 
   useEffect(() => {
     fetchGame();
+    fetchGlobalSettings();
   }, [gameId]);
 
   useEffect(() => {
@@ -58,6 +60,18 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
       return () => clearInterval(interval);
     }
   }, [playing]);
+
+  const fetchGlobalSettings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/game/reward-settings`);
+      const data = await res.json();
+      if (data.success) {
+        setGlobalSettings(data.settings);
+      }
+    } catch (err) {
+      console.error("Error fetching global settings:", err);
+    }
+  };
 
   const fetchGame = async () => {
     try {
@@ -123,9 +137,12 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
     }
   };
 
+  const requiredTime = globalSettings?.requiredPlayTime || game?.requiredTime || 180;
+  const rewardCoins = globalSettings?.rewardCoins || game?.rewardCoins || 100;
+
   const elapsedSeconds = startTime ? Math.floor((currentTime - startTime) / 1000) : 0;
-  const progress = game ? Math.min((elapsedSeconds / game.requiredTime) * 100, 100) : 0;
-  const canClaim = game && elapsedSeconds >= game.requiredTime;
+  const progress = Math.min((elapsedSeconds / requiredTime) * 100, 100);
+  const canClaim = elapsedSeconds >= requiredTime;
 
   if (loading) {
     return (
@@ -164,7 +181,7 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
         <div className="flex items-center gap-2">
           <div className="bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl flex items-center gap-2">
             <Coins className="w-4 h-4 text-emerald-500" />
-            <span className="text-sm font-black text-emerald-500">{game.rewardCoins}</span>
+            <span className="text-sm font-black text-emerald-500">{rewardCoins}</span>
           </div>
         </div>
       </header>

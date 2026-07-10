@@ -4392,8 +4392,18 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       if (!gameSnap.exists()) return res.status(404).json({ error: "Game not found" });
       const gameData = gameSnap.data();
 
-      const requiredTimeSec = Number(gameData.requiredTime || 60); // default 1 min
-      const rewardCoins = Number(gameData.rewardCoins || 10);
+      // Get global settings
+      const settingsRef = doc(db, "settings", "game_rewards");
+      const settingsSnap = await getDoc(settingsRef);
+      const settings = settingsSnap.exists() ? settingsSnap.data() : null;
+
+      const requiredTimeSec = Number(settings?.requiredPlayTime ?? gameData.requiredTime ?? 60);
+      const rewardCoins = Number(settings?.rewardCoins ?? gameData.rewardCoins ?? 10);
+
+      // Check if enabled
+      if (settings && settings.enabled === false) {
+        return res.status(403).json({ error: "Game rewards are currently disabled by administrator." });
+      }
 
       if (durationSec < requiredTimeSec) {
         await updateDoc(sessionRef, { status: "failed", endTime: new Date().toISOString() });
@@ -4405,8 +4415,22 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const userSnap = await getDoc(userRef);
       const userData = userSnap.data();
 
-      // Update coins and streak
+      // Check Cooldown
+      const lastRewardAt = userData?.lastGameRewardAt ? new Date(userData.lastGameRewardAt).getTime() : 0;
+      const cooldownMs = (settings?.cooldownMinutes || 0) * 60 * 1000;
+      if (Date.now() - lastRewardAt < cooldownMs) {
+        const remaining = Math.ceil((cooldownMs - (Date.now() - lastRewardAt)) / 60000);
+        return res.status(429).json({ error: `Please wait ${remaining} minutes before claiming another reward.` });
+      }
+
+      // Check Daily Limit
       const today = new Date().toISOString().split("T")[0];
+      const dailyEarnings = userData?.lastGamePlayDate === today ? (userData?.dailyGameCoins || 0) : 0;
+      if (settings?.dailyCoinLimit > 0 && dailyEarnings + rewardCoins > settings.dailyCoinLimit) {
+        return res.status(429).json({ error: "You have reached your daily coin limit for games." });
+      }
+
+      // Update coins and streak
       const lastPlay = userData?.lastGamePlayDate || "";
       let newStreak = Number(userData?.gameStreak || 0);
 
@@ -4424,12 +4448,16 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         }
       }
 
-      await updateDoc(userRef, {
+      const updateData: any = {
         gameCoins: increment(rewardCoins),
+        dailyGameCoins: lastPlay === today ? increment(rewardCoins) : rewardCoins,
         gameStreak: newStreak,
         lastGamePlayDate: today,
+        lastGameRewardAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
-      });
+      };
+
+      await updateDoc(userRef, updateData);
 
       await updateDoc(sessionRef, { status: "completed", endTime: new Date().toISOString(), earned: rewardCoins });
 
@@ -8299,6 +8327,67 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // ==========================================
+  // GAME REWARD SETTINGS
+  // ==========================================
+
+  app.get("/api/admin/game-reward-settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "game_rewards");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        res.json({ success: true, settings: snap.data() });
+      } else {
+        // Default settings
+        const defaults = {
+          enabled: true,
+          requiredPlayTime: 180, // 3 mins
+          rewardCoins: 100,
+          conversionCoins: 1000,
+          conversionInr: 1,
+          dailyCoinLimit: 5000,
+          cooldownMinutes: 5,
+          maxDailyRewards: 50
+        };
+        res.json({ success: true, settings: defaults });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/admin/game-reward-settings", async (req, res) => {
+    try {
+      const settings = req.body;
+      const docRef = doc(db, "settings", "game_rewards");
+      await setDoc(docRef, { ...settings, updatedAt: new Date().toISOString() });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Public endpoint for app to get settings
+  app.get("/api/game/reward-settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "game_rewards");
+      const snap = await getDoc(docRef);
+      const settings = snap.exists() ? snap.data() : {
+        enabled: true,
+        requiredPlayTime: 180,
+        rewardCoins: 100,
+        conversionCoins: 1000,
+        conversionInr: 1,
+        dailyCoinLimit: 5000,
+        cooldownMinutes: 5,
+        maxDailyRewards: 50
+      };
+      res.json({ success: true, settings });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 

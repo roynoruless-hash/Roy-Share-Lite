@@ -52,6 +52,9 @@ import {
   Upload,
   Image,
   FolderPlus,
+  Save,
+  Coins,
+  ArrowRight,
 } from "lucide-react";
 
 
@@ -253,15 +256,21 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [gamePixSyncStatus, setGamePixSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
   const [gamePixSyncResult, setGamePixSyncResult] = useState<{ imported: number; updated: number; failed: number } | null>(null);
 
-  // Game Rewards States
-  const [rewardAmount, setRewardAmount] = useState<number>(15);
-  const [minPlayDuration, setMinPlayDuration] = useState<number>(30);
-  const [dailyLimit, setDailyLimit] = useState<number>(10);
-  const [maxCoinsPerDay, setMaxCoinsPerDay] = useState<number>(150);
-  const [cooldown, setCooldown] = useState<number>(60);
-  const [rewardEnabled, setRewardEnabled] = useState<boolean>(true);
-  const [rewardsSaving, setRewardsSaving] = useState(false);
-  const [rewardsSuccess, setRewardsSuccess] = useState(false);
+  // Game Reward Settings state definitions
+  const [gameRewardSettings, setGameRewardSettings] = useState<any>({
+    enabled: true,
+    requiredPlayTime: 180,
+    rewardCoins: 100,
+    conversionCoins: 1000,
+    conversionInr: 1,
+    dailyCoinLimit: 5000,
+    cooldownMinutes: 5,
+    maxDailyRewards: 50
+  });
+  const [gameRewardSettingsLoading, setGameRewardSettingsLoading] = useState(false);
+  const [gameRewardSettingsSaving, setGameRewardSettingsSaving] = useState(false);
+  const [gameRewardSettingsSuccess, setGameRewardSettingsSuccess] = useState("");
+  const [gameRewardSettingsError, setGameRewardSettingsError] = useState("");
 
   // Game Analytics States
   const [gameAnalytics, setGameAnalytics] = useState<any>(null);
@@ -884,6 +893,49 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchGameRewardSettings = async () => {
+    setGameRewardSettingsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/game-reward-settings`);
+      const data = await res.json();
+      if (data.success) {
+        setGameRewardSettings(data.settings);
+      }
+    } catch (err) {
+      console.error("Error fetching game reward settings:", err);
+    } finally {
+      setGameRewardSettingsLoading(false);
+    }
+  };
+
+  const saveGameRewardSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGameRewardSettingsSaving(true);
+    setGameRewardSettingsError("");
+    setGameRewardSettingsSuccess("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/game-reward-settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(gameRewardSettings)
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setGameRewardSettingsSuccess("✅ Game Reward Settings Saved Successfully");
+        setTimeout(() => setGameRewardSettingsSuccess(""), 5000);
+      } else {
+        setGameRewardSettingsError(data.error || "Failed to save settings.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setGameRewardSettingsError("Network error saving settings: " + err.message);
+    } finally {
+      setGameRewardSettingsSaving(false);
     }
   };
 
@@ -1752,25 +1804,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
-  const fetchGameRewardsSettings = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/game/rewards/settings`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.settings) {
-          setRewardAmount(Number(data.settings.rewardAmount) || 15);
-          setMinPlayDuration(Number(data.settings.minPlayDuration) || 30);
-          setDailyLimit(Number(data.settings.dailyLimit) || 10);
-          setMaxCoinsPerDay(Number(data.settings.maxCoinsPerDay) || 150);
-          setCooldown(Number(data.settings.cooldown) || 60);
-          setRewardEnabled(data.settings.enabled !== false);
-        }
-      }
-    } catch (e) {
-      console.error("Error loading reward settings in admin:", e);
-    }
-  };
-
   const fetchGameAnalytics = async () => {
     setGameAnalyticsLoading(true);
     try {
@@ -1789,30 +1822,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   };
 
   const saveGameRewardsSettings = async () => {
-    setRewardsSaving(true);
-    setRewardsSuccess(false);
-    try {
-      const res = await fetch(`${API_BASE}/api/admin/game/rewards/settings`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rewardAmount: Number(rewardAmount),
-          minPlayDuration: Number(minPlayDuration),
-          dailyLimit: Number(dailyLimit),
-          maxCoinsPerDay: Number(maxCoinsPerDay),
-          cooldown: Number(cooldown),
-          enabled: rewardEnabled
-        })
-      });
-      if (res.ok) {
-        setRewardsSuccess(true);
-        setTimeout(() => setRewardsSuccess(false), 5000);
-      }
-    } catch (e) {
-      console.error("Error saving reward settings:", e);
-    } finally {
-      setRewardsSaving(false);
-    }
+    // Redundant function removed
   };
 
   const fetchGamePixConfig = async () => {
@@ -1833,7 +1843,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       }
       
       // Load Rewards & Analytics
-      await fetchGameRewardsSettings();
+      await fetchGameRewardSettings();
       await fetchGameAnalytics();
     } catch (err: any) {
       console.error(err);
@@ -3755,6 +3765,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🚀 Referral System",
               "⚙️ System Settings",
               "📄 Ads.txt Manager",
+              "🎮 Game Rewards",
               "🎮 GamePix Integration",
               "🎮 Game Catalog",
               "➕ Add Custom Game",
@@ -3765,6 +3776,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 onClick={() => {
                   setActiveTab(btn);
                   if (btn === "💰 Verified Tasks") fetchVerifiedTasks();
+                  if (btn === "🎮 Game Rewards") fetchGameRewardSettings();
                 }}
                 className={`px-4 py-2 hover:bg-slate-800 border border-slate-800 rounded-xl text-sm font-medium transition-colors ${activeTab === btn ? "bg-blue-600 text-white border-blue-500" : "bg-slate-900 text-slate-300"}`}
               >
@@ -9935,126 +9947,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   </div>
 
                   {/* ==========================================
-                      GAME REWARDS CONFIGURATION PANEL
-                     ========================================== */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl mt-6">
-                    <div>
-                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        🎁 Game Rewards Configuration
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Configure the exact play requirements and reward coins credited directly to the user's wallet.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-slate-200">
-                          Reward Coins per Valid Session
-                        </label>
-                        <input
-                          type="number"
-                          value={rewardAmount}
-                          onChange={(e) => setRewardAmount(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-slate-200">
-                          Minimum Required Play Time (Seconds)
-                        </label>
-                        <input
-                          type="number"
-                          value={minPlayDuration}
-                          onChange={(e) => setMinPlayDuration(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-slate-200">
-                          Daily Claim Limit per User (Plays)
-                        </label>
-                        <input
-                          type="number"
-                          value={dailyLimit}
-                          onChange={(e) => setDailyLimit(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-slate-200">
-                          Daily Earning Cap per User (Coins)
-                        </label>
-                        <input
-                          type="number"
-                          value={maxCoinsPerDay}
-                          onChange={(e) => setMaxCoinsPerDay(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-slate-200">
-                          Cooldown Duration between Claims (Seconds)
-                        </label>
-                        <input
-                          type="number"
-                          value={cooldown}
-                          onChange={(e) => setCooldown(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
-                        />
-                      </div>
-
-                      <div className="space-y-2 flex flex-col justify-end pb-1">
-                        <span className="text-xs font-semibold text-slate-200 mb-2 block">
-                          Reward System Status
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setRewardEnabled(!rewardEnabled)}
-                            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                              rewardEnabled 
-                                ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" 
-                                : "bg-red-500/10 border border-red-500/30 text-red-400"
-                            }`}
-                          >
-                            {rewardEnabled ? "● Enabled" : "○ Disabled"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {rewardsSuccess && (
-                      <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm flex items-center gap-2">
-                        <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                        <span>Game Rewards Settings Saved Successfully</span>
-                      </div>
-                    )}
-
-                    <div className="flex justify-end pt-2">
-                      <button
-                        onClick={saveGameRewardsSettings}
-                        disabled={rewardsSaving}
-                        className="flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg text-sm active:scale-95 disabled:opacity-50 cursor-pointer"
-                      >
-                        {rewardsSaving ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
-                          </>
-                        ) : (
-                          <>
-                            <Check className="w-4 h-4" /> Save Rewards Config
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* ==========================================
                       GAME PERFORMANCE & ANALYTICS INSIGHTS
                      ========================================== */}
                   <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl mt-6">
@@ -11995,6 +11887,201 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   )}
                 </div>
 
+              </div>
+            </div>
+          )}
+
+          {activeTab === "🎮 Game Rewards" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  🎮 Game Reward Settings
+                </h2>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setGameRewardSettings({
+                      enabled: true,
+                      requiredPlayTime: 180,
+                      rewardCoins: 100,
+                      conversionCoins: 1000,
+                      conversionInr: 1,
+                      dailyCoinLimit: 5000,
+                      cooldownMinutes: 5,
+                      maxDailyRewards: 50
+                    })}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl transition-all border border-slate-700 flex items-center gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" /> Reset
+                  </button>
+                  <button
+                    onClick={saveGameRewardSettings}
+                    disabled={gameRewardSettingsSaving}
+                    className="flex items-center gap-2 px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" /> 💾 Save Settings
+                  </button>
+                </div>
+              </div>
+
+              {gameRewardSettingsSuccess && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl flex items-center gap-3">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <p className="font-bold uppercase tracking-widest text-xs">{gameRewardSettingsSuccess}</p>
+                </div>
+              )}
+
+              {gameRewardSettingsError && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5" />
+                  <p className="font-bold text-sm">{gameRewardSettingsError}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Basic Configuration */}
+                <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <h3 className="text-lg font-black text-white uppercase tracking-tighter">Core Configuration</h3>
+                      <p className="text-xs text-slate-500 font-medium">Toggle rewards and basic play requirements.</p>
+                    </div>
+                    <button
+                      onClick={() => setGameRewardSettings({...gameRewardSettings, enabled: !gameRewardSettings.enabled})}
+                      className={`relative w-14 h-8 rounded-full transition-all duration-300 ${gameRewardSettings.enabled ? 'bg-emerald-600' : 'bg-slate-700'}`}
+                    >
+                      <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all duration-300 ${gameRewardSettings.enabled ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 pt-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Required Play Time</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <select
+                          value={gameRewardSettings.requiredPlayTime}
+                          onChange={(e) => setGameRewardSettings({...gameRewardSettings, requiredPlayTime: Number(e.target.value)})}
+                          className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                        >
+                          <option value={60}>1 Minute</option>
+                          <option value={120}>2 Minutes</option>
+                          <option value={180}>3 Minutes</option>
+                          <option value={300}>5 Minutes</option>
+                          <option value={600}>10 Minutes</option>
+                          <option value={0}>Custom (Seconds)</option>
+                        </select>
+                        <input
+                          type="number"
+                          placeholder="Or enter seconds..."
+                          value={gameRewardSettings.requiredPlayTime}
+                          onChange={(e) => setGameRewardSettings({...gameRewardSettings, requiredPlayTime: Number(e.target.value)})}
+                          className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic">User must play for this duration before claiming reward.</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Reward Coins</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={gameRewardSettings.rewardCoins}
+                          onChange={(e) => setGameRewardSettings({...gameRewardSettings, rewardCoins: Number(e.target.value)})}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none pl-10"
+                        />
+                        <Coins className="absolute left-3 top-3.5 w-4 h-4 text-amber-500" />
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic">Amount of coins awarded per successful play session.</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Economic Configuration */}
+                <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
+                  <div className="space-y-1">
+                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">Coin Conversion</h3>
+                    <p className="text-xs text-slate-500 font-medium">Define the monetary value of arcade coins.</p>
+                  </div>
+
+                  <div className="flex items-center gap-4 pt-4">
+                    <div className="flex-1 space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Coins</label>
+                      <input
+                        type="number"
+                        value={gameRewardSettings.conversionCoins}
+                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, conversionCoins: Number(e.target.value)})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                    <div className="pt-6">
+                      <ArrowRight className="w-5 h-5 text-slate-600" />
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Amount (₹)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={gameRewardSettings.conversionInr}
+                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, conversionInr: Number(e.target.value)})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                    <p className="text-xs text-blue-400 text-center font-bold">
+                      Current Rate: {gameRewardSettings.conversionCoins} Coins = ₹{gameRewardSettings.conversionInr.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Limits Configuration */}
+                <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
+                  <div className="space-y-1">
+                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">Limits & Cooldowns</h3>
+                    <p className="text-xs text-slate-500 font-medium">Control the pace of earnings to prevent abuse.</p>
+                  </div>
+
+                  <div className="space-y-4 pt-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Daily Coin Limit</label>
+                      <input
+                        type="number"
+                        value={gameRewardSettings.dailyCoinLimit}
+                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, dailyCoinLimit: Number(e.target.value)})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                      <p className="text-[10px] text-slate-500 italic">Total coins a user can earn per day (0 for unlimited).</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Max Rewards Per Day</label>
+                      <input
+                        type="number"
+                        value={gameRewardSettings.maxDailyRewards}
+                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, maxDailyRewards: Number(e.target.value)})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                      <p className="text-[10px] text-slate-500 italic">Maximum number of sessions rewarded per user per day.</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Cooldown (Minutes)</label>
+                      <select
+                        value={gameRewardSettings.cooldownMinutes}
+                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, cooldownMinutes: Number(e.target.value)})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      >
+                        <option value={0}>0 Min (Instantly)</option>
+                        <option value={2}>2 Min</option>
+                        <option value={5}>5 Min</option>
+                        <option value={10}>10 Min</option>
+                        <option value={30}>30 Min</option>
+                        <option value={60}>1 Hour</option>
+                      </select>
+                      <p className="text-[10px] text-slate-500 italic">Waiting time required between two rewarded sessions.</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}

@@ -56,6 +56,7 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
   const [view, setView] = useState<"intro" | "center">(initialView);
   const [games, setGames] = useState<Game[]>([]);
   const [userData, setUserData] = useState<UserData | null>(null);
+  const [globalSettings, setGlobalSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -64,10 +65,23 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
 
   useEffect(() => {
     fetchGames();
+    fetchGlobalSettings();
     if (userId) {
       fetchUserData();
     }
   }, [userId]);
+
+  const fetchGlobalSettings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/game/reward-settings`);
+      const data = await res.json();
+      if (data.success) {
+        setGlobalSettings(data.settings);
+      }
+    } catch (err) {
+      console.error("Error fetching global settings:", err);
+    }
+  };
 
   const fetchGames = async () => {
     try {
@@ -296,7 +310,7 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                           {featuredGames.map(game => (
-                            <GameCard key={game.id} game={game} />
+                            <GameCard key={game.id} game={game} settings={globalSettings} />
                           ))}
                         </div>
                       </section>
@@ -356,7 +370,7 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
                     {filteredGames.length > 0 ? (
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         {filteredGames.map(game => (
-                          <GameCard key={game.id} game={game} />
+                          <GameCard key={game.id} game={game} settings={globalSettings} />
                         ))}
                       </div>
                     ) : (
@@ -387,11 +401,11 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
                     <div className="grid grid-cols-2 gap-4 bg-black/20 p-4 rounded-2xl border border-white/5">
                       <div className="text-left">
                         <p className="text-[10px] font-bold text-slate-600 uppercase">Est. Value</p>
-                        <p className="text-lg font-black text-emerald-500">₹{((userData?.gameCoins || 0) * 0.001).toFixed(2)}</p>
+                        <p className="text-lg font-black text-emerald-500">₹{((userData?.gameCoins || 0) * (globalSettings?.conversionInr / globalSettings?.conversionCoins || 0.001)).toFixed(2)}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] font-bold text-slate-600 uppercase">Rate</p>
-                        <p className="text-lg font-black text-white">1000 = ₹1</p>
+                        <p className="text-lg font-black text-white">{globalSettings?.conversionCoins || 1000} = ₹{globalSettings?.conversionInr || 1}</p>
                       </div>
                     </div>
                     <button 
@@ -432,7 +446,10 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
   );
 };
 
-const GameCard: React.FC<{ game: Game }> = ({ game }) => {
+const GameCard: React.FC<{ game: Game, settings?: any }> = ({ game, settings }) => {
+  const rewardCoins = settings?.rewardCoins || game.rewardCoins || 10;
+  const requiredTime = settings?.requiredPlayTime || game.requiredTime || 60;
+
   return (
     <motion.div 
       whileHover={{ y: -8 }}
@@ -454,11 +471,11 @@ const GameCard: React.FC<{ game: Game }> = ({ game }) => {
         <div className="absolute bottom-3 left-3 flex items-center gap-2">
           <div className="bg-emerald-500/20 backdrop-blur-md border border-emerald-500/20 px-2 py-1 rounded-lg flex items-center gap-1">
             <Coins className="w-3 h-3 text-emerald-400" />
-            <span className="text-[10px] font-black text-emerald-400">+{game.rewardCoins || 10}</span>
+            <span className="text-[10px] font-black text-emerald-400">+{rewardCoins}</span>
           </div>
           <div className="bg-indigo-500/20 backdrop-blur-md border border-indigo-500/20 px-2 py-1 rounded-lg flex items-center gap-1">
             <Timer className="w-3 h-3 text-indigo-400" />
-            <span className="text-[10px] font-black text-indigo-400">{Math.ceil((game.requiredTime || 60) / 60)}m</span>
+            <span className="text-[10px] font-black text-indigo-400">{Math.ceil(requiredTime / 60)}m</span>
           </div>
         </div>
       </div>
