@@ -3022,6 +3022,162 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // GamePix API endpoints
+  app.get("/api/gamepix/rss", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "gamepix");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        return res.status(404).json({ success: false, error: "RSS URL not configured in settings." });
+      }
+      const { rssUrl } = docSnap.data();
+      if (!rssUrl) {
+        return res.status(404).json({ success: false, error: "RSS Feed URL is empty." });
+      }
+
+      const response = await fetch(rssUrl);
+      if (!response.ok) {
+        return res.status(400).json({ success: false, error: `Feed returned status ${response.status}` });
+      }
+
+      const text = await response.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (e) {
+        return res.status(400).json({ success: false, error: "Feed content is not valid JSON." });
+      }
+
+      return res.json({
+        success: true,
+        message: "RSS Feed Verified Successfully. Connection Established.",
+        gameCount: Array.isArray(json) ? json.length : (Array.isArray(json.data) ? json.data.length : (Array.isArray(json.games) ? json.games.length : 0))
+      });
+    } catch (e: any) {
+      console.error("Error in GET /api/gamepix/rss:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to reach RSS feed." });
+    }
+  });
+
+  app.get("/api/admin/gamepix/config", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "gamepix");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        return res.json({ rssUrl: "" });
+      }
+      return res.json(docSnap.data());
+    } catch (e: any) {
+      console.error("Error fetching gamepix settings:", e);
+      return res.status(500).json({ error: "Server error fetching GamePix settings" });
+    }
+  });
+
+  app.put("/api/admin/gamepix/config", async (req, res) => {
+    try {
+      const { rssUrl } = req.body;
+      const docRef = doc(db, "settings", "gamepix");
+      await setDoc(docRef, { rssUrl, updatedAt: new Date().toISOString() }, { merge: true });
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error updating gamepix settings:", e);
+      return res.status(500).json({ error: "Server error updating GamePix settings" });
+    }
+  });
+
+  app.post("/api/admin/gamepix/test", async (req, res) => {
+    try {
+      const { rssUrl } = req.body;
+      if (!rssUrl) {
+        return res.status(400).json({ success: false, error: "Please provide a valid RSS Feed URL" });
+      }
+      const response = await fetch(rssUrl);
+      if (!response.ok) {
+        return res.status(400).json({ success: false, error: `Unable to connect. Status: ${response.status}` });
+      }
+      const text = await response.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (e) {
+        return res.status(400).json({ success: false, error: "Unable to connect. Please check RSS Feed URL. Response is not valid JSON." });
+      }
+
+      return res.json({
+        success: true,
+        message: "RSS Feed Verified Successfully. Connection Established."
+      });
+    } catch (e: any) {
+      console.error("Test connection error:", e);
+      return res.status(500).json({ success: false, error: "Unable to connect. Please check RSS Feed URL." });
+    }
+  });
+
+  app.get("/api/gamepix/games", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "gamepix");
+      const docSnap = await getDoc(docRef);
+      let rssUrl = "https://feed.gamepix.com/v1/json"; // Fallback URL
+      if (docSnap.exists() && docSnap.data().rssUrl) {
+        rssUrl = docSnap.data().rssUrl;
+      }
+
+      const response = await fetch(rssUrl);
+      if (!response.ok) {
+        throw new Error(`Feed returned status ${response.status}`);
+      }
+      const json = await response.json();
+      let rawGames = [];
+      if (Array.isArray(json)) {
+        rawGames = json;
+      } else if (json && Array.isArray(json.data)) {
+        rawGames = json.data;
+      } else if (json && Array.isArray(json.games)) {
+        rawGames = json.games;
+      }
+
+      // Format to a unified structure
+      const games = rawGames.map((g: any) => ({
+        id: g.id || g.title || String(Math.random()),
+        title: g.title || g.name || "Untitled Game",
+        description: g.description || "",
+        url: g.url || g.playUrl || g.link || "",
+        thumbnailUrl: g.thumbnailUrl || g.thumbnail || g.image || g.icon || g.logo || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=150",
+        bannerUrl: g.bannerUrl || g.banner || g.largeImage || g.image || g.thumbnailUrl || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600",
+        category: g.category || g.genre || (Array.isArray(g.categories) ? g.categories[0] : "Casual"),
+        orientation: g.orientation || "landscape"
+      }));
+
+      return res.json({ success: true, games });
+    } catch (e: any) {
+      console.error("Error in GET /api/gamepix/games:", e);
+      // Fallback: If feed fails, let's return some high-quality curated sample games to ensure UI is never empty and beautiful
+      const sampleGames = [
+        {
+          id: "classic-bowling",
+          title: "Classic Bowling",
+          description: "Strike down the pins in this 3D classic bowling game.",
+          url: "https://play.gamepix.com/classic-bowling",
+          thumbnailUrl: "https://images.unsplash.com/photo-1544698310-74ea9d1c8258?w=150",
+          bannerUrl: "https://images.unsplash.com/photo-1544698310-74ea9d1c8258?w=600",
+          category: "Sports",
+          orientation: "landscape"
+        },
+        {
+          id: "retro-racing",
+          title: "Retro Racing",
+          description: "Speed through neon tracks in retro arcade style.",
+          url: "https://play.gamepix.com/retro-speed-2b",
+          thumbnailUrl: "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=150",
+          bannerUrl: "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600",
+          category: "Racing",
+          orientation: "landscape"
+        }
+      ];
+      return res.json({ success: true, games: sampleGames, fallback: true, error: e.message });
+    }
+  });
+
   app.get("/api/admin/system-settings", async (req, res) => {
     try {
       const docRef = doc(db, "settings", "system");

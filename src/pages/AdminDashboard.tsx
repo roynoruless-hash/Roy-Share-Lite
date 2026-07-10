@@ -194,6 +194,16 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [adsTxtSuccess, setAdsTxtSuccess] = useState(false);
   const [showAdsTxtPreview, setShowAdsTxtPreview] = useState(false);
 
+  // GamePix integration state definitions
+  const [gamePixRssUrl, setGamePixRssUrl] = useState("");
+  const [gamePixLoading, setGamePixLoading] = useState(false);
+  const [gamePixSaving, setGamePixSaving] = useState(false);
+  const [gamePixTesting, setGamePixTesting] = useState(false);
+  const [gamePixError, setGamePixError] = useState("");
+  const [gamePixSuccessMessage, setGamePixSuccessMessage] = useState("");
+  const [gamePixTestSuccess, setGamePixTestSuccess] = useState<string | null>(null);
+  const [gamePixTestError, setGamePixTestError] = useState<string | null>(null);
+
   const fetchGoogleDriveAccounts = async () => {
     setGoogleDriveLoading(true);
     setGoogleDriveError("");
@@ -1306,6 +1316,80 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const fetchGamePixConfig = async () => {
+    setGamePixLoading(true);
+    setGamePixError("");
+    setGamePixSuccessMessage("");
+    setGamePixTestSuccess(null);
+    setGamePixTestError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gamepix/config`);
+      if (res.ok) {
+        const data = await res.json();
+        setGamePixRssUrl(data.rssUrl || "");
+      } else {
+        setGamePixError("Failed to fetch GamePix configuration from server.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setGamePixError("Network error fetching GamePix configuration: " + err.message);
+    } finally {
+      setGamePixLoading(false);
+    }
+  };
+
+  const saveGamePixConfig = async () => {
+    setGamePixSaving(true);
+    setGamePixError("");
+    setGamePixSuccessMessage("");
+    setGamePixTestSuccess(null);
+    setGamePixTestError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gamepix/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rssUrl: gamePixRssUrl }),
+      });
+      if (res.ok) {
+        setGamePixSuccessMessage("✅ Configuration Saved Successfully");
+        setTimeout(() => setGamePixSuccessMessage(""), 5000);
+      } else {
+        setGamePixError("Failed to save GamePix configuration.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setGamePixError("Network error saving GamePix configuration: " + err.message);
+    } finally {
+      setGamePixSaving(false);
+    }
+  };
+
+  const testGamePixConnection = async () => {
+    setGamePixTesting(true);
+    setGamePixError("");
+    setGamePixSuccessMessage("");
+    setGamePixTestSuccess(null);
+    setGamePixTestError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gamepix/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rssUrl: gamePixRssUrl }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setGamePixTestSuccess("✅ RSS Feed Verified Successfully. Connection Established.");
+      } else {
+        setGamePixTestError(data.error || "❌ Unable to connect. Please check RSS Feed URL.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setGamePixTestError("❌ Unable to connect. Please check RSS Feed URL.");
+    } finally {
+      setGamePixTesting(false);
+    }
+  };
+
   const fetchSupportSettings = async () => {
     setSupportSettingsLoading(true);
     try {
@@ -1938,6 +2022,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchGoogleDriveAccounts();
     } else if (activeTab === "📄 Ads.txt Manager") {
       fetchAdsTxt();
+    } else if (activeTab === "🎮 GamePix Integration") {
+      fetchGamePixConfig();
     }
 
     return () => {
@@ -2780,6 +2866,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🚀 Referral System",
               "⚙️ System Settings",
               "📄 Ads.txt Manager",
+              "🎮 GamePix Integration",
             ].map((btn) => (
               <button
                 key={btn}
@@ -8797,6 +8884,113 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                         )}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === "🎮 GamePix Integration" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    🎮 GamePix Integration
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Configure the GamePix RSS/JSON Feed URL to integrate premium HTML5 games into RoyShare.
+                  </p>
+                </div>
+              </div>
+
+              {gamePixLoading ? (
+                <div className="flex justify-center py-12">
+                  <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl">
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-200">
+                      RSS Feed URL
+                    </label>
+                    <input
+                      type="text"
+                      value={gamePixRssUrl}
+                      onChange={(e) => setGamePixRssUrl(e.target.value)}
+                      placeholder="https://feed.gamepix.com/v1/json"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm font-mono text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-slate-500">
+                      Typically GamePix provides a JSON-formatted RSS feed. Defaults to <code>https://feed.gamepix.com/v1/json</code> if left empty.
+                    </p>
+                  </div>
+
+                  {gamePixError && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm flex items-center gap-2">
+                      <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                      <span>{gamePixError}</span>
+                    </div>
+                  )}
+
+                  {gamePixSuccessMessage && (
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                      <span>{gamePixSuccessMessage}</span>
+                    </div>
+                  )}
+
+                  {gamePixTestSuccess && (
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm flex flex-col gap-1 whitespace-pre-line">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                        <span>Connection Verified</span>
+                      </div>
+                      <p className="text-xs opacity-90">{gamePixTestSuccess}</p>
+                    </div>
+                  )}
+
+                  {gamePixTestError && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm flex flex-col gap-1 whitespace-pre-line">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                        <span>Connection Failed</span>
+                      </div>
+                      <p className="text-xs opacity-90">{gamePixTestError}</p>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-3 pt-2">
+                    <button
+                      onClick={saveGamePixConfig}
+                      disabled={gamePixSaving || gamePixTesting}
+                      className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-sm active:scale-95 disabled:opacity-50"
+                    >
+                      {gamePixSaving ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4" /> Save
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={testGamePixConnection}
+                      disabled={gamePixSaving || gamePixTesting}
+                      className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-900/20 text-sm active:scale-95 disabled:opacity-50"
+                    >
+                      {gamePixTesting ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" /> Testing...
+                        </>
+                      ) : (
+                        <>
+                          <Globe className="w-4 h-4" /> Test Connection
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
               )}

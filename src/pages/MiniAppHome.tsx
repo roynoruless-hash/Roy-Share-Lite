@@ -43,6 +43,7 @@ import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
 import { MyContentPage } from "./MyContentPage";
 import ReferralCenter from "./ReferralCenter";
 import DriveUploadPage from "./DriveUploadPage";
+import { GameCenterPage } from "./GameCenterPage";
 
 interface PhoneVerificationProps {
   user: any;
@@ -286,6 +287,8 @@ export const MiniAppHome: React.FC = () => {
     console.log("[MiniAppHome] Initializing view. Pathname:", window.location.pathname, "Search:", window.location.search);
     const params = new URLSearchParams(window.location.search);
     const page = params.get("page");
+    if (page === "game-earn") return "game-earn";
+    if (page === "game-center") return "game-center";
     if (page === "referral" || window.location.pathname === "/referral") return "referral";
     if (page === "content") return "dashboard";
     if (page === "files") return "my-content";
@@ -476,6 +479,26 @@ export const MiniAppHome: React.FC = () => {
   }
 
   // Render Sub-Views
+  if (currentView === "game-earn") {
+    return (
+      <GameCenterPage 
+        userId={activeUser.id} 
+        onBack={() => setCurrentView("home")} 
+        initialView="intro"
+      />
+    );
+  }
+
+  if (currentView === "game-center") {
+    return (
+      <GameCenterPage 
+        userId={activeUser.id} 
+        onBack={() => setCurrentView("home")} 
+        initialView="center"
+      />
+    );
+  }
+
   if (currentView === "my-content") {
     return (
       <MyContentPage 
@@ -587,6 +610,7 @@ export const MiniAppHome: React.FC = () => {
 
   const actionButtons = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
+    { id: "game-earn", label: "Game & Earn", icon: PlayCircle, color: "bg-purple-600", shadow: "shadow-purple-500/20" },
     { id: "my-links", label: "My Short Links", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
     { id: "my-content", label: "My Content", icon: FolderOpen, color: "bg-sky-500", shadow: "shadow-sky-500/20" },
     { id: "balance", label: "Balance", icon: Wallet, color: "bg-emerald-500", shadow: "shadow-emerald-500/20" },

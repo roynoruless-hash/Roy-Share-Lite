@@ -2604,6 +2604,7 @@ function getMainMenuKeyboard(userId?: string | number) {
     return {
         keyboard: [
             [{ text: "🚀 Self Earning", web_app: { url: userId ? `${appUrl}/?userId=${userId}` : appUrl } }],
+            [{ text: "🎮 Game & Earn", web_app: { url: userId ? `${appUrl}/app?page=game-earn&userId=${userId}` : `${appUrl}/app?page=game-earn` } }],
             [
                 { text: "📤 Upload File", web_app: { url: userId ? `${appUrl}/app?page=upload&userId=${userId}` : `${appUrl}/app?page=upload` } },
                 { text: "🔗 URL Shortener" }
