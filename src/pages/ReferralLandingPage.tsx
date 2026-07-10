@@ -35,6 +35,7 @@ export default function ReferralLandingPage() {
   // Extract referral token on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const successParam = params.get("success");
     let token = params.get("code") || params.get("ref") || params.get("startapp") || params.get("start_param");
     
     if (!token) {
@@ -42,6 +43,24 @@ export default function ReferralLandingPage() {
       if (pathMatch) {
         token = pathMatch[1];
       }
+    }
+
+    if (successParam === "true") {
+      setStep(3);
+      setVerifying(false);
+      if (token) {
+        setInviteToken(token);
+        // Fetch referrer details quietly without blocking loading state
+        fetch(`${API_BASE}/api/referral/verify-code?code=${encodeURIComponent(token.trim())}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) {
+              setReferrer(data.referrer);
+            }
+          })
+          .catch(err => console.error("Error loading referrer quietly:", err));
+      }
+      return;
     }
 
     if (token) {
@@ -96,7 +115,10 @@ export default function ReferralLandingPage() {
         script.setAttribute("data-telegram-login", botUser);
         script.setAttribute("data-size", "large");
         script.setAttribute("data-radius", "16");
-        script.setAttribute("data-onauth", "onTelegramAuth(user)");
+        
+        // Use the secure redirect-based callback URL matching our backend endpoint
+        const callbackUrl = `${window.location.origin}/auth/telegram/callback${inviteToken ? `?r=${encodeURIComponent(inviteToken)}` : ""}`;
+        script.setAttribute("data-auth-url", callbackUrl);
         script.setAttribute("data-request-access", "write");
         
         container.appendChild(script);
