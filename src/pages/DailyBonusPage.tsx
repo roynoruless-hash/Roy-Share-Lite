@@ -61,10 +61,29 @@ export default function DailyBonusPage() {
 
   // Wheel States
   const [wheelRotation, setWheelRotation] = useState(0);
+  const [lightTick, setLightTick] = useState(0);
+
+  useEffect(() => {
+    if (revealing) return; // Blinking is driven by the requestAnimationFrame loop during spin
+    const interval = setInterval(() => {
+      setLightTick(prev => (prev + 1) % 2);
+    }, 450);
+    return () => clearInterval(interval);
+  }, [revealing]);
   
   // Scratch Card States
   const [scratchedPercent, setScratchedPercent] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Custom Scratch Drawing and Particle Refs
+  const isScratchingRef = useRef(false);
+  const lastXRef = useRef(0);
+  const lastYRef = useRef(0);
+  const particleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const particlesRef = useRef<any[]>([]);
+  const isAnimatingParticlesRef = useRef(false);
+  const hasTriggeredFiftyPercentRef = useRef(false);
+  const lastCalculationTimeRef = useRef(0);
 
 
 
@@ -119,6 +138,63 @@ export default function DailyBonusPage() {
 
   // --- Actions ---
 
+  const playTickSound = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(800, audioCtx.currentTime); // Quick, clean wooden-click sound
+      osc.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + 0.04);
+      
+      gainNode.gain.setValueAtTime(0.06, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.04);
+    } catch (e) {
+      // Ignored if audio context is blocked
+    }
+  };
+
+  const autoClaimRewardForType = async (type: string, reward: any) => {
+    if (!userId || !reward) return;
+    setClaiming(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/daily-bonus/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          userId, 
+          type,
+          adStatus: 'Verified'
+        })
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        setClaimSuccess(true);
+        confetti({
+          particleCount: 150,
+          spread: 80,
+          origin: { y: 0.6 },
+          colors: ['#6366f1', '#a855f7', '#ec4899', '#fbbf24', '#10b981']
+        });
+        fetchStatus();
+      } else {
+        alert(data.error || "Failed to auto-claim reward.");
+      }
+    } catch (err) {
+      console.error("Auto claim error:", err);
+    } finally {
+      setClaiming(false);
+    }
+  };
+
   const handleReveal = async (type: string, index?: number) => {
     if (revealing || !userId) return;
     
@@ -149,27 +225,85 @@ export default function DailyBonusPage() {
 
       if (type === 'wheel') {
         const rewards = status?.modules.wheel.rewards || [];
-        const rewardIndex = rewards.findIndex(r => r.label === data.reward.label);
         
-        const spinTime = 4000;
-        const extraSpins = 5;
+        // Find correct index of the reward
+        let rewardIndex = rewards.findIndex(r => r.label === data.reward.label);
+        if (rewardIndex === -1) {
+          rewardIndex = rewards.findIndex(r => Number(r.amount) === Number(data.reward.amount));
+        }
+        if (rewardIndex === -1) {
+          rewardIndex = 0; // Fallback
+        }
+
+        const extraSpins = 6; // Spin 6 full turns for drama
         const segmentSize = 360 / (rewards.length || 6);
         
-        // Calculate exact angle to stop at the center of the won segment
-        // We add current rotation to keep it spinning forward
-        const targetAngle = (rewards.length - rewardIndex) * segmentSize - (segmentSize / 2);
-        const newRotation = wheelRotation + (360 * extraSpins) + (targetAngle - (wheelRotation % 360));
+        // targetAngle places the centerline of the won segment exactly at 0 degrees (pointer is at top)
+        const targetAngle = 360 - (rewardIndex * segmentSize + segmentSize / 2);
         
-        setWheelRotation(newRotation);
+        const currentBaseRotation = wheelRotation - (wheelRotation % 360);
+        const startRotation = wheelRotation;
+        const endRotation = currentBaseRotation + (360 * extraSpins) + targetAngle;
         
-        setTimeout(() => {
-          setRevealedReward(data.reward);
-          setRevealing(false);
-        }, spinTime);
+        const spinTime = 5000; // 5 seconds smooth ease-out rotation
+        
+        let lastBoundaryIndex = Math.floor(startRotation / segmentSize);
+        const startTime = performance.now();
+        
+        const step = (now: number) => {
+          const elapsed = now - startTime;
+          const progress = Math.min(elapsed / spinTime, 1);
+          
+          // Speed up outer lights blink during spin, slow down when stopping
+          setLightTick(Math.floor(elapsed / (progress > 0.8 ? 250 : 60)));
+          
+          // Easing: easeOutQuart (starts extremely fast, slows down very smoothly near end)
+          const ease = 1 - Math.pow(1 - progress, 4);
+          const currentAngle = startRotation + (endRotation - startRotation) * ease;
+          
+          setWheelRotation(currentAngle);
+          
+          // Play tick sound whenever a segment boundary crosses the pointer
+          const currentBoundaryIndex = Math.floor(currentAngle / segmentSize);
+          if (currentBoundaryIndex !== lastBoundaryIndex) {
+            playTickSound();
+            lastBoundaryIndex = currentBoundaryIndex;
+          }
+          
+          if (progress < 1) {
+            requestAnimationFrame(step);
+          } else {
+            // Spin complete!
+            setRevealedReward(data.reward);
+            setRevealing(false);
+            
+            // Confetti
+            confetti({
+              particleCount: 150,
+              spread: 85,
+              origin: { y: 0.6 },
+              colors: ['#fbbf24', '#f59e0b', '#3b82f6', '#10b981', '#a855f7']
+            });
+
+            // Automatically claim/credit the reward
+            if (Number(data.reward.amount) > 0) {
+              autoClaimRewardForType('wheel', data.reward);
+            } else {
+              setClaimSuccess(true);
+            }
+          }
+        };
+        requestAnimationFrame(step);
       } else if (type === 'box') {
         setTimeout(() => {
           setRevealedReward(data.reward);
           setRevealing(false);
+          // Auto-claim for box
+          if (Number(data.reward.amount) > 0) {
+            autoClaimRewardForType('box', data.reward);
+          } else {
+            setClaimSuccess(true);
+          }
         }, 1200);
       } else if (type === 'scratch') {
         setRevealedReward(data.reward);
@@ -228,21 +362,100 @@ export default function DailyBonusPage() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // Fill with gray silver color
-      ctx.fillStyle = '#475569';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Ensure canvas size is set properly
+      canvas.width = 280;
+      canvas.height = 210;
+
+      // 1. Create a Premium metallic silver gradient
+      const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      grad.addColorStop(0, '#94a3b8'); // Slate-400
+      grad.addColorStop(0.25, '#f1f5f9'); // Slate-100 (Bright metallic reflection)
+      grad.addColorStop(0.5, '#cbd5e1'); // Slate-300
+      grad.addColorStop(0.75, '#f8fafc'); // Slate-50 (Another highlight)
+      grad.addColorStop(1, '#64748b'); // Slate-500
       
-      // Add text pattern
-      ctx.fillStyle = '#64748b';
-      ctx.font = 'bold 16px sans-serif';
-      ctx.textAlign = 'center';
-      for(let i=0; i<5; i++) {
-        for(let j=0; j<5; j++) {
-          ctx.fillText('SCRATCH', 40 + i*60, 30 + j*50);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 2. Add metallic brushed textures / noise for high polish
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      for (let i = 0; i < 1000; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        ctx.fillRect(x, y, 1.2, 1.2);
+      }
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+      for (let i = 0; i < 1000; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        ctx.fillRect(x, y, 1.2, 1.2);
+      }
+
+      // Add horizontal brushed lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 20; i++) {
+        ctx.beginPath();
+        const y = Math.random() * canvas.height;
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y + (Math.random() * 10 - 5));
+        ctx.stroke();
+      }
+
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.04)';
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < 12; i++) {
+        ctx.beginPath();
+        const y = Math.random() * canvas.height;
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y + (Math.random() * 20 - 10));
+        ctx.stroke();
+      }
+
+      // 3. Draw a premium gold frame around the inner texture
+      ctx.strokeStyle = '#eab308'; // amber-500/yellow-600 gold color
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+
+      // 4. Add subtle dotted pattern for tactile feel
+      ctx.fillStyle = 'rgba(71, 85, 105, 0.12)';
+      for (let x = 15; x < canvas.width; x += 15) {
+        for (let y = 15; y < canvas.height; y += 15) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
 
+      // 5. Draw elegant typography with depth
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+      ctx.shadowBlur = 2;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 1;
+
+      ctx.fillStyle = '#1e293b'; // Slate-800
+      ctx.font = '900 14px "Inter", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✨ SCRATCH WITH FINGER ✨', canvas.width / 2, canvas.height / 2 - 25);
+      
+      ctx.fillStyle = '#475569'; // Slate-600
+      ctx.font = 'bold 10px "Inter", sans-serif';
+      ctx.fillText('WIN UP TO ₹1,000.00 REAL CASH', canvas.width / 2, canvas.height / 2 + 5);
+
+      ctx.fillStyle = '#d97706'; // Amber-600 gold
+      ctx.font = '900 12px "Inter", sans-serif';
+      ctx.fillText('🎫 SCRATCH HERE 🎫', canvas.width / 2, canvas.height / 2 + 32);
+
+      // Reset canvas context shadow properties for other drawing operations
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+
       setScratchedPercent(0);
+      hasTriggeredFiftyPercentRef.current = false;
     }, 100);
   };
 
@@ -256,7 +469,7 @@ export default function DailyBonusPage() {
           claimed: false
         });
         if (activeView === 'scratch') {
-          setScratchedPercent(100);
+          initScratchCard();
         } else if (activeView === 'box' && selectedBox === null) {
           setSelectedBox(0);
         }
@@ -264,29 +477,200 @@ export default function DailyBonusPage() {
     }
   }, [status, activeView]);
 
-  const handleScratch = (e: any) => {
+  const getCoordinates = (e: any, canvas: HTMLCanvasElement) => {
+    const rect = canvas.getBoundingClientRect();
+    let clientX = 0;
+    let clientY = 0;
+
+    if (e.touches && e.touches.length > 0) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+
+    return { x, y };
+  };
+
+  const spawnParticles = (x: number, y: number, count: number) => {
+    const canvas = particleCanvasRef.current;
+    if (!canvas) return;
+    
+    if (canvas.width !== 280 || canvas.height !== 210) {
+      canvas.width = 280;
+      canvas.height = 210;
+    }
+
+    const colors = ['#cbd5e1', '#94a3b8', '#64748b', '#e2e8f0', '#f1f5f9', '#fbbf24'];
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 2.5 + 1;
+      particlesRef.current.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 1.2,
+        radius: Math.random() * 2.5 + 1.2,
+        alpha: 1,
+        color: colors[Math.floor(Math.random() * colors.length)]
+      });
+    }
+
+    if (!isAnimatingParticlesRef.current) {
+      isAnimatingParticlesRef.current = true;
+      requestAnimationFrame(updateParticlesAndRender);
+    }
+  };
+
+  const updateParticlesAndRender = () => {
+    const canvas = particleCanvasRef.current;
+    if (!canvas) {
+      isAnimatingParticlesRef.current = false;
+      return;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      isAnimatingParticlesRef.current = false;
+      return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const particles = particlesRef.current;
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.22; // gravity
+      p.vx *= 0.95; // friction
+      p.alpha -= 0.035; // fade out
+
+      if (p.alpha <= 0 || p.x < 0 || p.x > canvas.width || p.y > canvas.height) {
+        particles.splice(i, 1);
+        continue;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (particles.length > 0) {
+      requestAnimationFrame(updateParticlesAndRender);
+    } else {
+      isAnimatingParticlesRef.current = false;
+    }
+  };
+
+  const handleScratchStart = (e: any) => {
     const canvas = canvasRef.current;
-    if (!canvas || revealedReward?.claimed || claimSuccess) return;
+    if (!canvas || !revealedReward || revealedReward.claimed || claimSuccess) return;
+    
+    isScratchingRef.current = true;
+    const { x, y } = getCoordinates(e, canvas);
+    lastXRef.current = x;
+    lastYRef.current = y;
+
+    spawnParticles(x, y, 6);
+  };
+
+  const handleScratchMove = (e: any) => {
+    if (!isScratchingRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
-    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
-
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.beginPath();
-    ctx.arc(x, y, 20, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Check percent
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    let transparent = 0;
-    for (let i = 0; i < imageData.data.length; i += 4) {
-      if (imageData.data[i + 3] === 0) transparent++;
+    if (e.cancelable) {
+      e.preventDefault();
     }
-    const percent = (transparent / (canvas.width * canvas.height)) * 100;
-    setScratchedPercent(percent);
+
+    const { x, y } = getCoordinates(e, canvas);
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 32;
+
+    ctx.beginPath();
+    ctx.moveTo(lastXRef.current, lastYRef.current);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.restore();
+
+    spawnParticles(x, y, 3);
+
+    lastXRef.current = x;
+    lastYRef.current = y;
+
+    throttlePercentCalculation();
+  };
+
+  const handleScratchEnd = () => {
+    if (!isScratchingRef.current) return;
+    isScratchingRef.current = false;
+    calculatePercent();
+  };
+
+  const throttlePercentCalculation = () => {
+    const now = Date.now();
+    if (now - lastCalculationTimeRef.current > 120) {
+      lastCalculationTimeRef.current = now;
+      calculatePercent();
+    }
+  };
+
+  const calculatePercent = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    try {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      let transparent = 0;
+      
+      for (let i = 0; i < data.length; i += 16) {
+        if (data[i + 3] < 128) {
+          transparent++;
+        }
+      }
+      
+      const totalSampledPixels = data.length / 16;
+      const percent = (transparent / totalSampledPixels) * 100;
+      
+      setScratchedPercent(percent);
+
+      if (percent > 50 && !hasTriggeredFiftyPercentRef.current) {
+        hasTriggeredFiftyPercentRef.current = true;
+        confetti({
+          particleCount: 80,
+          spread: 60,
+          origin: { y: 0.7 },
+          colors: ['#fbbf24', '#f59e0b', '#10b981', '#3b82f6', '#ec4899']
+        });
+        if (navigator.vibrate) {
+          try {
+            navigator.vibrate(100);
+          } catch (e) {}
+        }
+      }
+    } catch (err) {
+      console.error("Failed to calculate scratch percentage:", err);
+    }
   };
 
   if (loading) {
@@ -393,7 +777,7 @@ export default function DailyBonusPage() {
     const segmentSize = 360 / (rewards.length || 6);
 
     const getSectorPath = (startAngle: number, endAngle: number) => {
-      const r = 140;
+      const r = 136; // Tiny gap from chassis at 144
       const cx = 150;
       const cy = 150;
       
@@ -408,21 +792,22 @@ export default function DailyBonusPage() {
       return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2} Z`;
     };
 
-    const getSegmentColor = (index: number, totalCount: number) => {
-      const colors = [
-        "#4f46e5",
-        "#7c3aed",
-        "#06b6d4",
-        "#10b981",
-        "#f59e0b",
-        "#db2777"
-      ];
-      if (totalCount % 2 === 0) {
-        return index % 2 === 0 ? "#4f46e5" : "#7c3aed";
-      } else if (totalCount % 3 === 0) {
-        return ["#4f46e5", "#7c3aed", "#db2777"][index % 3];
+    const getSegmentFill = (index: number, label: string) => {
+      const lower = label.toLowerCase();
+      const isBetterLuck = lower.includes("luck") || lower.includes("try") || lower.includes("again");
+      if (isBetterLuck) {
+        return "url(#slateGrad)";
       }
-      return colors[index % colors.length];
+      
+      const amountMatch = label.match(/₹\s*(\d+(\.\d+)?)/);
+      if (amountMatch) {
+        const amt = parseFloat(amountMatch[1]);
+        if (amt >= 5) {
+          return "url(#goldGrad)"; // Big reward
+        }
+      }
+
+      return index % 2 === 0 ? "url(#indigoGrad)" : "url(#purpleGrad)";
     };
 
     const getCleanLabel = (label: string) => {
@@ -446,104 +831,188 @@ export default function DailyBonusPage() {
 
     return (
       <div className="flex flex-col items-center space-y-8 py-4">
-        <div className="relative select-none">
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-rose-500 z-30 drop-shadow-[0_4px_6px_rgba(0,0,0,0.5)]" />
+        {/* Outer card framing the wheel with a beautiful glassmorphic slot machine design */}
+        <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 p-6 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.6)] relative">
           
-          <div className="relative p-1 bg-slate-900 rounded-full shadow-[0_0_50px_rgba(79,70,229,0.3)] border-4 border-indigo-500/20">
-            <div
-              className="relative w-72 h-72 rounded-full overflow-hidden transition-transform duration-[4000ms] cubic-bezier(0.25, 0.1, 0.25, 1)"
-              style={{ transform: `rotate(${wheelRotation}deg)` }}
-            >
-              <svg viewBox="0 0 300 300" className="w-full h-full select-none">
-                <circle cx="150" cy="150" r="148" fill="#020617" />
-
-                {rewards.map((r, i) => {
-                  const startAngle = i * segmentSize;
-                  const endAngle = (i + 1) * segmentSize;
-                  const color = getSegmentColor(i, rewards.length);
-                  return (
-                    <path
-                      key={`slice-${i}`}
-                      d={getSectorPath(startAngle, endAngle)}
-                      fill={color}
-                      stroke="#020617"
-                      strokeWidth="2.5"
-                      strokeLinejoin="round"
-                    />
-                  );
-                })}
-
-                <circle cx="150" cy="150" r="141" fill="none" stroke="#fbbf24" strokeWidth="2" className="opacity-90" />
-                <circle cx="150" cy="150" r="145" fill="none" stroke="#4f46e5" strokeWidth="3" className="opacity-40" />
-
-                {bulbs.map((b, j) => (
-                  <circle
-                    key={`bulb-${j}`}
-                    cx={b.x}
-                    cy={b.y}
-                    r="2.5"
-                    fill={j % 2 === 0 ? "#ffffff" : "#fef08a"}
-                    className="animate-pulse"
-                    style={{ animationDelay: `${(j * 150) % 1000}ms` }}
-                  />
-                ))}
-
-                {rewards.map((r, i) => {
-                  const cleanLabel = getCleanLabel(r.label);
-                  const midAngle = i * segmentSize + segmentSize / 2;
-                  const normAngle = ((midAngle % 360) + 360) % 360;
-                  const isFlipped = normAngle > 90 && normAngle < 270;
-                  const rotateAngle = isFlipped ? midAngle + 180 : midAngle;
-                  const textAnchor = isFlipped ? "start" : "end";
-                  const textX = isFlipped ? 22 : 122;
-
-                  let fontSize = 11;
-                  if (rewards.length > 24) fontSize = 6.5;
-                  else if (rewards.length > 18) fontSize = 7.5;
-                  else if (rewards.length > 12) fontSize = 8.5;
-                  else if (rewards.length > 8) fontSize = 9.5;
-
-                  if (cleanLabel.length > 10) {
-                    fontSize = Math.max(5.5, fontSize - 1.5);
-                  }
-
-                  return (
-                    <g key={`label-g-${i}`} transform={`rotate(${rotateAngle} 150 150)`}>
-                      <text
-                        x={150 + textX}
-                        y={150}
-                        textAnchor={textAnchor}
-                        dominantBaseline="central"
-                        fill="#ffffff"
-                        style={{
-                          fontSize: `${fontSize}px`,
-                          fontWeight: "950",
-                          fontFamily: "Inter, sans-serif",
-                          letterSpacing: "-0.01em",
-                          textShadow: "0px 1px 3px rgba(0,0,0,0.8)"
-                        }}
-                      >
-                        {cleanLabel}
-                      </text>
-                    </g>
-                  );
-                })}
-
-                <circle cx="150" cy="150" r="18" fill="#1e1b4b" stroke="#fbbf24" strokeWidth="3" className="shadow-lg" />
-                <circle cx="150" cy="150" r="7" fill="#fbbf24" className="animate-pulse" />
+          {/* Glowing neon halo behind the wheel */}
+          <div className="absolute inset-4 rounded-full bg-indigo-500/10 blur-3xl -z-10 animate-pulse" />
+          
+          <div className="relative select-none">
+            {/* Premium 3D Gold Pointer */}
+            <div className="absolute -top-[18px] left-1/2 -translate-x-1/2 z-30 drop-shadow-[0_4px_12px_rgba(234,179,8,0.5)]">
+              <svg width="40" height="48" viewBox="0 0 40 48">
+                <defs>
+                  <linearGradient id="pointerGold" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#fef08a" />
+                    <stop offset="50%" stopColor="#eab308" />
+                    <stop offset="100%" stopColor="#854d0e" />
+                  </linearGradient>
+                </defs>
+                {/* 3D Pointer body */}
+                <path
+                  d="M 20 44 L 4 10 A 16 16 0 0 1 36 10 Z"
+                  fill="url(#pointerGold)"
+                  stroke="#fbbf24"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M 20 40 L 7 12 A 13 13 0 0 1 33 12 Z"
+                  fill="#ffffff"
+                  opacity="0.25"
+                />
+                {/* Embedded ruby jewel */}
+                <circle cx="20" cy="16" r="5" fill="#ef4444" stroke="#ffffff" strokeWidth="1" />
               </svg>
+            </div>
+            
+            {/* Outer Marquee Ring Frame with Golden Bezel */}
+            <div className="relative p-1.5 bg-slate-950 rounded-full shadow-[0_0_40px_rgba(79,70,229,0.25)] border-4 border-indigo-900/40">
+              <div
+                className="relative w-80 h-80 rounded-full overflow-hidden"
+                style={{
+                  transform: `rotate(${wheelRotation}deg)`,
+                  transformOrigin: "center center",
+                }}
+              >
+                <svg viewBox="0 0 300 300" className="w-full h-full select-none">
+                  {/* SVG Custom gradients and filters */}
+                  <defs>
+                    <linearGradient id="indigoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#4f46e5" />
+                      <stop offset="100%" stopColor="#221e72" />
+                    </linearGradient>
+                    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#7c3aed" />
+                      <stop offset="100%" stopColor="#4c1d95" />
+                    </linearGradient>
+                    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#fbbf24" />
+                      <stop offset="100%" stopColor="#92400e" />
+                    </linearGradient>
+                    <linearGradient id="slateGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#334155" />
+                      <stop offset="100%" stopColor="#0f172a" />
+                    </linearGradient>
+                    <linearGradient id="goldChassis" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#fef08a" />
+                      <stop offset="40%" stopColor="#ca8a04" />
+                      <stop offset="100%" stopColor="#713f12" />
+                    </linearGradient>
+                    <linearGradient id="hubGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#fef08a" />
+                      <stop offset="100%" stopColor="#ca8a04" />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Golden Outer Chassis Ring */}
+                  <circle cx="150" cy="150" r="148" fill="#020617" stroke="url(#goldChassis)" strokeWidth="4" />
+
+                  {/* Wheel sectors */}
+                  {rewards.map((r, i) => {
+                    const startAngle = i * segmentSize;
+                    const endAngle = (i + 1) * segmentSize;
+                    const fill = getSegmentFill(i, r.label);
+                    return (
+                      <path
+                        key={`slice-${i}`}
+                        d={getSectorPath(startAngle, endAngle)}
+                        fill={fill}
+                        stroke="#020617"
+                        strokeWidth="1.5"
+                        strokeLinejoin="round"
+                      />
+                    );
+                  })}
+
+                  {/* Inner golden divider ring */}
+                  <circle cx="150" cy="150" r="136" fill="none" stroke="#fbbf24" strokeWidth="1.5" className="opacity-80" />
+
+                  {/* Blinking Marquee LEDs */}
+                  {bulbs.map((b, j) => {
+                    const isOn = (lightTick + j) % 2 === 0;
+                    return (
+                      <circle
+                        key={`bulb-${j}`}
+                        cx={b.x}
+                        cy={b.y}
+                        r="3.5"
+                        fill={isOn ? "#ffffff" : "#475569"}
+                        stroke={isOn ? "#fef08a" : "#1e293b"}
+                        strokeWidth="0.75"
+                        style={{
+                          filter: isOn ? "drop-shadow(0 0 3px #fef08a)" : "none",
+                        }}
+                      />
+                    );
+                  })}
+
+                  {/* Segment labels - written vertically along each wedge's centerline */}
+                  {rewards.map((r, i) => {
+                    const cleanLabel = getCleanLabel(r.label);
+                    const midAngle = i * segmentSize + segmentSize / 2;
+
+                    let fontSize = 11;
+                    if (rewards.length > 24) fontSize = 6.0;
+                    else if (rewards.length > 18) fontSize = 7.0;
+                    else if (rewards.length > 12) fontSize = 8.0;
+                    else if (rewards.length > 8) fontSize = 9.0;
+
+                    if (cleanLabel.length > 10) {
+                      fontSize = Math.max(5.0, fontSize - 1.5);
+                    }
+
+                    return (
+                      <g key={`label-g-${i}`} transform={`rotate(${midAngle} 150 150)`}>
+                        <text
+                          x="150"
+                          y="48"
+                          textAnchor="middle"
+                          transform="rotate(-90 150 48)" // Radial alignment from rim to center
+                          fill="#ffffff"
+                          style={{
+                            fontSize: `${fontSize}px`,
+                            fontWeight: "900",
+                            fontFamily: "Inter, sans-serif",
+                            textShadow: "0px 2px 4px rgba(0,0,0,0.9)",
+                            letterSpacing: "0.02em",
+                          }}
+                        >
+                          {cleanLabel}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* Center Golden Casino Hub */}
+                  <circle cx="150" cy="150" r="22" fill="#1e1b4b" stroke="url(#goldChassis)" strokeWidth="3" className="shadow-2xl" />
+                  <circle cx="150" cy="150" r="16" fill="url(#hubGrad)" stroke="#1e1b4b" strokeWidth="1" />
+                  <circle cx="150" cy="150" r="6" fill="#ffffff" className="animate-pulse" />
+                </svg>
+              </div>
             </div>
           </div>
         </div>
 
+        {/* Spin Wheel Trigger Action Button */}
         <button
           onClick={() => handleReveal('wheel')}
           disabled={revealing || (!!revealedReward && !claimSuccess)}
-          className={`w-56 py-4 rounded-2xl font-black text-lg uppercase tracking-wider transition shadow-xl ${
-            revealing || (!!revealedReward && !claimSuccess) ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/20 active:scale-95'
+          className={`w-64 py-4.5 rounded-3xl font-black text-lg uppercase tracking-wider transition duration-300 shadow-2xl relative overflow-hidden group ${
+            revealing || (!!revealedReward && !claimSuccess)
+              ? 'bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed shadow-none'
+              : 'bg-gradient-to-r from-indigo-500 via-purple-600 to-pink-500 text-white shadow-indigo-500/20 active:scale-95 cursor-pointer hover:shadow-indigo-500/40 hover:brightness-110'
           }`}
         >
-          {revealing ? 'Spinning...' : 'Spin Wheel'}
+          {revealing ? (
+            <div className="flex items-center justify-center gap-3">
+              <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span>SPINNING...</span>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-2">
+              <span>🎯 SPIN WHEEL</span>
+            </div>
+          )}
         </button>
       </div>
     );
@@ -576,36 +1045,84 @@ export default function DailyBonusPage() {
 
   const ScratchView = () => (
     <div className="flex flex-col items-center space-y-8 py-4">
+      {/* Scratch Card Frame */}
       <div className="relative w-full max-w-[280px] aspect-[4/3] bg-slate-900 rounded-3xl border-4 border-amber-600 shadow-2xl overflow-hidden group">
-         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950">
-            <Trophy className="w-12 h-12 text-amber-500 mb-2 opacity-20" />
-            <span className="text-3xl font-black text-white">
-               {scratchedPercent > 50 && revealedReward ? `₹${revealedReward.amount}` : '₹??'}
+         
+         {/* Underlying Mystery Reward - revealed when scratchPercent > 50 */}
+         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+            <Trophy className="w-12 h-12 text-amber-500 mb-2 opacity-25 animate-pulse" />
+            <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-500 to-orange-500">
+               {scratchedPercent > 50 && revealedReward ? `₹${Number(revealedReward.amount).toFixed(2)}` : '₹??'}
             </span>
-            <span className="text-[10px] font-bold text-slate-500 uppercase mt-2 tracking-widest">Mystery Reward</span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase mt-2 tracking-widest">
+               {scratchedPercent > 50 ? 'Your Won Reward' : 'Mystery Reward'}
+            </span>
          </div>
 
+         {/* Scratchable coating canvas */}
          <canvas
             ref={canvasRef}
             width={280}
             height={210}
-            className="absolute inset-0 cursor-crosshair touch-none"
-            onMouseMove={handleScratch}
-            onTouchMove={handleScratch}
+            className="absolute inset-0 cursor-crosshair touch-none z-10"
+            onMouseDown={handleScratchStart}
+            onMouseMove={handleScratchMove}
+            onMouseUp={handleScratchEnd}
+            onMouseLeave={handleScratchEnd}
+            onTouchStart={handleScratchStart}
+            onTouchMove={handleScratchMove}
+            onTouchEnd={handleScratchEnd}
          />
 
+         {/* Particle layer canvas */}
+         <canvas
+            ref={particleCanvasRef}
+            width={280}
+            height={210}
+            className="absolute inset-0 pointer-events-none z-20"
+         />
+
+         {/* Cleared state overlay */}
          {scratchedPercent > 50 && !revealedReward?.claimed && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-transparent pointer-events-none flex items-center justify-center">
-                <div className="bg-emerald-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase">Cleared!</div>
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.8 }} 
+              animate={{ opacity: 1, scale: 1 }} 
+              className="absolute inset-0 bg-black/40 backdrop-blur-[1px] pointer-events-none flex items-center justify-center z-30"
+            >
+              <div className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-950">
+                ✨ Cleared! ✨
+              </div>
             </motion.div>
          )}
       </div>
-      <p className="text-slate-400 text-xs font-medium">Scratch at least 50% of the area to reveal reward.</p>
+
+      {/* Helper Guidance Text */}
+      <div className="text-center space-y-1">
+        {scratchedPercent <= 50 ? (
+          <>
+            <p className="text-slate-300 text-xs font-semibold">
+              Scratch at least 50% of the area to reveal reward.
+            </p>
+            <p className="text-amber-500 text-[10px] font-bold uppercase tracking-widest animate-pulse">
+              Scratched: {Math.floor(scratchedPercent)}%
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-emerald-400 text-xs font-bold">
+              Congratulations! Card cleared successfully!
+            </p>
+            <p className="text-slate-500 text-[10px] font-semibold">
+              Tap the Claim button below to claim your ₹{Number(revealedReward?.amount).toFixed(2)}.
+            </p>
+          </>
+        )}
+      </div>
       
       {!revealedReward && (
         <button 
           onClick={() => handleReveal('scratch')} 
-          className="w-56 py-3.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-amber-900/20"
+          className="w-56 py-3.5 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-amber-900/20"
         >
           Get Scratch Card
         </button>

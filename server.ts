@@ -2976,6 +2976,52 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     `);
   });
 
+  app.get("/ads.txt", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "ads_txt");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        return res.status(404).send("");
+      }
+      const data = docSnap.data();
+      const content = data?.content ?? "";
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.send(content);
+    } catch (e: any) {
+      console.error("Error serving ads.txt:", e);
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.status(500).send("");
+    }
+  });
+
+  app.get("/api/admin/ads-txt", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "ads_txt");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        return res.json({ content: "", updatedAt: null });
+      }
+      return res.json(docSnap.data());
+    } catch (e: any) {
+      console.error("Error fetching admin ads-txt:", e);
+      return res.status(500).json({ error: "Server error fetching ads.txt" });
+    }
+  });
+
+  app.put("/api/admin/ads-txt", async (req, res) => {
+    try {
+      const { content } = req.body;
+      const docRef = doc(db, "settings", "ads_txt");
+      const updatedAt = new Date().toISOString();
+      await setDoc(docRef, { content, updatedAt }, { merge: true });
+      return res.json({ success: true, updatedAt });
+    } catch (e: any) {
+      console.error("Error updating admin ads-txt:", e);
+      return res.status(500).json({ error: "Server error updating ads.txt" });
+    }
+  });
+
   app.get("/api/admin/system-settings", async (req, res) => {
     try {
       const docRef = doc(db, "settings", "system");
@@ -7172,7 +7218,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   app.post("/api/smart-links/session/init", async (req, res) => {
     try {
-      const { type, id, browser, device, country, referrer } = req.body;
+      const { type, id, browser, device, country, referrer, visitorTgId } = req.body;
       if (!type || !id) return res.status(400).json({ success: false, message: "Missing required parameters" });
 
       const ip = req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
@@ -7192,8 +7238,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         botDetection: true,
         pagesConfig: []
       };
-
-
 
       // Requirement 6: Debug log - Link ID received
       console.log(`[DEBUG SHORTENER] Link ID received: "${id}"`);
@@ -7291,9 +7335,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           console.error("Error fetching global shortener settings config:", err);
         }
 
-        // Requirement 9: Apply configuration logic
-        // If it's from the "links" collection (Bot/User created), always enforce global settings
-        // If it's a Smart Link or Download, use specific settings but fallback to global defaults if specific ones are missing
+        // Apply configuration logic
         if (type === "shortener" && col === "links") {
           itemData.totalPages = globalSettings.totalPages;
           itemData.instructions = globalSettings.instructions;
@@ -7343,14 +7385,62 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(404).json({ success: false, message: `${type === "shortener" ? "Smart link" : "File"} not found or disabled.` });
       }
 
-      // Security checking - Bot Detection
+      // Security checking - Bot & Crawler Detection (Ignore automated requests)
       const ua = req.headers["user-agent"] || "";
-      const isBot = /bot|spider|crawl|slurp|lighthouse|chrome-lighthouse|headless/i.test(ua);
+      const isBot = /bot|spider|crawl|slurp|lighthouse|chrome-lighthouse|headless|telegrambot|telegram\s?bot|facebookexternalhit|whatsapp|googlebot|bingbot|yahoo|baiduspider|yandex|duckduckbot|twitterbot|linkedinbot|pinterest|slackbot|discordbot/i.test(ua);
       if (isBot && itemData.botDetection !== false) {
+        try {
+          const currentBlocked = Number(itemData.blockedClicks || 0) + 1;
+          await updateDoc(docRef, { blockedClicks: currentBlocked });
+          await addDoc(collection(db, "shortener_analytics"), {
+            linkId: itemData.id || id,
+            type: "blocked_click",
+            reason: "bot",
+            ip: String(ip),
+            userAgent: ua,
+            createdAt: new Date().toISOString()
+          });
+        } catch (e) {
+          console.error("Error updating blocked clicks for bot:", e);
+        }
         return res.json({ success: false, securityBlocked: true, securityReason: "🤖 Automated agent request blocked by RoyShare Integrity Sentinel." });
       }
 
-      // Security checking - VPN Detection
+      // Generate unique visitor identifier for fraud & duplicate verification
+      let visitorId = "";
+      if (visitorTgId) {
+        visitorId = `visitor_tg_${visitorTgId}`;
+      } else {
+        const hash = crypto.createHash("md5").update(String(ip) + ua).digest("hex");
+        visitorId = `visitor_fp_${hash}`;
+      }
+
+      // Security checking - Fraud Protection (Prevent rapid refreshes within 10 seconds)
+      const tenSecondsAgo = new Date(Date.now() - 10000).toISOString();
+      const qRecent = query(
+        collection(db, "shortener_sessions"),
+        where("visitorId", "==", visitorId),
+        where("createdAt", ">=", tenSecondsAgo)
+      );
+      const recentSnap = await getDocs(qRecent);
+      if (!recentSnap.empty) {
+        try {
+          const currentBlocked = Number(itemData.blockedClicks || 0) + 1;
+          await updateDoc(docRef, { blockedClicks: currentBlocked });
+          await addDoc(collection(db, "shortener_analytics"), {
+            linkId: itemData.id || id,
+            type: "blocked_click",
+            reason: "rapid_refresh",
+            ip: String(ip),
+            createdAt: new Date().toISOString()
+          });
+        } catch (e) {
+          console.error("Error updating blocked clicks for rapid refresh:", e);
+        }
+        return res.json({ success: false, securityBlocked: true, securityReason: "⚠️ Rapid refreshes detected. Please wait 10 seconds before generating a new session." });
+      }
+
+      // Security checking - VPN/Proxy Detection
       if (itemData.vpnDetection === true && ip && ip !== "Unknown" && ip !== "127.0.0.1" && ip !== "::1") {
         try {
           const ipCheckRes = await fetch(`http://ip-api.com/json/${ip}?fields=status,proxy,hosting`).catch(() => null);
@@ -7358,6 +7448,15 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
             const checkData = await ipCheckRes.json();
             if (checkData.status === "success") {
               if (checkData.proxy === true || checkData.hosting === true) {
+                const currentBlocked = Number(itemData.blockedClicks || 0) + 1;
+                await updateDoc(docRef, { blockedClicks: currentBlocked });
+                await addDoc(collection(db, "shortener_analytics"), {
+                  linkId: itemData.id || id,
+                  type: "blocked_click",
+                  reason: "vpn_proxy",
+                  ip: String(ip),
+                  createdAt: new Date().toISOString()
+                });
                 return res.json({ success: false, securityBlocked: true, securityReason: "🔒 Access restricted. VPN, proxy, or hosting network connections are prohibited." });
               }
             }
@@ -7366,6 +7465,32 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           console.error("VPN detection error:", e);
         }
       }
+
+      // Self-click check (visitor is the owner of the link)
+      let isSelfClick = false;
+      const ownerId = String(itemData.userId || "");
+      if (visitorTgId && ownerId && String(visitorTgId) === ownerId) {
+        isSelfClick = true;
+      }
+
+      // Duplicate-click check (same visitor clicked within 24 hours)
+      let isDuplicate = false;
+      if (!isSelfClick) {
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const qDup = query(
+          collection(db, "shortener_sessions"),
+          where("linkId", "==", itemData.id || id),
+          where("visitorId", "==", visitorId),
+          where("createdAt", ">=", twentyFourHoursAgo),
+          where("isVerified", "==", true)
+        );
+        const dupSnap = await getDocs(qDup);
+        if (!dupSnap.empty) {
+          isDuplicate = true;
+        }
+      }
+
+      const isValidClick = !isSelfClick && !isDuplicate;
 
       // Initialize session ID
       const sessionId = "SESS_" + Math.random().toString(36).substring(2, 15).toUpperCase();
@@ -7394,41 +7519,55 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         completedPages: [],
         createdAt: new Date().toISOString(),
         ip: String(ip),
-        isVerified: false
+        visitorId,
+        visitorTgId: visitorTgId || "",
+        isVerified: false,
+        isSelfClick,
+        isDuplicate,
+        isValidClick
       });
 
-      // Track views
+      // Update counters on the link/upload document
       const currentViews = Number(itemData.views || 0);
-      const ipList = itemData.ipList || [];
-      const isUnique = !ipList.includes(ip);
-      const currentUniqueViews = Number(itemData.uniqueViews || 0) + (isUnique ? 1 : 0);
+      const currentSelfClicks = Number(itemData.selfClicks || 0);
+      const currentDuplicateClicks = Number(itemData.duplicateClicks || 0);
+      const currentUniqueViews = Number(itemData.uniqueViews || itemData.uniqueVisitors || 0);
 
-      const updatePayload: any = { views: currentViews + 1 };
-      if (isUnique) {
-        updatePayload.uniqueViews = currentUniqueViews;
-        updatePayload.ipList = [...ipList, ip].slice(-500); // Prevent document bloat
+      const updatePayload: any = {
+        views: currentViews + 1
+      };
+
+      if (isSelfClick) {
+        updatePayload.selfClicks = currentSelfClicks + 1;
+      } else if (isDuplicate) {
+        updatePayload.duplicateClicks = currentDuplicateClicks + 1;
+      } else {
+        // Unique valid visitor!
+        updatePayload.uniqueViews = currentUniqueViews + 1;
+        updatePayload.uniqueVisitors = currentUniqueViews + 1;
       }
       
-      // Recalculate conversion rate
+      // Recalculate conversion rate based on unique valid clicks or total views
       const redirects = Number(itemData.completedRedirects || itemData.downloads || 0);
-      const newViews = currentViews + 1;
-      updatePayload.conversionRate = Number(((redirects / newViews) * 100).toFixed(2));
+      const denominator = isSelfClick ? currentViews + 1 : (currentUniqueViews + (isValidClick ? 1 : 0) || 1);
+      updatePayload.conversionRate = Number(((redirects / denominator) * 100).toFixed(2));
 
       await updateDoc(docRef, updatePayload);
 
       // Save analytics records
-      await addDoc(collection(db, "shortener_analytics"), {
+      const analyticsPayload: any = {
         linkId: itemData.id || id,
-        type: "view",
+        type: isSelfClick ? "self_click" : (isDuplicate ? "duplicate_click" : "view"),
         ip: String(ip),
         country,
         device,
         browser,
         referrer: referrer || "Direct",
         createdAt: new Date().toISOString()
-      });
+      };
+      await addDoc(collection(db, "shortener_analytics"), analyticsPayload);
 
-      if (isUnique) {
+      if (isValidClick) {
         await addDoc(collection(db, "shortener_analytics"), {
           linkId: itemData.id || id,
           type: "unique_view",
@@ -7568,7 +7707,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       const sessionData = sessionSnap.data();
-      const { linkId, type, completedPages, ip } = sessionData;
+      const { linkId, type, completedPages, ip, isSelfClick, isDuplicate, isValidClick } = sessionData;
 
       let itemData: any = null;
       let docRef: any = null;
@@ -7705,7 +7844,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Save analytics redirect log
       await addDoc(collection(db, "shortener_analytics"), {
         linkId,
-        type: "redirect",
+        type: isSelfClick ? "self_redirect" : (isDuplicate ? "duplicate_redirect" : "valid_redirect"),
         ip: String(ip),
         createdAt: new Date().toISOString()
       });
@@ -7713,13 +7852,62 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Increment completed Redirects / Downloads
       if (type === "shortener") {
         const currentRedirects = Number(itemData.completedRedirects || 0) + 1;
-        const views = Number(itemData.views || 1);
-        const conversionRate = Number(((currentRedirects / views) * 100).toFixed(2));
+        const currentValidClicks = Number(itemData.validClicks || 0) + (isValidClick ? 1 : 0);
+        const uniqueVisitors = Number(itemData.uniqueViews || itemData.uniqueVisitors || 1);
+        const conversionRate = Number(((currentRedirects / uniqueVisitors) * 100).toFixed(2));
         
-        await updateDoc(docRef, {
+        const updatePayload: any = {
           completedRedirects: currentRedirects,
           conversionRate
-        });
+        };
+
+        if (isValidClick) {
+          updatePayload.validClicks = currentValidClicks;
+        }
+
+        if (isValidClick && itemData.userId) {
+          try {
+            const sysRef = doc(db, "settings", "system");
+            const sysSnap = await getDoc(sysRef);
+            let cpm = 5.0; // Default CPM of $5.0 per 1000 views ($0.005 per click)
+            if (sysSnap.exists()) {
+              const earningSettings = sysSnap.data().earningSettings || {};
+              cpm = parseFloat(earningSettings.linkCpm || "5.0") || 5.0;
+            }
+            const clickReward = cpm / 1000;
+            
+            const currentEarnings = Number(itemData.earnings || 0) + clickReward;
+            updatePayload.earnings = currentEarnings;
+
+            const userRef = doc(db, "users", String(itemData.userId));
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+              const userData = userSnap.data();
+              const currentLinkEarnings = Number(userData.linkEarnings || 0);
+              const currentBalance = Number(userData.balance || 0);
+              const currentTotalEarned = Number(userData.totalEarned || 0);
+              
+              await updateDoc(userRef, {
+                linkEarnings: currentLinkEarnings + clickReward,
+                balance: currentBalance + clickReward,
+                totalEarned: currentTotalEarned + clickReward
+              });
+
+              await addDoc(collection(db, "transactions"), {
+                userId: String(itemData.userId),
+                type: "Credit",
+                amount: clickReward,
+                description: `Earnings from short link redirect completion: ${itemData.alias || itemData.id || "N/A"}`,
+                createdAt: new Date().toISOString(),
+                status: "Completed"
+              });
+            }
+          } catch (e) {
+            console.error("Error crediting user wallet for link click:", e);
+          }
+        }
+
+        await updateDoc(docRef, updatePayload);
 
         if (!itemData.destinationUrl) {
           return res.status(400).json({ success: false, message: "Target destination URL is missing in the database." });
@@ -7731,23 +7919,27 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         });
       } else {
         const currentDownloads = Number(itemData.downloads || 0) + 1;
-        const views = Number(itemData.views || 1);
-        const conversionRate = Number(((currentDownloads / views) * 100).toFixed(2));
+        const currentValidClicks = Number(itemData.validClicks || 0) + (isValidClick ? 1 : 0);
+        const uniqueVisitors = Number(itemData.uniqueViews || itemData.uniqueVisitors || 1);
+        const conversionRate = Number(((currentDownloads / uniqueVisitors) * 100).toFixed(2));
 
-        // Fetch system earnings per download
-        const settingsSnap = await getDoc(doc(db, "settings", "earnings"));
-        const earningsPerDownload = settingsSnap.exists() ? (Number(settingsSnap.data()?.earningsPerDownload) || 0.1) : 0.1;
-        const currentEarnings = Number(itemData.earnings || 0) + earningsPerDownload;
-
-        await updateDoc(docRef, {
+        const updatePayload: any = {
           downloads: currentDownloads,
-          earnings: currentEarnings,
           conversionRate
-        });
+        };
 
-        // Credit the uploader user's wallet
-        if (itemData.userId) {
+        if (isValidClick) {
+          updatePayload.validClicks = currentValidClicks;
+        }
+
+        if (isValidClick && itemData.userId) {
           try {
+            // Fetch system earnings per download
+            const settingsSnap = await getDoc(doc(db, "settings", "earnings"));
+            const earningsPerDownload = settingsSnap.exists() ? (Number(settingsSnap.data()?.earningsPerDownload) || 0.1) : 0.1;
+            const currentEarnings = Number(itemData.earnings || 0) + earningsPerDownload;
+            updatePayload.earnings = currentEarnings;
+
             const userRef = doc(db, "users", String(itemData.userId));
             const userSnap = await getDoc(userRef);
             if (userSnap.exists()) {
@@ -7771,6 +7963,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
             console.error("Error crediting uploader wallet:", e);
           }
         }
+
+        await updateDoc(docRef, updatePayload);
 
         // Return the new secure direct backend download endpoint
         const downloadUrl = `/download/${linkId}?action=download`;

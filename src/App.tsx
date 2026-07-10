@@ -105,7 +105,7 @@ export default function App() {
 
     // PRIORITIZE Referral Landing Page routing for /ref, /r, and /referral-success requests
     const path = window.location.pathname;
-    if (path.startsWith("/ref") || path === "/ref" || path.startsWith("/r/") || path === "/r" || path === "/referral-success") {
+    if (path.startsWith("/ref/") || path === "/ref" || path.startsWith("/r/") || path === "/r" || path === "/referral-success") {
       return <ReferralLandingPage />;
     }
 

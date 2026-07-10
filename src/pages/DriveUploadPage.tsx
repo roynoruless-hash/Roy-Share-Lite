@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { db } from "../lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { 
   Cloud, 
   UploadCloud, 
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 
 export default function DriveUploadPage({ onBack }: { onBack?: () => void } = {}) {
+  const { user, loading: authLoading } = useTelegramAuth();
   const [tgId, setTgId] = useState<string | null>(null);
   const [phase, setPhase] = useState<"checking" | "disconnected" | "idle" | "uploading" | "finalizing" | "success" | "error">("checking");
   const [error, setError] = useState<string | null>(null);
@@ -95,13 +97,20 @@ export default function DriveUploadPage({ onBack }: { onBack?: () => void } = {}
   const xhrRef = useRef<XMLHttpRequest | null>(null);
 
   useEffect(() => {
-    // Get tg_id from query parameters or Telegram WebApp
+    // If auth is still loading, wait before throwing error
+    if (authLoading) return;
+
+    // Get tg_id from query parameters, Telegram WebApp, or AuthContext
     const params = new URLSearchParams(window.location.search);
     let id = params.get("tg_id") || params.get("tgId");
 
     const tg = (window as any).Telegram?.WebApp;
     if (!id && tg?.initDataUnsafe?.user?.id) {
       id = String(tg.initDataUnsafe.user.id);
+    }
+
+    if (!id && user?.id) {
+      id = String(user.id);
     }
 
     if (id) {
@@ -111,7 +120,7 @@ export default function DriveUploadPage({ onBack }: { onBack?: () => void } = {}
       setPhase("error");
       setError("Telegram user session not detected. Please open this page from the Telegram Bot.");
     }
-  }, []);
+  }, [user, authLoading]);
 
   const checkDriveConnection = async (userId: string) => {
     try {

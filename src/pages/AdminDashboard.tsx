@@ -184,6 +184,16 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [withdrawalsError, setWithdrawalsError] = useState("");
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
 
+  // Ads.txt state definitions
+  const [adsTxtContent, setAdsTxtContent] = useState("");
+  const [originalAdsTxtContent, setOriginalAdsTxtContent] = useState("");
+  const [adsTxtUpdatedAt, setAdsTxtUpdatedAt] = useState<string | null>(null);
+  const [adsTxtLoading, setAdsTxtLoading] = useState(false);
+  const [adsTxtSaving, setAdsTxtSaving] = useState(false);
+  const [adsTxtError, setAdsTxtError] = useState("");
+  const [adsTxtSuccess, setAdsTxtSuccess] = useState(false);
+  const [showAdsTxtPreview, setShowAdsTxtPreview] = useState(false);
+
   const fetchGoogleDriveAccounts = async () => {
     setGoogleDriveLoading(true);
     setGoogleDriveError("");
@@ -1242,6 +1252,60 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const fetchAdsTxt = async () => {
+    setAdsTxtLoading(true);
+    setAdsTxtError("");
+    setAdsTxtSuccess(false);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/ads-txt`);
+      if (res.ok) {
+        const data = await res.json();
+        setAdsTxtContent(data.content || "");
+        setOriginalAdsTxtContent(data.content || "");
+        setAdsTxtUpdatedAt(data.updatedAt || null);
+      } else {
+        setAdsTxtError("Failed to fetch ads.txt from server.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setAdsTxtError("Network error fetching ads.txt: " + err.message);
+    } finally {
+      setAdsTxtLoading(false);
+    }
+  };
+
+  const saveAdsTxt = async () => {
+    if (!adsTxtContent.trim()) {
+      const confirmEmpty = window.confirm("The ads.txt content is empty. Saving this will clear your ads.txt. Do you want to proceed?");
+      if (!confirmEmpty) return;
+    }
+
+    setAdsTxtSaving(true);
+    setAdsTxtError("");
+    setAdsTxtSuccess(false);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/ads-txt`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: adsTxtContent }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setOriginalAdsTxtContent(adsTxtContent);
+        setAdsTxtUpdatedAt(data.updatedAt);
+        setAdsTxtSuccess(true);
+        setTimeout(() => setAdsTxtSuccess(false), 5000);
+      } else {
+        setAdsTxtError("Failed to save ads.txt settings.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setAdsTxtError("Network error saving ads.txt: " + err.message);
+    } finally {
+      setAdsTxtSaving(false);
+    }
+  };
+
   const fetchSupportSettings = async () => {
     setSupportSettingsLoading(true);
     try {
@@ -1872,6 +1936,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchMonetagStats();
     } else if (activeTab === "📥 Google Drive Accounts") {
       fetchGoogleDriveAccounts();
+    } else if (activeTab === "📄 Ads.txt Manager") {
+      fetchAdsTxt();
     }
 
     return () => {
@@ -2713,6 +2779,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "📥 Backup & Restore",
               "🚀 Referral System",
               "⚙️ System Settings",
+              "📄 Ads.txt Manager",
             ].map((btn) => (
               <button
                 key={btn}
@@ -8735,6 +8802,218 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               )}
             </div>
           )}
+
+          {activeTab === "📄 Ads.txt Manager" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    📄 Ads.txt Manager
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Manage, update, and verify your public ads.txt entries. Served at{" "}
+                    <a
+                      href="/ads.txt"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:underline inline-flex items-center gap-1 font-mono text-xs"
+                    >
+                      /ads.txt <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <button
+                    onClick={() => {
+                      if (confirm("Are you sure you want to revert changes back to the last saved version?")) {
+                        setAdsTxtContent(originalAdsTxtContent);
+                      }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 text-sm active:scale-95"
+                  >
+                    <RotateCcw className="w-4 h-4" /> Reset
+                  </button>
+                  <button
+                    onClick={saveAdsTxt}
+                    disabled={adsTxtSaving || adsTxtLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-sm active:scale-95 disabled:opacity-50"
+                  >
+                    {adsTxtSaving ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" /> Save Ads.txt
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {adsTxtError && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <span>{adsTxtError}</span>
+                </div>
+              )}
+
+              {adsTxtSuccess && (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 text-sm flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                  <span>✅ Ads.txt updated successfully.</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 space-y-4">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
+                    <div className="flex justify-between items-center">
+                      <label className="text-sm font-semibold text-slate-200">
+                        Ads.txt Configuration Snippet
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            if (!adsTxtContent.trim()) {
+                              alert("Nothing to copy!");
+                              return;
+                            }
+                            navigator.clipboard.writeText(adsTxtContent);
+                            alert("Copied to clipboard!");
+                          }}
+                          className="flex items-center gap-1 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-all border border-slate-700"
+                        >
+                          <Copy className="w-3 h-3" /> Copy
+                        </button>
+                        <button
+                          onClick={() => setShowAdsTxtPreview(!showAdsTxtPreview)}
+                          className="flex items-center gap-1 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-all border border-slate-700"
+                        >
+                          <Eye className="w-3 h-3" /> {showAdsTxtPreview ? "Hide Preview" : "Preview"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <textarea
+                      value={adsTxtContent}
+                      onChange={(e) => setAdsTxtContent(e.target.value)}
+                      placeholder={`# Paste your ads.txt configuration lines here\n# Example:\ngoogle.com, pub-100200300400500, DIRECT, f08c47fec0942fa0\ngamepix.com, 10452, DIRECT, c32bd72a81831c19`}
+                      className="w-full h-80 bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm font-mono text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 whitespace-pre scrollbar-thin"
+                      disabled={adsTxtLoading}
+                    />
+
+                    {!adsTxtContent.trim() && (
+                      <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-400 text-xs flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold">⚠️ Warning: Textarea is empty</p>
+                          <p className="opacity-80 mt-0.5">
+                            Saving an empty ads.txt will disable advertising validation on your domain, which could lead to loss of revenue.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {showAdsTxtPreview && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3 shadow-xl">
+                      <h3 className="text-sm font-semibold text-slate-200">
+                        👀 Real-time Format Preview
+                      </h3>
+                      <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl max-h-48 overflow-y-auto font-mono text-xs text-slate-400 whitespace-pre-wrap divide-y divide-slate-800/40">
+                        {adsTxtContent.trim() ? (
+                          adsTxtContent.split("\n").map((line, idx) => {
+                            const trimmed = line.trim();
+                            if (!trimmed) return <div key={idx} className="py-1 min-h-[1.5rem] text-slate-600">[Empty Line]</div>;
+                            if (trimmed.startsWith("#")) {
+                              return (
+                                <div key={idx} className="py-1 text-slate-500 font-italic">
+                                  {line}
+                                </div>
+                              );
+                            }
+                            const parts = trimmed.split(",").map(p => p.trim());
+                            const isValid = parts.length >= 3;
+                            return (
+                              <div key={idx} className={`py-1 flex flex-wrap gap-x-2 ${isValid ? "text-slate-300" : "text-red-400"}`}>
+                                <span className="text-slate-500">[{idx + 1}]</span>
+                                <span>{line}</span>
+                                {!isValid && <span className="text-[10px] bg-red-900/30 text-red-400 px-1.5 py-0.5 rounded ml-auto">Malformatted</span>}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-slate-600 italic">No content pasted to preview.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-6">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
+                    <h3 className="text-sm font-semibold text-slate-200">
+                      📊 Verification & Status
+                    </h3>
+                    
+                    <div className="space-y-3 text-xs">
+                      <div className="flex justify-between py-2 border-b border-slate-800">
+                        <span className="text-slate-400">Current Saved Version:</span>
+                        <span className={`font-mono font-semibold ${originalAdsTxtContent ? "text-emerald-400" : "text-amber-500"}`}>
+                          {originalAdsTxtContent ? `${originalAdsTxtContent.split("\n").length} Lines` : "Not Configured"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-slate-800">
+                        <span className="text-slate-400">Last Updated:</span>
+                        <span className="text-slate-300 font-semibold font-mono">
+                          {adsTxtUpdatedAt ? new Date(adsTxtUpdatedAt).toLocaleString() : "Never"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-slate-800">
+                        <span className="text-slate-400">Status:</span>
+                        <span className={`inline-flex items-center gap-1 font-semibold ${originalAdsTxtContent ? "text-emerald-400" : "text-amber-500"}`}>
+                          <span className={`w-2 h-2 rounded-full ${originalAdsTxtContent ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+                          {originalAdsTxtContent ? "Serving Active" : "Empty / Dormant"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 space-y-2">
+                      <button
+                        onClick={() => window.open("https://www.royshare.online/ads.txt", "_blank")}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-blue-900/20 active:scale-95"
+                      >
+                        <ExternalLink className="w-4 h-4" /> Test ads.txt (Production)
+                      </button>
+                      <button
+                        onClick={() => window.open("/ads.txt", "_blank")}
+                        className="w-full flex items-center justify-center gap-2 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold uppercase tracking-wider rounded-xl transition-all border border-slate-700 active:scale-95"
+                      >
+                        <Globe className="w-4 h-4" /> Test ads.txt (Local Staging)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3 shadow-xl text-xs text-slate-400">
+                    <h3 className="text-sm font-semibold text-slate-200 mb-1">
+                      💡 Quick Guide
+                    </h3>
+                    <p>
+                      An <strong className="text-slate-200">ads.txt</strong> (Authorized Digital Sellers) file is an IAB initiative to declare who is authorized to sell your advertising inventory.
+                    </p>
+                    <p>
+                      For ad platforms like <strong className="text-slate-200">GamePix</strong>, you must paste the lines they provide and click <strong className="text-slate-200">Save</strong>.
+                    </p>
+                    <p>
+                      Once saved, verify the changes at the production link. Platforms typically scan and update their verification within 24 hours.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === "⚙️ System Settings" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">

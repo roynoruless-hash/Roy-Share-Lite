@@ -291,7 +291,7 @@ export const MiniAppHome: React.FC = () => {
     if (page === "files") return "my-content";
     if (page === "links") return "my-links";
     if (page === "analytics") return "link-analytics";
-    if (page === "upload") return "upload";
+    if (page === "upload" || window.location.pathname === "/drive-upload" || window.location.pathname === "/drive-upload/") return "upload";
     return params.get("view") || "home";
   });
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(() => {

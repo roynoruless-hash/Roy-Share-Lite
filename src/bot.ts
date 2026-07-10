@@ -5850,11 +5850,11 @@ Maximum File Size:
                 await sendTelegramMessage(botToken, chatId, messageText, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
             } else {
                 const appUrl = getActualAppUrl();
-                const uploadUrl = `${appUrl}/drive-upload?tg_id=${userId}`;
+                const uploadUrl = `${appUrl}/drive-upload?tg_id=${userId}&userId=${userId}`;
                 const messageText = `☁️ *Large File Upload*\n\nMaximum Size:\n10 GB\n\nClick below to open secure uploader.`;
                 const inlineKeyboard = {
                     inline_keyboard: [
-                        [{ text: "🚀 Open Upload Page", url: uploadUrl }],
+                        [{ text: "🚀 Open Upload Page", web_app: { url: uploadUrl } }],
                         [{ text: "🔙 Back", callback_data: "upload_back_to_menu" }]
                     ]
                 };

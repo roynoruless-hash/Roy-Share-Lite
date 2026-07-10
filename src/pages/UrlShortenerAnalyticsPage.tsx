@@ -238,6 +238,38 @@ export const UrlShortenerAnalyticsPage: React.FC<UrlShortenerAnalyticsPageProps>
           </div>
         </div>
 
+        {/* Production Metrics */}
+        {linkInfo && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <p className="text-emerald-400 text-[10px] font-black uppercase tracking-wider mb-1">Valid Clicks</p>
+              <h2 className="text-xl font-black text-emerald-400">{linkInfo.validClicks || 0}</h2>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <p className="text-indigo-400 text-[10px] font-black uppercase tracking-wider mb-1">Unique Visitors</p>
+              <h2 className="text-xl font-black text-indigo-400">{linkInfo.uniqueViews || linkInfo.uniqueVisitors || 0}</h2>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <p className="text-purple-400 text-[10px] font-black uppercase tracking-wider mb-1">Completed Redirects</p>
+              <h2 className="text-xl font-black text-purple-400">{linkInfo.completedRedirects || 0}</h2>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <p className="text-amber-400 text-[10px] font-black uppercase tracking-wider mb-1">Self Clicks</p>
+              <h2 className="text-xl font-black text-amber-500">{linkInfo.selfClicks || 0}</h2>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <p className="text-rose-400 text-[10px] font-black uppercase tracking-wider mb-1">Blocked / Fraud Clicks</p>
+              <h2 className="text-xl font-black text-rose-500">{linkInfo.blockedClicks || 0}</h2>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <p className="text-cyan-400 text-[10px] font-black uppercase tracking-wider mb-1">Conversion Rate</p>
+              <h2 className="text-xl font-black text-cyan-400">
+                {linkInfo.conversionRate !== undefined ? `${linkInfo.conversionRate}%` : "0%"}
+              </h2>
+            </div>
+          </div>
+        )}
+
         {/* Interactive Timeline Chart card */}
         <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-5 space-y-4">
           <div className="flex justify-between items-center">

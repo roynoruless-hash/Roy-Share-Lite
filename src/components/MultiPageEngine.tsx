@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from "react";
 import { API_BASE } from "../config/api";
+import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, ShieldAlert, ArrowRight, Download, ExternalLink, CheckCircle2, Share2, Copy, Check, FileIcon } from "lucide-react";
 import AnimatedBackground from "./AnimatedBackground";
@@ -89,6 +90,9 @@ interface MultiPageEngineProps {
 }
 
 function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
+  const auth = useTelegramAuth();
+  const visitorTgId = auth?.user?.id || "";
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [itemData, setItemData] = useState<any>(null);
@@ -287,7 +291,8 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
             browser,
             device,
             country,
-            referrer: document.referrer || "Direct"
+            referrer: document.referrer || "Direct",
+            visitorTgId
           })
         });
 
