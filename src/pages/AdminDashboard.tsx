@@ -2182,19 +2182,19 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 <div className="flex justify-between items-center pb-2 border-b border-slate-800/50">
                   <span className="text-slate-400 font-medium">Requested Amount</span>
                   <span className="text-lg font-bold text-white">
-                    {selectedWithdrawal.method === "USDT" ? `${selectedWithdrawal.amount} USDT` : `₹${selectedWithdrawal.amount}`}
+                    {(selectedWithdrawal.method === "USDT" || selectedWithdrawal.method === "USDT (TRC20)") ? `${selectedWithdrawal.amount} USDT` : `₹${selectedWithdrawal.amount}`}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-xs text-slate-400">
-                  <span>Processing Fee ({selectedWithdrawal.method === "USDT" ? "Fixed" : "5%"})</span>
+                  <span>Processing Fee ({(selectedWithdrawal.method === "USDT" || selectedWithdrawal.method === "USDT (TRC20)") ? "Fixed" : "5%"})</span>
                   <span>
-                    {selectedWithdrawal.method === "USDT" ? `${selectedWithdrawal.processingFee || 1} USDT` : `₹${selectedWithdrawal.processingFee || (selectedWithdrawal.amount * 0.05).toFixed(2)}`}
+                    {(selectedWithdrawal.method === "USDT" || selectedWithdrawal.method === "USDT (TRC20)") ? `${selectedWithdrawal.processingFee || 1} USDT` : `₹${selectedWithdrawal.processingFee || (selectedWithdrawal.amount * 0.05).toFixed(2)}`}
                   </span>
                 </div>
                 <div className="flex justify-between items-center pt-2 border-t border-slate-800/50 font-semibold text-emerald-400">
                   <span>Estimated Receive</span>
                   <span className="text-base font-bold text-emerald-400">
-                    {selectedWithdrawal.method === "USDT" ? `${selectedWithdrawal.receiveAmount || (selectedWithdrawal.amount - 1)} USDT` : `₹${selectedWithdrawal.receiveAmount || (selectedWithdrawal.amount * 0.95).toFixed(2)}`}
+                    {(selectedWithdrawal.method === "USDT" || selectedWithdrawal.method === "USDT (TRC20)") ? `${selectedWithdrawal.receiveAmount || (selectedWithdrawal.amount - 1)} USDT` : `₹${selectedWithdrawal.receiveAmount || (selectedWithdrawal.amount * 0.95).toFixed(2)}`}
                   </span>
                 </div>
               </div>
@@ -2205,14 +2205,14 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   💳 Payment Method: <span className="text-indigo-400 font-bold">{selectedWithdrawal.method}</span>
                 </h4>
 
-                {selectedWithdrawal.method === "UPI" && (
+                {(selectedWithdrawal.method === "UPI" || selectedWithdrawal.method === "UPI ID") && (
                   <div className="space-y-1">
                     <span className="block text-[10px] uppercase font-bold text-slate-500">UPI ID</span>
                     <span className="font-mono text-sm text-white select-all bg-slate-900 px-3 py-2 rounded-xl border border-slate-800 block">{selectedWithdrawal.upiId || "N/A"}</span>
                   </div>
                 )}
 
-                {selectedWithdrawal.method === "Bank" && (
+                {(selectedWithdrawal.method === "Bank" || selectedWithdrawal.method === "Bank Account") && (
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
                       <span className="block text-[10px] uppercase font-bold text-slate-500">Account Holder Name</span>
@@ -2233,7 +2233,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   </div>
                 )}
 
-                {selectedWithdrawal.method === "USDT" && (
+                {(selectedWithdrawal.method === "USDT" || selectedWithdrawal.method === "USDT (TRC20)") && (
                   <div className="space-y-2">
                     <div>
                       <span className="block text-[10px] uppercase font-bold text-slate-500">Wallet Address</span>
