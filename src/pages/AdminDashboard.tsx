@@ -202,6 +202,26 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [adsTxtSuccess, setAdsTxtSuccess] = useState(false);
   const [showAdsTxtPreview, setShowAdsTxtPreview] = useState(false);
 
+  // Ads.txt modular providers manager state definitions
+  interface AdsTxtProvider {
+    id?: string;
+    providerName: string;
+    providerType: "Game Provider" | "Ad Network" | "Custom";
+    snippet: string;
+    enabled: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+  }
+  const [adsTxtProviders, setAdsTxtProviders] = useState<AdsTxtProvider[]>([]);
+  const [adsTxtProvidersLoading, setAdsTxtProvidersLoading] = useState(false);
+  const [adsTxtProvidersSaving, setAdsTxtProvidersSaving] = useState(false);
+  const [providerNameField, setProviderNameField] = useState("");
+  const [providerTypeField, setProviderTypeField] = useState<"Game Provider" | "Ad Network" | "Custom">("Game Provider");
+  const [providerSnippetField, setProviderSnippetField] = useState("");
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [providersError, setProvidersError] = useState("");
+  const [providersSuccess, setProvidersSuccess] = useState("");
+
   // GamePix integration state definitions
   const [gamePixRssUrl, setGamePixRssUrl] = useState("");
   const [gamePixLoading, setGamePixLoading] = useState(false);
@@ -1400,6 +1420,174 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const fetchAdsTxtProviders = async () => {
+    setAdsTxtProvidersLoading(true);
+    setProvidersError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/ads-txt-providers`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setAdsTxtProviders(data.providers || []);
+        } else {
+          setProvidersError(data.error || "Failed to load ads.txt providers.");
+        }
+      } else {
+        setProvidersError("Failed to load ads.txt providers.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setProvidersError("Network error loading providers: " + err.message);
+    } finally {
+      setAdsTxtProvidersLoading(false);
+    }
+  };
+
+  const saveAdsTxtProvider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProvidersError("");
+    setProvidersSuccess("");
+
+    const name = providerNameField.trim();
+    const type = providerTypeField;
+    const snippet = providerSnippetField.trim();
+
+    if (!name) {
+      setProvidersError("Provider Name is required.");
+      return;
+    }
+    if (!snippet) {
+      setProvidersError("Snippet content cannot be empty.");
+      return;
+    }
+
+    // Client-side duplicate check
+    const isDuplicate = adsTxtProviders.some(
+      (p) => p.providerName.toLowerCase() === name.toLowerCase() && p.id !== editingProviderId
+    );
+    if (isDuplicate) {
+      setProvidersError(`A provider with the name "${name}" already exists.`);
+      return;
+    }
+
+    setAdsTxtProvidersSaving(true);
+    try {
+      const url = editingProviderId
+        ? `${API_BASE}/api/admin/ads-txt-providers/${editingProviderId}`
+        : `${API_BASE}/api/admin/ads-txt-providers`;
+      const method = editingProviderId ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerName: name,
+          providerType: type,
+          snippet,
+          enabled: true, // default to enabled on save/create
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setProvidersSuccess(
+          editingProviderId
+            ? "Provider updated successfully!"
+            : "Provider added successfully!"
+        );
+        // Clear form
+        setProviderNameField("");
+        setProviderTypeField("Game Provider");
+        setProviderSnippetField("");
+        setEditingProviderId(null);
+        // Refresh list
+        await fetchAdsTxtProviders();
+        // Hide success alert after 5s
+        setTimeout(() => setProvidersSuccess(""), 5000);
+      } else {
+        setProvidersError(data.error || "Failed to save provider.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setProvidersError("Network error saving provider: " + err.message);
+    } finally {
+      setAdsTxtProvidersSaving(false);
+    }
+  };
+
+  const deleteAdsTxtProvider = async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete the ads.txt snippet for "${name}"?`)) {
+      return;
+    }
+    setProvidersError("");
+    setProvidersSuccess("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/ads-txt-providers/${id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setProvidersSuccess(`Successfully deleted provider "${name}".`);
+        if (editingProviderId === id) {
+          // Reset editing form if deleted the active edit
+          setProviderNameField("");
+          setProviderTypeField("Game Provider");
+          setProviderSnippetField("");
+          setEditingProviderId(null);
+        }
+        await fetchAdsTxtProviders();
+        setTimeout(() => setProvidersSuccess(""), 5000);
+      } else {
+        setProvidersError(data.error || "Failed to delete provider.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setProvidersError("Network error deleting provider: " + err.message);
+    }
+  };
+
+  const toggleAdsTxtProvider = async (id: string, currentStatus: boolean, name: string) => {
+    setProvidersError("");
+    setProvidersSuccess("");
+    const newStatus = !currentStatus;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/ads-txt-providers/${id}/toggle`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: newStatus }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setProvidersSuccess(`Successfully ${newStatus ? "enabled" : "disabled"} "${name}".`);
+        await fetchAdsTxtProviders();
+        setTimeout(() => setProvidersSuccess(""), 5000);
+      } else {
+        setProvidersError(data.error || "Failed to toggle provider status.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setProvidersError("Network error toggling provider status: " + err.message);
+    }
+  };
+
+  const startEditingProvider = (provider: AdsTxtProvider) => {
+    setEditingProviderId(provider.id || null);
+    setProviderNameField(provider.providerName);
+    setProviderTypeField(provider.providerType);
+    setProviderSnippetField(provider.snippet);
+    setProvidersError("");
+    setProvidersSuccess("");
+  };
+
+  const clearProviderForm = () => {
+    setEditingProviderId(null);
+    setProviderNameField("");
+    setProviderTypeField("Game Provider");
+    setProviderSnippetField("");
+    setProvidersError("");
+    setProvidersSuccess("");
+  };
+
   const fetchGameRewardsSettings = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/game/rewards/settings`);
@@ -2550,6 +2738,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchGoogleDriveAccounts();
     } else if (activeTab === "📄 Ads.txt Manager") {
       fetchAdsTxt();
+      fetchAdsTxtProviders();
     } else if (activeTab === "🎮 GamePix Integration") {
       fetchGamePixConfig();
     } else if (activeTab === "🎮 Game Catalog") {
@@ -11135,211 +11324,294 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
           {activeTab === "📄 Ads.txt Manager" && (
             <div className="space-y-6">
-              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+              {/* Header Panel */}
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
                 <div>
                   <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                    📄 Ads.txt Manager
+                    🛡 Ads.txt Manager
                   </h2>
                   <p className="text-sm text-slate-400 mt-1">
-                    Manage, update, and verify your public ads.txt entries. Served at{" "}
-                    <a
-                      href="/ads.txt"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-400 hover:underline inline-flex items-center gap-1 font-mono text-xs"
-                    >
-                      /ads.txt <ExternalLink className="w-3 h-3" />
-                    </a>
+                    Store, manage, and toggle ads.txt configuration snippets from multiple advertising & game providers.
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2 items-center">
-                  <button
-                    onClick={() => {
-                      if (confirm("Are you sure you want to revert changes back to the last saved version?")) {
-                        setAdsTxtContent(originalAdsTxtContent);
-                      }
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 text-sm active:scale-95"
-                  >
-                    <RotateCcw className="w-4 h-4" /> Reset
-                  </button>
-                  <button
-                    onClick={saveAdsTxt}
-                    disabled={adsTxtSaving || adsTxtLoading}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-sm active:scale-95 disabled:opacity-50"
-                  >
-                    {adsTxtSaving ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-4 h-4" /> Save Ads.txt
-                      </>
-                    )}
-                  </button>
+                <div className="px-3 py-1.5 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-xl text-xs font-semibold">
+                  🚀 Phase 1: Storage & Toggle Active
                 </div>
               </div>
 
-              {adsTxtError && (
-                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                  <span>{adsTxtError}</span>
+              {/* Status Banner */}
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 text-xs text-slate-400 flex items-start gap-2.5 backdrop-blur-sm">
+                <Info className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-slate-200">ℹ️ Note on Merging & Publishing</p>
+                  <p>
+                    At this stage, you can store, edit, and toggle provider snippets. 
+                    The merge, preview, and public publish features to the main domain will be unlocked in the next system update.
+                  </p>
                 </div>
-              )}
+              </div>
 
-              {adsTxtSuccess && (
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 text-sm flex items-center gap-2">
+              {/* Toast Alerts */}
+              {providersSuccess && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 text-sm flex items-center gap-2"
+                >
                   <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                  <span>✅ Ads.txt updated successfully.</span>
-                </div>
+                  <span>{providersSuccess}</span>
+                </motion.div>
               )}
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-4">
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
-                    <div className="flex justify-between items-center">
-                      <label className="text-sm font-semibold text-slate-200">
-                        Ads.txt Configuration Snippet
-                      </label>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            if (!adsTxtContent.trim()) {
-                              alert("Nothing to copy!");
-                              return;
-                            }
-                            navigator.clipboard.writeText(adsTxtContent);
-                            alert("Copied to clipboard!");
-                          }}
-                          className="flex items-center gap-1 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-all border border-slate-700"
-                        >
-                          <Copy className="w-3 h-3" /> Copy
-                        </button>
-                        <button
-                          onClick={() => setShowAdsTxtPreview(!showAdsTxtPreview)}
-                          className="flex items-center gap-1 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-all border border-slate-700"
-                        >
-                          <Eye className="w-3 h-3" /> {showAdsTxtPreview ? "Hide Preview" : "Preview"}
-                        </button>
-                      </div>
+              {providersError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm flex items-center gap-2"
+                >
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <span>{providersError}</span>
+                </motion.div>
+              )}
+
+              {/* Core Layout Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* Section 1: Add/Edit Snippet Form (Span 5) */}
+                <div className="lg:col-span-5">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <h3 className="text-base font-bold text-white flex items-center gap-2">
+                        {editingProviderId ? "✏️ Edit ads.txt Snippet" : "➕ Add ads.txt Snippet"}
+                      </h3>
+                      {editingProviderId && (
+                        <span className="px-2 py-0.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded text-[10px] font-bold">
+                          Edit Mode
+                        </span>
+                      )}
                     </div>
 
-                    <textarea
-                      value={adsTxtContent}
-                      onChange={(e) => setAdsTxtContent(e.target.value)}
-                      placeholder={`# Paste your ads.txt configuration lines here\n# Example:\ngoogle.com, pub-100200300400500, DIRECT, f08c47fec0942fa0\ngamepix.com, 10452, DIRECT, c32bd72a81831c19`}
-                      className="w-full h-80 bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm font-mono text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 whitespace-pre scrollbar-thin"
-                      disabled={adsTxtLoading}
-                    />
-
-                    {!adsTxtContent.trim() && (
-                      <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-400 text-xs flex items-start gap-2">
-                        <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                        <div>
-                          <p className="font-bold">⚠️ Warning: Textarea is empty</p>
-                          <p className="opacity-80 mt-0.5">
-                            Saving an empty ads.txt will disable advertising validation on your domain, which could lead to loss of revenue.
-                          </p>
-                        </div>
+                    <form onSubmit={saveAdsTxtProvider} className="space-y-4">
+                      {/* Provider preset selector for convenient typing */}
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-300">
+                          Select Provider Preset
+                        </label>
+                        <select
+                          value={
+                            ["GamePix", "GameMonetize", "Google AdSense", "Adsterra", "Monetag"].includes(providerNameField)
+                              ? providerNameField
+                              : providerNameField === ""
+                              ? ""
+                              : "Custom"
+                          }
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === "Custom") {
+                              setProviderNameField("");
+                              setProviderTypeField("Custom");
+                            } else {
+                              setProviderNameField(val);
+                              // Auto assign corresponding type for preset
+                              if (["GamePix", "GameMonetize"].includes(val)) {
+                                setProviderTypeField("Game Provider");
+                              } else if (["Google AdSense", "Adsterra", "Monetag"].includes(val)) {
+                                setProviderTypeField("Ad Network");
+                              }
+                            }
+                          }}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                        >
+                          <option value="">-- Choose a Preset --</option>
+                          <option value="GamePix">GamePix</option>
+                          <option value="GameMonetize">GameMonetize</option>
+                          <option value="Google AdSense">Google AdSense</option>
+                          <option value="Adsterra">Adsterra</option>
+                          <option value="Monetag">Monetag</option>
+                          <option value="Custom">Custom / Other Provider</option>
+                        </select>
                       </div>
-                    )}
+
+                      {/* Provider Name Input */}
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-300">
+                          Provider Name
+                        </label>
+                        <input
+                          type="text"
+                          value={providerNameField}
+                          onChange={(e) => setProviderNameField(e.target.value)}
+                          placeholder="e.g. MyAdPlatform"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                          required
+                        />
+                      </div>
+
+                      {/* Provider Type */}
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-300">
+                          Provider Type
+                        </label>
+                        <select
+                          value={providerTypeField}
+                          onChange={(e) => setProviderTypeField(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                        >
+                          <option value="Game Provider">Game Provider</option>
+                          <option value="Ad Network">Ad Network</option>
+                          <option value="Custom">Custom</option>
+                        </select>
+                      </div>
+
+                      {/* Snippet Content Area */}
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-300">
+                          Paste ads.txt Snippet Here
+                        </label>
+                        <p className="text-[10px] text-slate-400">
+                          Paste multi-line raw definitions exactly as provided (no modified formatting).
+                        </p>
+                        <textarea
+                          value={providerSnippetField}
+                          onChange={(e) => setProviderSnippetField(e.target.value)}
+                          placeholder="google.com, pub-100200300400500, DIRECT, f08c47fec0942fa0"
+                          className="w-full h-48 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-100 focus:outline-none focus:border-purple-500 whitespace-pre scrollbar-thin"
+                          required
+                        />
+                      </div>
+
+                      {/* Form Button Actions */}
+                      <div className="flex gap-2.5 pt-2">
+                        <button
+                          type="button"
+                          onClick={clearProviderForm}
+                          className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700 text-xs text-center active:scale-95"
+                        >
+                          🗑 Clear
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={adsTxtProvidersSaving}
+                          className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all text-xs flex items-center justify-center gap-1 shadow-lg active:scale-95 disabled:opacity-50"
+                        >
+                          {adsTxtProvidersSaving ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3.5 h-3.5" /> {editingProviderId ? "Update Snippet" : "Save Snippet"}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+
+                {/* Section 2: Saved Providers List (Span 7) */}
+                <div className="lg:col-span-7 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      📋 Saved Providers
+                      <span className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-xs text-slate-300 rounded-full font-black">
+                        {adsTxtProviders.length}
+                      </span>
+                    </h3>
                   </div>
 
-                  {showAdsTxtPreview && (
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3 shadow-xl">
-                      <h3 className="text-sm font-semibold text-slate-200">
-                        👀 Real-time Format Preview
-                      </h3>
-                      <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl max-h-48 overflow-y-auto font-mono text-xs text-slate-400 whitespace-pre-wrap divide-y divide-slate-800/40">
-                        {adsTxtContent.trim() ? (
-                          adsTxtContent.split("\n").map((line, idx) => {
-                            const trimmed = line.trim();
-                            if (!trimmed) return <div key={idx} className="py-1 min-h-[1.5rem] text-slate-600">[Empty Line]</div>;
-                            if (trimmed.startsWith("#")) {
-                              return (
-                                <div key={idx} className="py-1 text-slate-500 font-italic">
-                                  {line}
+                  {adsTxtProvidersLoading ? (
+                    <div className="flex flex-col items-center justify-center py-12 bg-slate-900 border border-slate-800 rounded-2xl space-y-3 shadow-xl">
+                      <RefreshCw className="w-8 h-8 text-purple-500 animate-spin" />
+                      <p className="text-xs text-slate-400">Loading saved provider snippets...</p>
+                    </div>
+                  ) : adsTxtProviders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 bg-slate-900 border border-slate-800 rounded-2xl text-center p-6 space-y-3 shadow-xl">
+                      <FileCode className="w-12 h-12 text-slate-600" />
+                      <p className="text-sm font-bold text-slate-300">No advertising providers configured yet</p>
+                      <p className="text-xs text-slate-400 max-w-sm">
+                        Use the form on the left to add GamePix, Google AdSense, or other networks to begin tracking and publishing your ads.txt components.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {adsTxtProviders.map((provider) => {
+                        const typeColors = {
+                          "Game Provider": "bg-sky-500/10 text-sky-400 border-sky-500/20",
+                          "Ad Network": "bg-purple-500/10 text-purple-400 border-purple-500/20",
+                          "Custom": "bg-slate-500/10 text-slate-400 border-slate-500/20",
+                        };
+                        const typeBadge = typeColors[provider.providerType] || typeColors["Custom"];
+
+                        return (
+                          <div
+                            key={provider.id}
+                            className={`bg-slate-900 border transition-all rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-xl hover:border-slate-700 relative overflow-hidden group ${
+                              editingProviderId === provider.id ? "border-purple-500" : "border-slate-800"
+                            }`}
+                          >
+                            <div className="space-y-2">
+                              {/* Provider title line & status toggle */}
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="space-y-1">
+                                  <h4 className="font-bold text-white text-base tracking-tight leading-tight">
+                                    {provider.providerName}
+                                  </h4>
+                                  <span className={`inline-block px-2 py-0.5 border rounded text-[10px] font-bold ${typeBadge}`}>
+                                    {provider.providerType}
+                                  </span>
                                 </div>
-                              );
-                            }
-                            const parts = trimmed.split(",").map(p => p.trim());
-                            const isValid = parts.length >= 3;
-                            return (
-                              <div key={idx} className={`py-1 flex flex-wrap gap-x-2 ${isValid ? "text-slate-300" : "text-red-400"}`}>
-                                <span className="text-slate-500">[{idx + 1}]</span>
-                                <span>{line}</span>
-                                {!isValid && <span className="text-[10px] bg-red-900/30 text-red-400 px-1.5 py-0.5 rounded ml-auto">Malformatted</span>}
+
+                                <button
+                                  type="button"
+                                  onClick={() => toggleAdsTxtProvider(provider.id!, provider.enabled, provider.providerName)}
+                                  className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${
+                                    provider.enabled
+                                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                                      : "bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20"
+                                  }`}
+                                  title={provider.enabled ? "Click to Disable" : "Click to Enable"}
+                                >
+                                  {provider.enabled ? "● Active" : "○ Disabled"}
+                                </button>
                               </div>
-                            );
-                          })
-                        ) : (
-                          <div className="text-slate-600 italic">No content pasted to preview.</div>
-                        )}
-                      </div>
+
+                              {/* Dates block */}
+                              <div className="space-y-0.5 text-[10px] text-slate-400 font-mono">
+                                <p>Created: {provider.createdAt ? new Date(provider.createdAt).toLocaleDateString() : "Unknown"}</p>
+                                <p>Updated: {provider.updatedAt ? new Date(provider.updatedAt).toLocaleDateString() : "Unknown"}</p>
+                              </div>
+
+                              {/* Snippet Preview */}
+                              <div className="pt-2">
+                                <div className="bg-slate-950 border border-slate-850 p-2.5 rounded-lg max-h-24 overflow-y-auto font-mono text-[10px] text-slate-400 whitespace-pre scrollbar-thin">
+                                  {provider.snippet}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Actions block */}
+                            <div className="flex items-center gap-2 pt-2 border-t border-slate-800/60">
+                              <button
+                                onClick={() => startEditingProvider(provider)}
+                                className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                              >
+                                <Edit className="w-3 h-3" /> Edit
+                              </button>
+                              <button
+                                onClick={() => deleteAdsTxtProvider(provider.id!, provider.providerName)}
+                                className="flex-1 py-1.5 bg-red-950/40 hover:bg-red-900/40 text-red-400 text-xs font-bold rounded-lg border border-red-900/30 transition-colors flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" /> Delete
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-6">
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
-                    <h3 className="text-sm font-semibold text-slate-200">
-                      📊 Verification & Status
-                    </h3>
-                    
-                    <div className="space-y-3 text-xs">
-                      <div className="flex justify-between py-2 border-b border-slate-800">
-                        <span className="text-slate-400">Current Saved Version:</span>
-                        <span className={`font-mono font-semibold ${originalAdsTxtContent ? "text-emerald-400" : "text-amber-500"}`}>
-                          {originalAdsTxtContent ? `${originalAdsTxtContent.split("\n").length} Lines` : "Not Configured"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-slate-800">
-                        <span className="text-slate-400">Last Updated:</span>
-                        <span className="text-slate-300 font-semibold font-mono">
-                          {adsTxtUpdatedAt ? new Date(adsTxtUpdatedAt).toLocaleString() : "Never"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between py-2 border-b border-slate-800">
-                        <span className="text-slate-400">Status:</span>
-                        <span className={`inline-flex items-center gap-1 font-semibold ${originalAdsTxtContent ? "text-emerald-400" : "text-amber-500"}`}>
-                          <span className={`w-2 h-2 rounded-full ${originalAdsTxtContent ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
-                          {originalAdsTxtContent ? "Serving Active" : "Empty / Dormant"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 space-y-2">
-                      <button
-                        onClick={() => window.open("https://www.royshare.online/ads.txt", "_blank")}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-blue-900/20 active:scale-95"
-                      >
-                        <ExternalLink className="w-4 h-4" /> Test ads.txt (Production)
-                      </button>
-                      <button
-                        onClick={() => window.open("/ads.txt", "_blank")}
-                        className="w-full flex items-center justify-center gap-2 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold uppercase tracking-wider rounded-xl transition-all border border-slate-700 active:scale-95"
-                      >
-                        <Globe className="w-4 h-4" /> Test ads.txt (Local Staging)
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3 shadow-xl text-xs text-slate-400">
-                    <h3 className="text-sm font-semibold text-slate-200 mb-1">
-                      💡 Quick Guide
-                    </h3>
-                    <p>
-                      An <strong className="text-slate-200">ads.txt</strong> (Authorized Digital Sellers) file is an IAB initiative to declare who is authorized to sell your advertising inventory.
-                    </p>
-                    <p>
-                      For ad platforms like <strong className="text-slate-200">GamePix</strong>, you must paste the lines they provide and click <strong className="text-slate-200">Save</strong>.
-                    </p>
-                    <p>
-                      Once saved, verify the changes at the production link. Platforms typically scan and update their verification within 24 hours.
-                    </p>
-                  </div>
-                </div>
               </div>
             </div>
           )}

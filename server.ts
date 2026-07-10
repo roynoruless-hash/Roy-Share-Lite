@@ -3022,6 +3022,136 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // Ads.txt modular providers manager endpoints
+  app.get("/api/admin/ads-txt-providers", async (req, res) => {
+    try {
+      const colRef = collection(db, "ads_txt_providers");
+      const snapshot = await getDocs(colRef);
+      const providers: any[] = [];
+      snapshot.forEach((docSnap) => {
+        providers.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      providers.sort((a, b) => (a.providerName || "").localeCompare(b.providerName || ""));
+      return res.json({ success: true, providers });
+    } catch (e: any) {
+      console.error("Error fetching ads.txt providers:", e);
+      return res.status(500).json({ error: "Server error fetching ads.txt providers: " + e.message });
+    }
+  });
+
+  app.post("/api/admin/ads-txt-providers", async (req, res) => {
+    try {
+      const { providerName, providerType, snippet, enabled } = req.body;
+      if (!providerName || !providerName.trim()) {
+        return res.status(400).json({ error: "Provider name is required." });
+      }
+      if (!snippet || !snippet.trim()) {
+        return res.status(400).json({ error: "Snippet content is required." });
+      }
+
+      const colRef = collection(db, "ads_txt_providers");
+      const snapshot = await getDocs(colRef);
+      const duplicate = snapshot.docs.some(docSnap => {
+        const data = docSnap.data();
+        return data.providerName?.trim().toLowerCase() === providerName.trim().toLowerCase();
+      });
+
+      if (duplicate) {
+        return res.status(400).json({ error: `A provider with the name "${providerName}" already exists.` });
+      }
+
+      const now = new Date().toISOString();
+      const newDoc = {
+        providerName: providerName.trim(),
+        providerType: providerType || "Custom",
+        snippet: snippet.trim(),
+        enabled: enabled !== false,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      const docRef = await addDoc(colRef, newDoc);
+      return res.json({ success: true, id: docRef.id, provider: { id: docRef.id, ...newDoc } });
+    } catch (e: any) {
+      console.error("Error adding ads.txt provider:", e);
+      return res.status(500).json({ error: "Server error adding provider: " + e.message });
+    }
+  });
+
+  app.put("/api/admin/ads-txt-providers/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { providerName, providerType, snippet, enabled } = req.body;
+
+      if (!providerName || !providerName.trim()) {
+        return res.status(400).json({ error: "Provider name is required." });
+      }
+      if (!snippet || !snippet.trim()) {
+        return res.status(400).json({ error: "Snippet content is required." });
+      }
+
+      const colRef = collection(db, "ads_txt_providers");
+      const snapshot = await getDocs(colRef);
+      const duplicate = snapshot.docs.some(docSnap => {
+        if (docSnap.id === id) return false;
+        const data = docSnap.data();
+        return data.providerName?.trim().toLowerCase() === providerName.trim().toLowerCase();
+      });
+
+      if (duplicate) {
+        return res.status(400).json({ error: `A provider with the name "${providerName}" already exists.` });
+      }
+
+      const docRef = doc(db, "ads_txt_providers", id);
+      const now = new Date().toISOString();
+      const updatedData: any = {
+        providerName: providerName.trim(),
+        providerType: providerType || "Custom",
+        snippet: snippet.trim(),
+        updatedAt: now
+      };
+      if (typeof enabled === "boolean") {
+        updatedData.enabled = enabled;
+      }
+
+      await updateDoc(docRef, updatedData);
+      return res.json({ success: true, id, provider: { id, ...updatedData } });
+    } catch (e: any) {
+      console.error("Error updating ads.txt provider:", e);
+      return res.status(500).json({ error: "Server error updating provider: " + e.message });
+    }
+  });
+
+  app.delete("/api/admin/ads-txt-providers/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const docRef = doc(db, "ads_txt_providers", id);
+      await deleteDoc(docRef);
+      return res.json({ success: true, id });
+    } catch (e: any) {
+      console.error("Error deleting ads.txt provider:", e);
+      return res.status(500).json({ error: "Server error deleting provider: " + e.message });
+    }
+  });
+
+  app.patch("/api/admin/ads-txt-providers/:id/toggle", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { enabled } = req.body;
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ error: "Enabled must be a boolean." });
+      }
+
+      const docRef = doc(db, "ads_txt_providers", id);
+      const now = new Date().toISOString();
+      await updateDoc(docRef, { enabled, updatedAt: now });
+      return res.json({ success: true, id, enabled });
+    } catch (e: any) {
+      console.error("Error toggling ads.txt provider:", e);
+      return res.status(500).json({ error: "Server error toggling provider: " + e.message });
+    }
+  });
+
   // GamePix API endpoints
   app.get("/api/gamepix/rss", async (req, res) => {
     try {
