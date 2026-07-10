@@ -3064,7 +3064,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const docRef = doc(db, "settings", "gamepix");
       const docSnap = await getDoc(docRef);
       if (!docSnap.exists()) {
-        return res.json({ rssUrl: "" });
+        return res.json({ rssUrl: "", totalImportedGames: 0, lastSyncTime: "" });
       }
       return res.json(docSnap.data());
     } catch (e: any) {
@@ -3113,20 +3113,30 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
-  app.get("/api/gamepix/games", async (req, res) => {
+  app.post("/api/admin/gamepix/sync", async (req, res) => {
     try {
       const docRef = doc(db, "settings", "gamepix");
       const docSnap = await getDoc(docRef);
-      let rssUrl = "https://feed.gamepix.com/v1/json"; // Fallback URL
-      if (docSnap.exists() && docSnap.data().rssUrl) {
-        rssUrl = docSnap.data().rssUrl;
+      if (!docSnap.exists()) {
+        return res.status(404).json({ success: false, error: "GamePix settings document not found. Please save RSS URL first." });
+      }
+      const { rssUrl } = docSnap.data();
+      if (!rssUrl) {
+        return res.status(404).json({ success: false, error: "RSS Feed URL is empty." });
       }
 
       const response = await fetch(rssUrl);
       if (!response.ok) {
-        throw new Error(`Feed returned status ${response.status}`);
+        return res.status(400).json({ success: false, error: `Feed returned status ${response.status}` });
       }
-      const json = await response.json();
+      const text = await response.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (e) {
+        return res.status(400).json({ success: false, error: "Feed content is not valid JSON." });
+      }
+
       let rawGames = [];
       if (Array.isArray(json)) {
         rawGames = json;
@@ -3136,45 +3146,335 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         rawGames = json.games;
       }
 
-      // Format to a unified structure
-      const games = rawGames.map((g: any) => ({
-        id: g.id || g.title || String(Math.random()),
-        title: g.title || g.name || "Untitled Game",
-        description: g.description || "",
-        url: g.url || g.playUrl || g.link || "",
-        thumbnailUrl: g.thumbnailUrl || g.thumbnail || g.image || g.icon || g.logo || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=150",
-        bannerUrl: g.bannerUrl || g.banner || g.largeImage || g.image || g.thumbnailUrl || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600",
-        category: g.category || g.genre || (Array.isArray(g.categories) ? g.categories[0] : "Casual"),
-        orientation: g.orientation || "landscape"
-      }));
+      if (rawGames.length === 0) {
+        return res.json({
+          success: true,
+          imported: 0,
+          updated: 0,
+          failed: 0,
+          message: "No games found in the RSS feed."
+        });
+      }
+
+      // Fetch existing catalog game IDs to count new vs updated
+      const catalogCol = collection(db, "gamepix_catalog");
+      const existingSnap = await getDocs(catalogCol);
+      const existingIds = new Set<string>();
+      existingSnap.forEach(d => {
+        existingIds.add(d.id);
+      });
+
+      let importedCount = 0;
+      let updatedCount = 0;
+      let failedCount = 0;
+
+      const gamesToCatalog = rawGames.map((g: any) => {
+        const id = String(g.id || g.title || "").trim();
+        if (!id) return null;
+
+        const category = g.category || g.genre || (Array.isArray(g.categories) ? g.categories[0] : "Casual");
+        const orientation = g.orientation || "landscape";
+        const quality = g.quality || (4.0 + Math.random() * 1.0).toFixed(1);
+
+        return {
+          id,
+          title: g.title || g.name || "Untitled Game",
+          description: g.description || "",
+          url: g.url || g.playUrl || g.link || "",
+          thumbnailUrl: g.thumbnailUrl || g.thumbnail || g.image || g.icon || g.logo || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=150",
+          bannerUrl: g.bannerUrl || g.banner || g.largeImage || g.image || g.thumbnailUrl || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600",
+          category: category,
+          orientation: orientation,
+          quality: String(quality),
+          playCount: 0,
+          clicks: 0,
+          favoritesCount: 0,
+          rewardSettings: { coinsPerMin: 10, enabled: true },
+          dailyMissions: [],
+          leaderboard: [],
+          coins: 0,
+          fetchedAt: new Date().toISOString()
+        };
+      }).filter(Boolean) as any[];
+
+      // Write batching in chunks of 400 to gamepix_catalog
+      const batchSize = 400;
+      for (let i = 0; i < gamesToCatalog.length; i += batchSize) {
+        const chunk = gamesToCatalog.slice(i, i + batchSize);
+        const batch = writeBatch(db);
+
+        for (const game of chunk) {
+          try {
+            const catDocRef = doc(db, "gamepix_catalog", game.id);
+            batch.set(catDocRef, game, { merge: true });
+            
+            if (existingIds.has(game.id)) {
+              updatedCount++;
+            } else {
+              importedCount++;
+            }
+          } catch (err) {
+            console.error(`Failed to catalog game ${game.id}:`, err);
+            failedCount++;
+          }
+        }
+
+        await batch.commit();
+      }
+
+      // Fetch the total size of gamepix_catalog
+      const totalCatalogSnap = await getDocs(catalogCol);
+      const totalCatalogSize = totalCatalogSnap.size;
+      const lastSyncTime = new Date().toISOString();
+
+      // Update GamePix settings document
+      await setDoc(docRef, {
+        totalImportedGames: totalCatalogSize,
+        lastSyncTime
+      }, { merge: true });
+
+      return res.json({
+        success: true,
+        imported: importedCount,
+        updated: updatedCount,
+        failed: failedCount,
+        totalImportedGames: totalCatalogSize,
+        lastSyncTime
+      });
+    } catch (e: any) {
+      console.error("Error in POST /api/admin/gamepix/sync:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to synchronize games catalog." });
+    }
+  });
+
+  // Fetch catalog list along with added status mapping
+  app.get("/api/admin/gamepix/catalog", async (req, res) => {
+    try {
+      const catalogCol = collection(db, "gamepix_catalog");
+      const catalogSnap = await getDocs(catalogCol);
+      
+      const gamesCol = collection(db, "games");
+      const gamesSnap = await getDocs(gamesCol);
+      const activeIds = new Set<string>();
+      const gamesMap: Record<string, any> = {};
+      gamesSnap.forEach(d => {
+        const data = d.data();
+        activeIds.add(d.id);
+        gamesMap[d.id] = data;
+      });
+
+      const catalogList: any[] = [];
+      catalogSnap.forEach(d => {
+        const data = d.data();
+        const activeGame = gamesMap[data.id];
+        catalogList.push({
+          ...data,
+          isAdded: activeIds.has(data.id),
+          featured: activeGame ? !!activeGame.featured : false,
+          enabled: activeGame ? activeGame.enabled !== false : true
+        });
+      });
+
+      // Sort by fetchedAt descending if available
+      catalogList.sort((a, b) => {
+        const dateA = a.fetchedAt || "";
+        const dateB = b.fetchedAt || "";
+        return dateB.localeCompare(dateA);
+      });
+
+      return res.json({ success: true, games: catalogList, activeGameIds: Array.from(activeIds) });
+    } catch (e: any) {
+      console.error("Error in GET /api/admin/gamepix/catalog:", e);
+      return res.status(500).json({ error: "Failed to fetch games catalog" });
+    }
+  });
+
+  // Copy game from gamepix_catalog to games collection (publish)
+  app.post("/api/admin/gamepix/add-to-royshare", async (req, res) => {
+    try {
+      const { gameId } = req.body;
+      if (!gameId) {
+        return res.status(400).json({ success: false, error: "gameId is required" });
+      }
+
+      const catDocRef = doc(db, "gamepix_catalog", String(gameId));
+      const catSnap = await getDoc(catDocRef);
+      if (!catSnap.exists()) {
+        return res.status(404).json({ success: false, error: "Game not found in catalog." });
+      }
+
+      const gameData = catSnap.data();
+      const publishDocRef = doc(db, "games", String(gameId));
+
+      // Build active game item preserving future ready properties
+      const activeGame = {
+        id: gameData.id,
+        title: gameData.title,
+        description: gameData.description || "",
+        url: gameData.url,
+        thumbnailUrl: gameData.thumbnailUrl,
+        bannerUrl: gameData.bannerUrl,
+        category: gameData.category,
+        orientation: gameData.orientation,
+        quality: gameData.quality || "5.0",
+        enabled: true,
+        featured: false,
+        playCount: gameData.playCount || 0,
+        clicks: gameData.clicks || 0,
+        favoritesCount: gameData.favoritesCount || 0,
+        rewardSettings: gameData.rewardSettings || { coinsPerMin: 10, enabled: true },
+        dailyMissions: gameData.dailyMissions || [],
+        leaderboard: gameData.leaderboard || [],
+        coins: gameData.coins || 0,
+        width: gameData.width || "",
+        height: gameData.height || "",
+        addedAt: new Date().toISOString()
+      };
+
+      await setDoc(publishDocRef, activeGame, { merge: true });
+      return res.json({ success: true, message: "Added game to RoyShare successfully!" });
+    } catch (e: any) {
+      console.error("Error adding game to active collection:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to publish game." });
+    }
+  });
+
+  // Get all active published games
+  app.get("/api/admin/games", async (req, res) => {
+    try {
+      const gamesCol = collection(db, "games");
+      const gamesSnap = await getDocs(gamesCol);
+      const activeList: any[] = [];
+      gamesSnap.forEach(d => {
+        activeList.push(d.data());
+      });
+
+      return res.json({ success: true, games: activeList });
+    } catch (e: any) {
+      console.error("Error fetching active games list:", e);
+      return res.status(500).json({ error: "Failed to fetch active games list." });
+    }
+  });
+
+  // Add fully custom manual game directly to games collection
+  app.post("/api/admin/games/custom", async (req, res) => {
+    try {
+      const {
+        title,
+        description,
+        category,
+        bannerUrl,
+        thumbnailUrl,
+        url,
+        orientation,
+        width,
+        height,
+        featured,
+        enabled
+      } = req.body;
+
+      if (!title || !url) {
+        return res.status(400).json({ success: false, error: "Title and Play URL are required." });
+      }
+
+      const customId = `custom_${Date.now()}`;
+      const publishDocRef = doc(db, "games", customId);
+
+      const customGame = {
+        id: customId,
+        title,
+        description: description || "",
+        category: category || "Casual",
+        bannerUrl: bannerUrl || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600",
+        thumbnailUrl: thumbnailUrl || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=150",
+        url,
+        orientation: orientation || "landscape",
+        width: width || "",
+        height: height || "",
+        featured: !!featured,
+        enabled: enabled !== false,
+        quality: "5.0",
+        playCount: 0,
+        clicks: 0,
+        favoritesCount: 0,
+        rewardSettings: { coinsPerMin: 15, enabled: true },
+        dailyMissions: [],
+        leaderboard: [],
+        coins: 0,
+        addedAt: new Date().toISOString()
+      };
+
+      await setDoc(publishDocRef, customGame);
+      return res.json({ success: true, message: "Custom game created successfully!" });
+    } catch (e: any) {
+      console.error("Error adding custom game:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to create custom game." });
+    }
+  });
+
+  // Update/Edit details of any active/published game
+  app.put("/api/admin/games/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updateData = req.body;
+      if (!id) {
+        return res.status(400).json({ success: false, error: "Game ID parameter is required" });
+      }
+
+      const publishDocRef = doc(db, "games", id);
+      const existingSnap = await getDoc(publishDocRef);
+      if (!existingSnap.exists()) {
+        return res.status(404).json({ success: false, error: "Game does not exist in RoyShare published collection." });
+      }
+
+      // Merge and update document fields
+      await updateDoc(publishDocRef, {
+        ...updateData,
+        updatedAt: new Date().toISOString()
+      });
+
+      return res.json({ success: true, message: "Game updated successfully!" });
+    } catch (e: any) {
+      console.error("Error updating active game:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to update game details." });
+    }
+  });
+
+  // Delete/Remove any active published game
+  app.delete("/api/admin/games/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res.status(400).json({ success: false, error: "Game ID parameter is required" });
+      }
+
+      const publishDocRef = doc(db, "games", id);
+      await deleteDoc(publishDocRef);
+
+      return res.json({ success: true, message: "Game deleted successfully from RoyShare!" });
+    } catch (e: any) {
+      console.error("Error deleting active game:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to delete game." });
+    }
+  });
+
+  app.get("/api/gamepix/games", async (req, res) => {
+    try {
+      const gamesCol = collection(db, "games");
+      const snapshot = await getDocs(gamesCol);
+      const games: any[] = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        // Return only enabled games for the Mini App Game Center
+        if (data.enabled !== false) {
+          games.push(data);
+        }
+      });
 
       return res.json({ success: true, games });
     } catch (e: any) {
       console.error("Error in GET /api/gamepix/games:", e);
-      // Fallback: If feed fails, let's return some high-quality curated sample games to ensure UI is never empty and beautiful
-      const sampleGames = [
-        {
-          id: "classic-bowling",
-          title: "Classic Bowling",
-          description: "Strike down the pins in this 3D classic bowling game.",
-          url: "https://play.gamepix.com/classic-bowling",
-          thumbnailUrl: "https://images.unsplash.com/photo-1544698310-74ea9d1c8258?w=150",
-          bannerUrl: "https://images.unsplash.com/photo-1544698310-74ea9d1c8258?w=600",
-          category: "Sports",
-          orientation: "landscape"
-        },
-        {
-          id: "retro-racing",
-          title: "Retro Racing",
-          description: "Speed through neon tracks in retro arcade style.",
-          url: "https://play.gamepix.com/retro-speed-2b",
-          thumbnailUrl: "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=150",
-          bannerUrl: "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600",
-          category: "Racing",
-          orientation: "landscape"
-        }
-      ];
-      return res.json({ success: true, games: sampleGames, fallback: true, error: e.message });
+      return res.status(500).json({ success: false, error: "Failed to load RoyShare Game Center library." });
     }
   });
 

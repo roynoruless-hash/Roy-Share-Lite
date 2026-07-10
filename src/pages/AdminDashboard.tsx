@@ -44,6 +44,11 @@ import {
   Radio,
   XCircle,
   CheckCircle,
+  Plus,
+  Trash,
+  Edit,
+  Gamepad2,
+  X,
 } from "lucide-react";
 
 
@@ -203,6 +208,48 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [gamePixSuccessMessage, setGamePixSuccessMessage] = useState("");
   const [gamePixTestSuccess, setGamePixTestSuccess] = useState<string | null>(null);
   const [gamePixTestError, setGamePixTestError] = useState<string | null>(null);
+  
+  // GamePix Sync details
+  const [gamePixTotalImported, setGamePixTotalImported] = useState<number>(0);
+  const [gamePixLastSync, setGamePixLastSync] = useState<string>("");
+  const [gamePixSyncStatus, setGamePixSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
+  const [gamePixSyncResult, setGamePixSyncResult] = useState<{ imported: number; updated: number; failed: number } | null>(null);
+
+  // Catalog State
+  const [catalogGames, setCatalogGames] = useState<any[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogFilter, setCatalogFilter] = useState("All"); // All, Added, Not Added, Featured, Disabled
+
+  // Custom Game Form State
+  const [customGameTitle, setCustomGameTitle] = useState("");
+  const [customGameDescription, setCustomGameDescription] = useState("");
+  const [customGameCategory, setCustomGameCategory] = useState("Casual");
+  const [customGameBannerUrl, setCustomGameBannerUrl] = useState("");
+  const [customGameThumbnailUrl, setCustomGameThumbnailUrl] = useState("");
+  const [customGameUrl, setCustomGameUrl] = useState("");
+  const [customGameOrientation, setCustomGameOrientation] = useState("landscape");
+  const [customGameWidth, setCustomGameWidth] = useState("");
+  const [customGameHeight, setCustomGameHeight] = useState("");
+  const [customGameFeatured, setCustomGameFeatured] = useState(false);
+  const [customGameEnabled, setCustomGameEnabled] = useState(true);
+  const [customGameError, setCustomGameError] = useState("");
+  const [customGameSuccess, setCustomGameSuccess] = useState("");
+  const [customGameSaving, setCustomGameSaving] = useState(false);
+
+  // Published Games Management State
+  const [publishedGames, setPublishedGames] = useState<any[]>([]);
+  const [publishedGamesLoading, setPublishedGamesLoading] = useState(false);
+  const [publishedSearch, setPublishedSearch] = useState("");
+  
+  // Game Preview State (Modal / Iframe)
+  const [previewGame, setPreviewGame] = useState<any | null>(null);
+
+  // Edit Game Modal State
+  const [editingGame, setEditingGame] = useState<any | null>(null);
+  const [editGameError, setEditGameError] = useState("");
+  const [editGameSuccess, setEditGameSuccess] = useState("");
+  const [editGameSaving, setEditGameSaving] = useState(false);
 
   const fetchGoogleDriveAccounts = async () => {
     setGoogleDriveLoading(true);
@@ -1327,6 +1374,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       if (res.ok) {
         const data = await res.json();
         setGamePixRssUrl(data.rssUrl || "");
+        setGamePixTotalImported(data.totalImportedGames || 0);
+        setGamePixLastSync(data.lastSyncTime || "");
       } else {
         setGamePixError("Failed to fetch GamePix configuration from server.");
       }
@@ -1335,6 +1384,39 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       setGamePixError("Network error fetching GamePix configuration: " + err.message);
     } finally {
       setGamePixLoading(false);
+    }
+  };
+
+  const syncGamePix = async () => {
+    setGamePixSyncStatus("syncing");
+    setGamePixSyncResult(null);
+    setGamePixError("");
+    setGamePixSuccessMessage("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gamepix/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setGamePixSyncStatus("success");
+        setGamePixSyncResult({
+          imported: data.imported,
+          updated: data.updated,
+          failed: data.failed
+        });
+        setGamePixTotalImported(data.totalImportedGames);
+        setGamePixLastSync(data.lastSyncTime);
+        setGamePixSuccessMessage("🎮 GamePix catalog fetched and updated successfully!");
+        fetchCatalogGames();
+      } else {
+        setGamePixSyncStatus("error");
+        setGamePixError(data.error || "Failed to synchronize games catalog.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setGamePixSyncStatus("error");
+      setGamePixError("Network error synchronizing games catalog: " + err.message);
     }
   };
 
@@ -1378,15 +1460,197 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setGamePixTestSuccess("✅ RSS Feed Verified Successfully. Connection Established.");
+        setGamePixTestSuccess("✅ RSS Feed Connected Successfully");
       } else {
-        setGamePixTestError(data.error || "❌ Unable to connect. Please check RSS Feed URL.");
+        setGamePixTestError("❌ Unable to connect.");
       }
     } catch (err: any) {
       console.error(err);
-      setGamePixTestError("❌ Unable to connect. Please check RSS Feed URL.");
+      setGamePixTestError("❌ Unable to connect.");
     } finally {
       setGamePixTesting(false);
+    }
+  };
+
+  const fetchCatalogGames = async () => {
+    setCatalogLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gamepix/catalog`);
+      if (res.ok) {
+        const data = await res.json();
+        setCatalogGames(data.games || []);
+      }
+    } catch (err) {
+      console.error("Error fetching catalog:", err);
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  const addToRoyShare = async (gameId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gamepix/add-to-royshare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        // Refresh catalog to update isAdded status immediately
+        fetchCatalogGames();
+        fetchPublishedGames();
+      } else {
+        alert(data.error || "Failed to add game to RoyShare.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("Error publishing game: " + err.message);
+    }
+  };
+
+  const fetchPublishedGames = async () => {
+    setPublishedGamesLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/games`);
+      if (res.ok) {
+        const data = await res.json();
+        setPublishedGames(data.games || []);
+      }
+    } catch (err) {
+      console.error("Error fetching published games:", err);
+    } finally {
+      setPublishedGamesLoading(false);
+    }
+  };
+
+  const saveCustomGame = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customGameTitle || !customGameUrl) {
+      setCustomGameError("Title and Play URL are required.");
+      return;
+    }
+    setCustomGameSaving(true);
+    setCustomGameError("");
+    setCustomGameSuccess("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/games/custom`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: customGameTitle,
+          description: customGameDescription,
+          category: customGameCategory,
+          bannerUrl: customGameBannerUrl,
+          thumbnailUrl: customGameThumbnailUrl,
+          url: customGameUrl,
+          orientation: customGameOrientation,
+          width: customGameWidth,
+          height: customGameHeight,
+          featured: customGameFeatured,
+          enabled: customGameEnabled
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCustomGameSuccess("✅ Custom game created and published successfully!");
+        // Reset manual form
+        setCustomGameTitle("");
+        setCustomGameDescription("");
+        setCustomGameCategory("Casual");
+        setCustomGameBannerUrl("");
+        setCustomGameThumbnailUrl("");
+        setCustomGameUrl("");
+        setCustomGameOrientation("landscape");
+        setCustomGameWidth("");
+        setCustomGameHeight("");
+        setCustomGameFeatured(false);
+        setCustomGameEnabled(true);
+        fetchPublishedGames();
+        fetchCatalogGames();
+      } else {
+        setCustomGameError(data.error || "Failed to add custom game.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setCustomGameError("Network error: " + err.message);
+    } finally {
+      setCustomGameSaving(false);
+    }
+  };
+
+  const updatePublishedGameStatus = async (gameId: string, updates: any) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/games/${gameId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        fetchPublishedGames();
+        fetchCatalogGames();
+      } else {
+        alert(data.error || "Failed to update game status.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("Error updating game status: " + err.message);
+    }
+  };
+
+  const saveEditedGame = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGame || !editingGame.title || !editingGame.url) {
+      setEditGameError("Title and Play URL are required.");
+      return;
+    }
+    setEditGameSaving(true);
+    setEditGameError("");
+    setEditGameSuccess("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/games/${editingGame.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingGame)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEditGameSuccess("✅ Game updated successfully!");
+        setTimeout(() => {
+          setEditingGame(null);
+          setEditGameSuccess("");
+        }, 1200);
+        fetchPublishedGames();
+        fetchCatalogGames();
+      } else {
+        setEditGameError(data.error || "Failed to update game details.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setEditGameError("Network error: " + err.message);
+    } finally {
+      setEditGameSaving(false);
+    }
+  };
+
+  const deleteGame = async (gameId: string) => {
+    if (!confirm("Are you sure you want to delete this game? This will remove it from the RoyShare Mini App Game Center.")) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/games/${gameId}`, {
+        method: "DELETE"
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        fetchPublishedGames();
+        fetchCatalogGames();
+      } else {
+        alert(data.error || "Failed to delete game.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("Error deleting game: " + err.message);
     }
   };
 
@@ -2024,6 +2288,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchAdsTxt();
     } else if (activeTab === "🎮 GamePix Integration") {
       fetchGamePixConfig();
+    } else if (activeTab === "🎮 Game Catalog") {
+      fetchCatalogGames();
+    } else if (activeTab === "✏️ Manage Games") {
+      fetchPublishedGames();
     }
 
     return () => {
@@ -2867,6 +3135,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "⚙️ System Settings",
               "📄 Ads.txt Manager",
               "🎮 GamePix Integration",
+              "🎮 Game Catalog",
+              "➕ Add Custom Game",
+              "✏️ Manage Games",
             ].map((btn) => (
               <button
                 key={btn}
@@ -8909,6 +9180,20 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 </div>
               ) : (
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl">
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col justify-between">
+                      <span className="text-xs font-semibold text-slate-400">Total Games in Catalog</span>
+                      <span className="text-2xl font-black text-white mt-1">{gamePixTotalImported}</span>
+                    </div>
+                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col justify-between">
+                      <span className="text-xs font-semibold text-slate-400">Last Synced (Downloaded Feed)</span>
+                      <span className="text-sm font-semibold text-slate-200 mt-2">
+                        {gamePixLastSync ? new Date(gamePixLastSync).toLocaleString() : "Never Synced"}
+                      </span>
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
                     <label className="text-sm font-semibold text-slate-200">
                       RSS Feed URL
@@ -8959,11 +9244,30 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     </div>
                   )}
 
+                  {gamePixSyncStatus === "syncing" && (
+                    <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-300 text-sm flex items-center gap-2">
+                      <RefreshCw className="w-5 h-5 animate-spin flex-shrink-0" />
+                      <span>Fetching latest games into local catalog...</span>
+                    </div>
+                  )}
+
+                  {gamePixSyncStatus === "success" && gamePixSyncResult && (
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm flex flex-col gap-1">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                        <span>Fetch Completed Successfully</span>
+                      </div>
+                      <p className="text-xs opacity-90">
+                        Downloaded feed. Loaded {gamePixSyncResult.imported} new games into <strong>gamepix_catalog</strong>, Updated {gamePixSyncResult.updated} games, Failed {gamePixSyncResult.failed}
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap gap-3 pt-2">
                     <button
                       onClick={saveGamePixConfig}
-                      disabled={gamePixSaving || gamePixTesting}
-                      className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-sm active:scale-95 disabled:opacity-50"
+                      disabled={gamePixSaving || gamePixTesting || gamePixSyncStatus === "syncing"}
+                      className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-sm active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
                       {gamePixSaving ? (
                         <>
@@ -8978,8 +9282,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
                     <button
                       onClick={testGamePixConnection}
-                      disabled={gamePixSaving || gamePixTesting}
-                      className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-900/20 text-sm active:scale-95 disabled:opacity-50"
+                      disabled={gamePixSaving || gamePixTesting || gamePixSyncStatus === "syncing"}
+                      className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-900/20 text-sm active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
                       {gamePixTesting ? (
                         <>
@@ -8991,11 +9295,950 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                         </>
                       )}
                     </button>
+
+                    <button
+                      onClick={syncGamePix}
+                      disabled={gamePixSaving || gamePixTesting || gamePixSyncStatus === "syncing"}
+                      className="flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-purple-900/20 text-sm active:scale-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      {gamePixSyncStatus === "syncing" ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" /> Fetching...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4" /> Fetch Games
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
               )}
             </div>
           )}
+
+          {activeTab === "🎮 Game Catalog" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    🎮 Game Catalog
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Select premium games from GamePix catalog to publish directly inside the RoyShare Mini App.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300">
+                  <Gamepad2 className="w-4 h-4 text-purple-400" />
+                  <span>Catalog size: <strong>{catalogGames.length}</strong></span>
+                </div>
+              </div>
+
+              {/* Search and Filters Bar */}
+              <div className="flex flex-col md:flex-row gap-4 justify-between bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+                <div className="relative flex-1">
+                  <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={catalogSearch}
+                    onChange={(e) => setCatalogSearch(e.target.value)}
+                    placeholder="Search games by title, description or category..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-slate-500"
+                  />
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+                  <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider mr-1">Filter:</span>
+                  {[
+                    { label: "All", value: "All" },
+                    { label: "Added", value: "Added" },
+                    { label: "Not Added", value: "Not Added" },
+                    { label: "Featured", value: "Featured" },
+                    { label: "Disabled", value: "Disabled" }
+                  ].map((f) => {
+                    const count = catalogGames.filter(g => {
+                      if (f.value === "All") return true;
+                      if (f.value === "Added") return g.isAdded;
+                      if (f.value === "Not Added") return !g.isAdded;
+                      if (f.value === "Featured") return g.featured;
+                      if (f.value === "Disabled") return g.isAdded && g.enabled === false;
+                      return true;
+                    }).length;
+
+                    return (
+                      <button
+                        key={f.value}
+                        onClick={() => setCatalogFilter(f.value)}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${catalogFilter === f.value ? "bg-purple-600 text-white shadow-md shadow-purple-900/30" : "bg-slate-950 text-slate-400 border border-slate-800 hover:bg-slate-800 hover:text-slate-200"}`}
+                      >
+                        {f.label} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {catalogLoading ? (
+                <div className="flex justify-center py-20">
+                  <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <>
+                  {/* Games Cards Grid */}
+                  {(() => {
+                    const filtered = catalogGames.filter((g) => {
+                      // Apply search
+                      const matchesSearch =
+                        g.title?.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+                        g.category?.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+                        g.description?.toLowerCase().includes(catalogSearch.toLowerCase());
+
+                      if (!matchesSearch) return false;
+
+                      // Apply filter
+                      if (catalogFilter === "Added") return g.isAdded;
+                      if (catalogFilter === "Not Added") return !g.isAdded;
+                      if (catalogFilter === "Featured") return g.featured;
+                      if (catalogFilter === "Disabled") return g.isAdded && g.enabled === false;
+
+                      return true;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
+                          <Gamepad2 className="w-16 h-16 text-slate-600 mx-auto animate-pulse" />
+                          <h3 className="text-lg font-bold text-slate-300">No games match your criteria</h3>
+                          <p className="text-sm text-slate-500 max-w-md mx-auto">
+                            Try adjusting your filters or search term, or click "Fetch Games" in the Integration tab to sync the latest feed.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filtered.map((game) => (
+                          <div
+                            key={game.id}
+                            className="bg-slate-900 border border-slate-800/80 hover:border-slate-700 rounded-2xl overflow-hidden flex flex-col justify-between shadow-lg transition-all hover:-translate-y-1"
+                          >
+                            <div className="relative">
+                              <img
+                                src={game.bannerUrl}
+                                alt={game.title}
+                                className="w-full aspect-[16/9] object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute top-3 right-3 flex gap-1">
+                                <span className="bg-slate-950/80 backdrop-blur-sm border border-slate-800 text-[10px] font-bold text-slate-300 px-2 py-1 rounded-md uppercase">
+                                  {game.orientation}
+                                </span>
+                                <span className="bg-purple-950/80 backdrop-blur-sm border border-purple-800 text-[10px] font-bold text-purple-300 px-2 py-1 rounded-md">
+                                  {game.category}
+                                </span>
+                              </div>
+                              
+                              {/* Thumbnail overlapping */}
+                              <div className="absolute left-4 -bottom-6">
+                                <img
+                                  src={game.thumbnailUrl}
+                                  alt=""
+                                  className="w-12 h-12 object-cover rounded-xl border-2 border-slate-900 shadow-md"
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
+
+                              <div className="absolute right-4 -bottom-5 bg-slate-950/90 backdrop-blur-sm border border-slate-800 px-2 py-0.5 rounded-lg text-[10px] font-extrabold text-amber-400 flex items-center gap-1 shadow-md">
+                                ⭐️ {game.quality || "5.0"}
+                              </div>
+                            </div>
+
+                            <div className="pt-8 px-5 pb-5 flex-1 flex flex-col justify-between space-y-4">
+                              <div className="space-y-1.5">
+                                <h3 className="font-extrabold text-white text-base line-clamp-1">{game.title}</h3>
+                                <p className="text-xs text-slate-400 line-clamp-2 h-8 leading-relaxed">
+                                  {game.description || "Premium HTML5 Arcade game."}
+                                </p>
+                              </div>
+
+                              {/* Footer Status Indicators */}
+                              {game.isAdded && (
+                                <div className="flex gap-2 flex-wrap pb-1">
+                                  {game.featured && (
+                                    <span className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-black uppercase px-2 py-0.5 rounded-md">
+                                      ⭐️ Featured
+                                    </span>
+                                  )}
+                                  {game.enabled === false ? (
+                                    <span className="bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase px-2 py-0.5 rounded-md">
+                                      ⛔ Disabled
+                                    </span>
+                                  ) : (
+                                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black uppercase px-2 py-0.5 rounded-md">
+                                      ✅ Active
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-2 gap-2 pt-2">
+                                <button
+                                  onClick={() => setPreviewGame(game)}
+                                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-950 hover:bg-slate-800 text-slate-200 text-xs font-bold rounded-xl border border-slate-800 transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" /> Preview
+                                </button>
+
+                                {game.isAdded ? (
+                                  <button
+                                    disabled
+                                    className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-950 text-emerald-400 text-xs font-bold rounded-xl border border-emerald-950/60 disabled:opacity-90"
+                                  >
+                                    <Check className="w-3.5 h-3.5" /> Added
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => addToRoyShare(game.id)}
+                                    className="flex items-center justify-center gap-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-900/20 transition-all cursor-pointer"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" /> Add to RoyShare
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          )}
+
+          {activeTab === "➕ Add Custom Game" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    ➕ Add Custom Game
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Upload or manually configure proprietary, premium, or third-party web games directly into the games collection.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Manual form */}
+                <form
+                  onSubmit={saveCustomGame}
+                  className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl"
+                >
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Game Details</h3>
+
+                  {customGameError && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      <span>{customGameError}</span>
+                    </div>
+                  )}
+
+                  {customGameSuccess && (
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                      <span>{customGameSuccess}</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-300">Game Name <span className="text-purple-400">*</span></label>
+                      <input
+                        type="text"
+                        required
+                        value={customGameTitle}
+                        onChange={(e) => setCustomGameTitle(e.target.value)}
+                        placeholder="e.g. Space Odyssey"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-300">Category / Genre <span className="text-purple-400">*</span></label>
+                      <select
+                        value={customGameCategory}
+                        onChange={(e) => setCustomGameCategory(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                      >
+                        {["Casual", "Action", "Sports", "Puzzle", "Racing", "Adventure", "Strategy", "Arcade", "Simulation"].map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-300">Play URL / Frame Source <span className="text-purple-400">*</span></label>
+                    <input
+                      type="url"
+                      required
+                      value={customGameUrl}
+                      onChange={(e) => setCustomGameUrl(e.target.value)}
+                      placeholder="e.g. https://play.gamepix.com/classic-bowling"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm font-mono text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-300">Game Description</label>
+                    <textarea
+                      rows={3}
+                      value={customGameDescription}
+                      onChange={(e) => setCustomGameDescription(e.target.value)}
+                      placeholder="Enter a brief, engaging description of the game..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600 resize-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-300">Banner Image URL</label>
+                      <input
+                        type="url"
+                        value={customGameBannerUrl}
+                        onChange={(e) => setCustomGameBannerUrl(e.target.value)}
+                        placeholder="https://images.unsplash.com/..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-300">Thumbnail Image URL</label>
+                      <input
+                        type="url"
+                        value={customGameThumbnailUrl}
+                        onChange={(e) => setCustomGameThumbnailUrl(e.target.value)}
+                        placeholder="https://images.unsplash.com/..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-300">Orientation</label>
+                      <select
+                        value={customGameOrientation}
+                        onChange={(e) => setCustomGameOrientation(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                      >
+                        <option value="landscape">Landscape</option>
+                        <option value="portrait">Portrait</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-300">Custom Width (e.g. 800)</label>
+                      <input
+                        type="text"
+                        value={customGameWidth}
+                        onChange={(e) => setCustomGameWidth(e.target.value)}
+                        placeholder="100% (default)"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-300">Custom Height (e.g. 600)</label>
+                      <input
+                        type="text"
+                        value={customGameHeight}
+                        onChange={(e) => setCustomGameHeight(e.target.value)}
+                        placeholder="600px (default)"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-6 items-center pt-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={customGameFeatured}
+                        onChange={(e) => setCustomGameFeatured(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500"
+                      />
+                      <span className="text-xs font-bold text-slate-300">Featured Game</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={customGameEnabled}
+                        onChange={(e) => setCustomGameEnabled(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500"
+                      />
+                      <span className="text-xs font-bold text-slate-300">Publish Immediately (Enabled)</span>
+                    </label>
+                  </div>
+
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      type="submit"
+                      disabled={customGameSaving}
+                      className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg text-sm active:scale-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      {customGameSaving ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4" /> Save Game
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!customGameUrl) {
+                          alert("Please fill in a Play URL first to preview.");
+                          return;
+                        }
+                        setPreviewGame({
+                          title: customGameTitle || "Custom Game Preview",
+                          url: customGameUrl,
+                          orientation: customGameOrientation
+                        });
+                      }}
+                      className="flex items-center gap-2 px-6 py-3 bg-slate-950 hover:bg-slate-800 text-slate-300 font-bold rounded-xl border border-slate-800 transition-all text-sm cursor-pointer"
+                    >
+                      <Eye className="w-4 h-4" /> Live Preview
+                    </button>
+                  </div>
+                </form>
+
+                {/* Mockup Preview Card */}
+                <div className="lg:col-span-5 space-y-4">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Card Preview</h3>
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl p-4 space-y-4">
+                    <div className="relative rounded-xl overflow-hidden aspect-[16/9] bg-slate-950">
+                      {customGameBannerUrl ? (
+                        <img
+                          src={customGameBannerUrl}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-700 bg-slate-950">
+                          <Gamepad2 className="w-12 h-12 mb-2" />
+                          <span className="text-xs italic">Banner Image Placeholder</span>
+                        </div>
+                      )}
+                      <div className="absolute top-2 right-2 flex gap-1">
+                        <span className="bg-slate-950/80 backdrop-blur-sm text-[9px] font-black uppercase text-slate-400 px-2 py-0.5 rounded">
+                          {customGameOrientation}
+                        </span>
+                        <span className="bg-purple-950/80 backdrop-blur-sm text-[9px] font-black text-purple-400 px-2 py-0.5 rounded">
+                          {customGameCategory}
+                        </span>
+                      </div>
+                      <div className="absolute left-4 -bottom-6">
+                        <div className="w-10 h-10 rounded-lg overflow-hidden border-2 border-slate-900 bg-slate-900 flex items-center justify-center text-slate-400">
+                          {customGameThumbnailUrl ? (
+                            <img
+                              src={customGameThumbnailUrl}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <Sparkles className="w-5 h-5 text-purple-500" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-6 space-y-2">
+                      <div className="flex justify-between items-start">
+                        <h4 className="font-extrabold text-white text-base">
+                          {customGameTitle || "Your Game Title"}
+                        </h4>
+                        <span className="text-[10px] text-amber-400 font-extrabold">⭐️ 5.0</span>
+                      </div>
+                      <p className="text-xs text-slate-500 line-clamp-3">
+                        {customGameDescription || "Your game description details will appear here inside the app catalog..."}
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2 flex-wrap pt-2 border-t border-slate-800/60">
+                      {customGameFeatured && (
+                        <span className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-extrabold px-2 py-0.5 rounded">
+                          ⭐️ Featured
+                        </span>
+                      )}
+                      {customGameEnabled ? (
+                        <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-extrabold px-2 py-0.5 rounded">
+                          ✅ Enabled
+                        </span>
+                      ) : (
+                        <span className="bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-extrabold px-2 py-0.5 rounded">
+                          ⛔ Disabled
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "✏️ Manage Games" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    ✏️ Published Games Manager
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Directly supervise, edit, disable/enable, feature, and review stats of active RoyShare games.
+                  </p>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-300 flex items-center gap-2">
+                  <Gamepad2 className="w-4 h-4 text-emerald-400" />
+                  <span>Total Active Published: <strong>{publishedGames.length}</strong></span>
+                </div>
+              </div>
+
+              {/* Search published games */}
+              <div className="relative bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+                <Search className="w-5 h-5 text-slate-400 absolute left-8 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={publishedSearch}
+                  onChange={(e) => setPublishedSearch(e.target.value)}
+                  placeholder="Search published games by title or category..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-slate-500"
+                />
+              </div>
+
+              {publishedGamesLoading ? (
+                <div className="flex justify-center py-20">
+                  <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <>
+                  {(() => {
+                    const filtered = publishedGames.filter((g) => {
+                      return (
+                        g.title?.toLowerCase().includes(publishedSearch.toLowerCase()) ||
+                        g.category?.toLowerCase().includes(publishedSearch.toLowerCase())
+                      );
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
+                          <Gamepad2 className="w-16 h-16 text-slate-600 mx-auto animate-pulse" />
+                          <h3 className="text-lg font-bold text-slate-300">No published games found</h3>
+                          <p className="text-sm text-slate-500 max-w-md mx-auto">
+                            Go to <strong>🎮 Game Catalog</strong> to import fetched GamePix titles or <strong>➕ Add Custom Game</strong> to register a custom game.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filtered.map((game) => (
+                          <div
+                            key={game.id}
+                            className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between shadow-xl"
+                          >
+                            <div className="relative">
+                              <img
+                                src={game.bannerUrl}
+                                alt={game.title}
+                                className="w-full aspect-[16/9] object-cover opacity-90"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute top-3 right-3 flex gap-1.5">
+                                {game.featured && (
+                                  <span className="bg-amber-500 border border-amber-400 text-[10px] font-extrabold text-slate-950 px-2 py-0.5 rounded-lg flex items-center gap-0.5 shadow-md">
+                                    ⭐️ Featured
+                                  </span>
+                                )}
+                                <span className={`border text-[10px] font-black px-2 py-0.5 rounded-lg shadow-md ${game.enabled !== false ? "bg-emerald-500/90 border-emerald-400 text-slate-950" : "bg-red-500/90 border-red-400 text-slate-950"}`}>
+                                  {game.enabled !== false ? "Active" : "Disabled"}
+                                </span>
+                              </div>
+
+                              {/* Thumbnail overlaid */}
+                              <div className="absolute left-4 -bottom-6">
+                                <img
+                                  src={game.thumbnailUrl}
+                                  alt=""
+                                  className="w-12 h-12 object-cover rounded-xl border-2 border-slate-900 shadow-md"
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="pt-8 px-5 pb-5 flex-1 flex flex-col justify-between space-y-4">
+                              <div className="space-y-1">
+                                <div className="flex justify-between items-center">
+                                  <h3 className="font-extrabold text-white text-base line-clamp-1">{game.title}</h3>
+                                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                                    {game.category}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
+                                  {game.description || "Active HTML5 arcade game."}
+                                </p>
+                              </div>
+
+                              {/* Analytics & Coins configuration summary (FUTURE READY DATA) */}
+                              <div className="grid grid-cols-2 gap-2 p-3 bg-slate-950 border border-slate-800 rounded-xl text-[11px]">
+                                <div className="space-y-0.5">
+                                  <span className="text-slate-500 font-semibold uppercase text-[9px]">Play Count:</span>
+                                  <div className="text-slate-200 font-bold">{game.playCount || 0} plays</div>
+                                </div>
+                                <div className="space-y-0.5">
+                                  <span className="text-slate-500 font-semibold uppercase text-[9px]">Reward Rate:</span>
+                                  <div className="text-purple-400 font-bold">{game.rewardSettings?.coinsPerMin || 10} coins/m</div>
+                                </div>
+                                <div className="space-y-0.5">
+                                  <span className="text-slate-500 font-semibold uppercase text-[9px]">Clicks:</span>
+                                  <div className="text-slate-200 font-bold">{game.clicks || 0}</div>
+                                </div>
+                                <div className="space-y-0.5">
+                                  <span className="text-slate-500 font-semibold uppercase text-[9px]">Favorites:</span>
+                                  <div className="text-slate-200 font-bold">{game.favoritesCount || 0}</div>
+                                </div>
+                              </div>
+
+                              {/* Control switches row */}
+                              <div className="flex gap-2 justify-between items-center text-xs text-slate-400 py-1">
+                                <button
+                                  onClick={() => updatePublishedGameStatus(game.id, { featured: !game.featured })}
+                                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black border transition-all cursor-pointer ${game.featured ? "bg-amber-500/10 border-amber-500/20 text-amber-400" : "bg-slate-950 border-slate-800 hover:bg-slate-800 hover:text-slate-300"}`}
+                                >
+                                  ⭐️ {game.featured ? "Unfeature" : "Feature Game"}
+                                </button>
+
+                                <button
+                                  onClick={() => updatePublishedGameStatus(game.id, { enabled: game.enabled === false })}
+                                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black border transition-all cursor-pointer ${game.enabled !== false ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"}`}
+                                >
+                                  {game.enabled !== false ? "Disable" : "Enable"}
+                                </button>
+                              </div>
+
+                              {/* Row Buttons */}
+                              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/50">
+                                <button
+                                  onClick={() => setPreviewGame(game)}
+                                  className="flex items-center justify-center gap-1 px-2.5 py-2 bg-slate-950 hover:bg-slate-850 border border-slate-800 rounded-xl text-[11px] font-bold text-slate-300 transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" /> Play
+                                </button>
+                                
+                                <button
+                                  onClick={() => setEditingGame({ ...game })}
+                                  className="flex items-center justify-center gap-1 px-2.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[11px] font-bold transition-colors cursor-pointer"
+                                >
+                                  <Edit className="w-3.5 h-3.5" /> Edit
+                                </button>
+
+                                <button
+                                  onClick={() => deleteGame(game.id)}
+                                  className="flex items-center justify-center gap-1 px-2.5 py-2 bg-red-950/40 hover:bg-red-900 border border-red-900/60 text-red-200 rounded-xl text-[11px] font-bold transition-all cursor-pointer"
+                                >
+                                  <Trash className="w-3.5 h-3.5" /> Delete
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* =======================================================================
+              LIVE MODAL OVERLAYS (PREVIEW MODAL & EDIT MODAL)
+              ======================================================================= */}
+          <AnimatePresence>
+            {/* Live Play Frame Preview Modal */}
+            {previewGame && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl relative"
+                >
+                  <div className="flex justify-between items-center px-6 py-4 border-b border-slate-800 bg-slate-950">
+                    <div className="flex items-center gap-2">
+                      <Gamepad2 className="w-5 h-5 text-purple-400" />
+                      <h3 className="text-lg font-extrabold text-white">{previewGame.title}</h3>
+                      <span className="text-xs uppercase bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                        {previewGame.orientation || "landscape"}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setPreviewGame(null)}
+                      className="p-1.5 bg-slate-900 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="flex-1 bg-slate-950 p-2 flex items-center justify-center relative">
+                    <iframe
+                      src={previewGame.url}
+                      width={previewGame.width || "100%"}
+                      height={previewGame.height || "100%"}
+                      className="w-full h-full border-0 rounded-lg shadow-inner bg-slate-950"
+                      allowFullScreen
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                </motion.div>
+              </div>
+            )}
+
+            {/* Edit Published Game Details Modal */}
+            {editingGame && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto">
+                <motion.div
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 15 }}
+                  className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden w-full max-w-2xl shadow-2xl flex flex-col my-8"
+                >
+                  <div className="flex justify-between items-center px-6 py-4 border-b border-slate-800 bg-slate-950">
+                    <div className="flex items-center gap-2">
+                      <Edit className="w-5 h-5 text-blue-400" />
+                      <h3 className="text-lg font-extrabold text-white">Edit Published Game</h3>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingGame(null);
+                        setEditGameError("");
+                        setEditGameSuccess("");
+                      }}
+                      className="p-1.5 bg-slate-900 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={saveEditedGame} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                    {editGameError && (
+                      <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        <span>{editGameError}</span>
+                      </div>
+                    )}
+
+                    {editGameSuccess && (
+                      <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                        <span>{editGameSuccess}</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-400">Game Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={editingGame.title}
+                          onChange={(e) => setEditingGame({ ...editingGame, title: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-400">Category</label>
+                        <select
+                          value={editingGame.category}
+                          onChange={(e) => setEditingGame({ ...editingGame, category: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                        >
+                          {["Casual", "Action", "Sports", "Puzzle", "Racing", "Adventure", "Strategy", "Arcade", "Simulation"].map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-400">Play URL</label>
+                      <input
+                        type="url"
+                        required
+                        value={editingGame.url}
+                        onChange={(e) => setEditingGame({ ...editingGame, url: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-400">Description</label>
+                      <textarea
+                        rows={2}
+                        value={editingGame.description || ""}
+                        onChange={(e) => setEditingGame({ ...editingGame, description: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none resize-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-400">Banner URL</label>
+                        <input
+                          type="text"
+                          value={editingGame.bannerUrl}
+                          onChange={(e) => setEditingGame({ ...editingGame, bannerUrl: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-400">Thumbnail URL</label>
+                        <input
+                          type="text"
+                          value={editingGame.thumbnailUrl}
+                          onChange={(e) => setEditingGame({ ...editingGame, thumbnailUrl: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-400">Orientation</label>
+                        <select
+                          value={editingGame.orientation}
+                          onChange={(e) => setEditingGame({ ...editingGame, orientation: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                        >
+                          <option value="landscape">Landscape</option>
+                          <option value="portrait">Portrait</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-400">Width</label>
+                        <input
+                          type="text"
+                          value={editingGame.width || ""}
+                          onChange={(e) => setEditingGame({ ...editingGame, width: e.target.value })}
+                          placeholder="100%"
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-400">Height</label>
+                        <input
+                          type="text"
+                          value={editingGame.height || ""}
+                          onChange={(e) => setEditingGame({ ...editingGame, height: e.target.value })}
+                          placeholder="600px"
+                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* FUTURE READY PARAMS EDIT */}
+                    <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl space-y-3">
+                      <h4 className="text-[10px] font-black uppercase text-purple-400 tracking-wider">Future Ready Features Settings</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-400">Play Count Stat override</label>
+                          <input
+                            type="number"
+                            value={editingGame.playCount || 0}
+                            onChange={(e) => setEditingGame({ ...editingGame, playCount: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-400">Reward Coins Per Minute</label>
+                          <input
+                            type="number"
+                            value={editingGame.rewardSettings?.coinsPerMin || 10}
+                            onChange={(e) => setEditingGame({
+                              ...editingGame,
+                              rewardSettings: {
+                                ...(editingGame.rewardSettings || {}),
+                                coinsPerMin: parseInt(e.target.value) || 10
+                              }
+                            })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-4 pt-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editingGame.featured}
+                          onChange={(e) => setEditingGame({ ...editingGame, featured: e.target.checked })}
+                          className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500"
+                        />
+                        <span className="text-xs font-bold text-slate-300">Featured</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editingGame.enabled !== false}
+                          onChange={(e) => setEditingGame({ ...editingGame, enabled: e.target.checked })}
+                          className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500"
+                        />
+                        <span className="text-xs font-bold text-slate-300">Active Enabled</span>
+                      </label>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t border-slate-800/60">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingGame(null);
+                          setEditGameError("");
+                          setEditGameSuccess("");
+                        }}
+                        className="px-4 py-2 bg-slate-950 hover:bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={editGameSaving}
+                        className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                      >
+                        {editGameSaving ? "Saving..." : "Save Changes"}
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
           {activeTab === "📄 Ads.txt Manager" && (
             <div className="space-y-6">
