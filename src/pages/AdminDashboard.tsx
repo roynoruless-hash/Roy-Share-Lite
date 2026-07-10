@@ -898,14 +898,18 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
   const fetchGameRewardSettings = async () => {
     setGameRewardSettingsLoading(true);
+    setGameRewardSettingsError("");
     try {
       const res = await fetch(`${API_BASE}/api/admin/game-reward-settings`);
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.settings) {
         setGameRewardSettings(data.settings);
+      } else {
+        setGameRewardSettingsError(data.error || "Unable to load Game Reward Settings.");
       }
     } catch (err) {
       console.error("Error fetching game reward settings:", err);
+      setGameRewardSettingsError("Unable to load Game Reward Settings.");
     } finally {
       setGameRewardSettingsLoading(false);
     }
@@ -9988,13 +9992,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                           <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
                             <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Valid Rate</span>
                             <span className="text-xl font-black text-white block mt-1">
-                              {gameAnalytics.completionRate.toFixed(1)}%
+                              {Number(gameAnalytics.completionRate || 0).toFixed(1)}%
                             </span>
                           </div>
                           <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
                             <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Est. CTR</span>
                             <span className="text-xl font-black text-amber-400 block mt-1">
-                              {gameAnalytics.ctr.toFixed(1)}%
+                              {Number(gameAnalytics.ctr || 0).toFixed(1)}%
                             </span>
                           </div>
                         </div>
@@ -11915,174 +11919,183 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   </button>
                   <button
                     onClick={saveGameRewardSettings}
-                    disabled={gameRewardSettingsSaving}
+                    disabled={gameRewardSettingsSaving || gameRewardSettingsLoading}
                     className="flex items-center gap-2 px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-50"
                   >
-                    <Save className="w-4 h-4" /> 💾 Save Settings
+                    <Save className="w-4 h-4" /> {gameRewardSettingsSaving ? "Saving..." : "💾 Save Settings"}
                   </button>
                 </div>
               </div>
 
-              {gameRewardSettingsSuccess && (
-                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl flex items-center gap-3">
-                  <CheckCircle2 className="w-5 h-5" />
-                  <p className="font-bold uppercase tracking-widest text-xs">{gameRewardSettingsSuccess}</p>
+              {gameRewardSettingsLoading ? (
+                <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                  <RefreshCw className="w-12 h-12 text-blue-500 animate-spin" />
+                  <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Loading Settings...</p>
                 </div>
-              )}
-
-              {gameRewardSettingsError && (
-                <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-center gap-3">
-                  <AlertTriangle className="w-5 h-5" />
-                  <p className="font-bold text-sm">{gameRewardSettingsError}</p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Basic Configuration */}
-                <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <h3 className="text-lg font-black text-white uppercase tracking-tighter">Core Configuration</h3>
-                      <p className="text-xs text-slate-500 font-medium">Toggle rewards and basic play requirements.</p>
+              ) : (
+                <>
+                  {gameRewardSettingsSuccess && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5" />
+                      <p className="font-bold uppercase tracking-widest text-xs">{gameRewardSettingsSuccess}</p>
                     </div>
-                    <button
-                      onClick={() => setGameRewardSettings({...gameRewardSettings, enabled: !gameRewardSettings.enabled})}
-                      className={`relative w-14 h-8 rounded-full transition-all duration-300 ${gameRewardSettings.enabled ? 'bg-emerald-600' : 'bg-slate-700'}`}
-                    >
-                      <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all duration-300 ${gameRewardSettings.enabled ? 'left-7' : 'left-1'}`} />
-                    </button>
-                  </div>
+                  )}
 
-                  <div className="space-y-4 pt-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Required Play Time</label>
-                      <div className="grid grid-cols-2 gap-3">
-                        <select
-                          value={gameRewardSettings.requiredPlayTime}
-                          onChange={(e) => setGameRewardSettings({...gameRewardSettings, requiredPlayTime: Number(e.target.value)})}
-                          className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  {gameRewardSettingsError && (
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-center gap-3">
+                      <AlertTriangle className="w-5 h-5" />
+                      <p className="font-bold text-sm">{gameRewardSettingsError}</p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Basic Configuration */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <h3 className="text-lg font-black text-white uppercase tracking-tighter">Core Configuration</h3>
+                          <p className="text-xs text-slate-500 font-medium">Toggle rewards and basic play requirements.</p>
+                        </div>
+                        <button
+                          onClick={() => setGameRewardSettings({...gameRewardSettings, enabled: !gameRewardSettings.enabled})}
+                          className={`relative w-14 h-8 rounded-full transition-all duration-300 ${gameRewardSettings.enabled ? 'bg-emerald-600' : 'bg-slate-700'}`}
                         >
-                          <option value={60}>1 Minute</option>
-                          <option value={120}>2 Minutes</option>
-                          <option value={180}>3 Minutes</option>
-                          <option value={300}>5 Minutes</option>
-                          <option value={600}>10 Minutes</option>
-                          <option value={0}>Custom (Seconds)</option>
-                        </select>
-                        <input
-                          type="number"
-                          placeholder="Or enter seconds..."
-                          value={gameRewardSettings.requiredPlayTime}
-                          onChange={(e) => setGameRewardSettings({...gameRewardSettings, requiredPlayTime: Number(e.target.value)})}
-                          className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                        />
+                          <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all duration-300 ${gameRewardSettings.enabled ? 'left-7' : 'left-1'}`} />
+                        </button>
                       </div>
-                      <p className="text-[10px] text-slate-500 italic">User must play for this duration before claiming reward.</p>
-                    </div>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Reward Coins</label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          value={gameRewardSettings.rewardCoins}
-                          onChange={(e) => setGameRewardSettings({...gameRewardSettings, rewardCoins: Number(e.target.value)})}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none pl-10"
-                        />
-                        <Coins className="absolute left-3 top-3.5 w-4 h-4 text-amber-500" />
+                      <div className="space-y-4 pt-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Required Play Time</label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <select
+                              value={Number(gameRewardSettings.requiredPlayTime || 0)}
+                              onChange={(e) => setGameRewardSettings({...gameRewardSettings, requiredPlayTime: Number(e.target.value)})}
+                              className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                            >
+                              <option value={60}>1 Minute</option>
+                              <option value={120}>2 Minutes</option>
+                              <option value={180}>3 Minutes</option>
+                              <option value={300}>5 Minutes</option>
+                              <option value={600}>10 Minutes</option>
+                              <option value={0}>Custom (Seconds)</option>
+                            </select>
+                            <input
+                              type="number"
+                              placeholder="Or enter seconds..."
+                              value={Number(gameRewardSettings.requiredPlayTime || 0)}
+                              onChange={(e) => setGameRewardSettings({...gameRewardSettings, requiredPlayTime: Number(e.target.value)})}
+                              className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                          </div>
+                          <p className="text-[10px] text-slate-500 italic">User must play for this duration before claiming reward.</p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Reward Coins</label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              value={Number(gameRewardSettings.rewardCoins || 0)}
+                              onChange={(e) => setGameRewardSettings({...gameRewardSettings, rewardCoins: Number(e.target.value)})}
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none pl-10"
+                            />
+                            <Coins className="absolute left-3 top-3.5 w-4 h-4 text-amber-500" />
+                          </div>
+                          <p className="text-[10px] text-slate-500 italic">Amount of coins awarded per successful play session.</p>
+                        </div>
                       </div>
-                      <p className="text-[10px] text-slate-500 italic">Amount of coins awarded per successful play session.</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Economic Configuration */}
-                <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
-                  <div className="space-y-1">
-                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">Coin Conversion</h3>
-                    <p className="text-xs text-slate-500 font-medium">Define the monetary value of arcade coins.</p>
-                  </div>
-
-                  <div className="flex items-center gap-4 pt-4">
-                    <div className="flex-1 space-y-2">
-                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Coins</label>
-                      <input
-                        type="number"
-                        value={gameRewardSettings.conversionCoins}
-                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, conversionCoins: Number(e.target.value)})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                    </div>
-                    <div className="pt-6">
-                      <ArrowRight className="w-5 h-5 text-slate-600" />
-                    </div>
-                    <div className="flex-1 space-y-2">
-                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Amount (₹)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={gameRewardSettings.conversionInr}
-                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, conversionInr: Number(e.target.value)})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                    </div>
-                  </div>
-                  <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
-                    <p className="text-xs text-blue-400 text-center font-bold">
-                      Current Rate: {gameRewardSettings.conversionCoins} Coins = ₹{gameRewardSettings.conversionInr.toFixed(2)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Limits Configuration */}
-                <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
-                  <div className="space-y-1">
-                    <h3 className="text-lg font-black text-white uppercase tracking-tighter">Limits & Cooldowns</h3>
-                    <p className="text-xs text-slate-500 font-medium">Control the pace of earnings to prevent abuse.</p>
-                  </div>
-
-                  <div className="space-y-4 pt-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Daily Coin Limit</label>
-                      <input
-                        type="number"
-                        value={gameRewardSettings.dailyCoinLimit}
-                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, dailyCoinLimit: Number(e.target.value)})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                      <p className="text-[10px] text-slate-500 italic">Total coins a user can earn per day (0 for unlimited).</p>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Max Rewards Per Day</label>
-                      <input
-                        type="number"
-                        value={gameRewardSettings.maxDailyRewards}
-                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, maxDailyRewards: Number(e.target.value)})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                      <p className="text-[10px] text-slate-500 italic">Maximum number of sessions rewarded per user per day.</p>
+                    {/* Economic Configuration */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
+                      <div className="space-y-1">
+                        <h3 className="text-lg font-black text-white uppercase tracking-tighter">Coin Conversion</h3>
+                        <p className="text-xs text-slate-500 font-medium">Define the monetary value of arcade coins.</p>
+                      </div>
+
+                      <div className="flex items-center gap-4 pt-4">
+                        <div className="flex-1 space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Coins</label>
+                          <input
+                            type="number"
+                            value={Number(gameRewardSettings.conversionCoins || 0)}
+                            onChange={(e) => setGameRewardSettings({...gameRewardSettings, conversionCoins: Number(e.target.value)})}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                        </div>
+                        <div className="pt-6">
+                          <ArrowRight className="w-5 h-5 text-slate-600" />
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Amount (₹)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={Number(gameRewardSettings.conversionInr || 0)}
+                            onChange={(e) => setGameRewardSettings({...gameRewardSettings, conversionInr: Number(e.target.value)})}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                        <p className="text-xs text-blue-400 text-center font-bold">
+                          Current Rate: {Number(gameRewardSettings.conversionCoins || 0)} Coins = ₹{Number(gameRewardSettings.conversionInr || 0).toFixed(2)}
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Cooldown (Minutes)</label>
-                      <select
-                        value={gameRewardSettings.cooldownMinutes}
-                        onChange={(e) => setGameRewardSettings({...gameRewardSettings, cooldownMinutes: Number(e.target.value)})}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                      >
-                        <option value={0}>0 Min (Instantly)</option>
-                        <option value={2}>2 Min</option>
-                        <option value={5}>5 Min</option>
-                        <option value={10}>10 Min</option>
-                        <option value={30}>30 Min</option>
-                        <option value={60}>1 Hour</option>
-                      </select>
-                      <p className="text-[10px] text-slate-500 italic">Waiting time required between two rewarded sessions.</p>
+                    {/* Limits Configuration */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
+                      <div className="space-y-1">
+                        <h3 className="text-lg font-black text-white uppercase tracking-tighter">Limits & Cooldowns</h3>
+                        <p className="text-xs text-slate-500 font-medium">Control the pace of earnings to prevent abuse.</p>
+                      </div>
+
+                      <div className="space-y-4 pt-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Daily Coin Limit</label>
+                          <input
+                            type="number"
+                            value={Number(gameRewardSettings.dailyCoinLimit || 0)}
+                            onChange={(e) => setGameRewardSettings({...gameRewardSettings, dailyCoinLimit: Number(e.target.value)})}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                          <p className="text-[10px] text-slate-500 italic">Total coins a user can earn per day (0 for unlimited).</p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Max Rewards Per Day</label>
+                          <input
+                            type="number"
+                            value={Number(gameRewardSettings.maxDailyRewards || 0)}
+                            onChange={(e) => setGameRewardSettings({...gameRewardSettings, maxDailyRewards: Number(e.target.value)})}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                          <p className="text-[10px] text-slate-500 italic">Maximum number of sessions rewarded per user per day.</p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Cooldown (Minutes)</label>
+                          <select
+                            value={Number(gameRewardSettings.cooldownMinutes || 0)}
+                            onChange={(e) => setGameRewardSettings({...gameRewardSettings, cooldownMinutes: Number(e.target.value)})}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          >
+                            <option value={0}>0 Min (Instantly)</option>
+                            <option value={2}>2 Min</option>
+                            <option value={5}>5 Min</option>
+                            <option value={10}>10 Min</option>
+                            <option value={30}>30 Min</option>
+                            <option value={60}>1 Hour</option>
+                          </select>
+                          <p className="text-[10px] text-slate-500 italic">Waiting time required between two rewarded sessions.</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           )}
 

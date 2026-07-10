@@ -8350,12 +8350,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           conversionInr: 1,
           dailyCoinLimit: 5000,
           cooldownMinutes: 5,
-          maxDailyRewards: 50
+          maxDailyRewards: 50,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         };
+        await setDoc(docRef, defaults);
         res.json({ success: true, settings: defaults });
       }
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      console.error("Error fetching game reward settings:", e);
+      res.status(500).json({ success: false, error: "Unable to load Game Reward Settings." });
     }
   });
 
@@ -8363,10 +8367,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     try {
       const settings = req.body;
       const docRef = doc(db, "settings", "game_rewards");
-      await setDoc(docRef, { ...settings, updatedAt: new Date().toISOString() });
+      await setDoc(docRef, { ...settings, updatedAt: new Date().toISOString() }, { merge: true });
       res.json({ success: true });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      console.error("Error saving game reward settings:", e);
+      res.status(500).json({ success: false, error: e.message });
     }
   });
 
@@ -8375,19 +8380,23 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     try {
       const docRef = doc(db, "settings", "game_rewards");
       const snap = await getDoc(docRef);
-      const settings = snap.exists() ? snap.data() : {
-        enabled: true,
-        requiredPlayTime: 180,
-        rewardCoins: 100,
-        conversionCoins: 1000,
-        conversionInr: 1,
-        dailyCoinLimit: 5000,
-        cooldownMinutes: 5,
-        maxDailyRewards: 50
-      };
-      res.json({ success: true, settings });
+      if (snap.exists()) {
+        res.json({ success: true, settings: snap.data() });
+      } else {
+        const defaults = {
+          enabled: true,
+          requiredPlayTime: 180,
+          rewardCoins: 100,
+          conversionCoins: 1000,
+          conversionInr: 1,
+          dailyCoinLimit: 5000,
+          cooldownMinutes: 5,
+          maxDailyRewards: 50
+        };
+        res.json({ success: true, settings: defaults });
+      }
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ success: false, error: "Unable to load Game Reward Settings." });
     }
   });
 

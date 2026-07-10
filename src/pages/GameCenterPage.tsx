@@ -401,11 +401,15 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
                     <div className="grid grid-cols-2 gap-4 bg-black/20 p-4 rounded-2xl border border-white/5">
                       <div className="text-left">
                         <p className="text-[10px] font-bold text-slate-600 uppercase">Est. Value</p>
-                        <p className="text-lg font-black text-emerald-500">₹{((userData?.gameCoins || 0) * (globalSettings?.conversionInr / globalSettings?.conversionCoins || 0.001)).toFixed(2)}</p>
+                        <p className="text-lg font-black text-emerald-500">
+                          ₹{(Number(userData?.gameCoins || 0) * (Number(globalSettings?.conversionInr || 0) / Number(globalSettings?.conversionCoins || 1000) || 0.001)).toFixed(2)}
+                        </p>
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] font-bold text-slate-600 uppercase">Rate</p>
-                        <p className="text-lg font-black text-white">{globalSettings?.conversionCoins || 1000} = ₹{globalSettings?.conversionInr || 1}</p>
+                        <p className="text-lg font-black text-white">
+                          {Number(globalSettings?.conversionCoins || 1000)} = ₹{Number(globalSettings?.conversionInr || 1)}
+                        </p>
                       </div>
                     </div>
                     <button 
