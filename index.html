@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RoyShare - Secure File Sharing & Rewards</title>
+    <meta name="description" content="RoyShare is a premium Telegram-powered file sharing, URL shortening, and monetization platform. Securely share files and earn rewards with our smart links." />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.royshare.online/" />
+    <meta property="og:title" content="RoyShare - Secure File Sharing & Rewards" />
+    <meta property="og:description" content="Premium Telegram-powered file sharing, URL shortening, and monetization platform." />
+    <meta property="og:image" content="/og-image.png" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://www.royshare.online/" />
+    <meta property="twitter:title" content="RoyShare - Secure File Sharing & Rewards" />
+    <meta property="twitter:description" content="Premium Telegram-powered file sharing, URL shortening, and monetization platform." />
+    <meta property="twitter:image" content="/og-image.png" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+      // Proactive Telegram Initialization
+      (function() {
+        function initTg() {
+          const tg = window.Telegram?.WebApp;
+          if (tg) {
+            console.log("[INDEX] Telegram SDK Found. Calling ready/expand...");
+            tg.ready();
+            tg.expand();
+          }
+        }
+        
+        initTg();
+        window.addEventListener('load', initTg);
+        // Retry a few times
+        setTimeout(initTg, 500);
+        setTimeout(initTg, 1500);
+      })();
+    </script>
+    <!-- EZMob Site Validation Code: EZMTNDAFBDSCOTJPM5F -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

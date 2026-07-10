@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "admin": {
+      "title": "Admin",
+      "description": "Administrator user",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["email", "role", "active"]
+    },
+    "transaction": {
+      "title": "Transaction",
+      "description": "User earnings/withdrawal transaction record",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "type": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["amount", "type", "date", "time", "userId", "createdAt"]
+    },
+    "referral": {
+      "title": "Referral",
+      "description": "Referral linking and commission tracking record",
+      "type": "object",
+      "properties": {
+        "referrerId": { "type": "string" },
+        "referredUserId": { "type": "string" },
+        "referredUsername": { "type": "string" },
+        "referredFirstName": { "type": "string" },
+        "joinDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved"] },
+        "pendingCommission": { "type": "number" },
+        "approvedCommission": { "type": "number" },
+        "totalCommission": { "type": "number" }
+      },
+      "required": [
+        "referrerId",
+        "referredUserId",
+        "joinDate",
+        "status",
+        "pendingCommission",
+        "approvedCommission",
+        "totalCommission"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": "admin",
+      "description": "Admins collection"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "transaction",
+      "description": "Earnings and deduction transactions collection"
+    },
+    "/referrals/{referredUserId}": {
+      "schema": "referral",
+      "description": "Collection tracking user referrals and potential/approved commission"
+    }
+  }
+}
