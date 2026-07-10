@@ -222,6 +222,21 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [providersError, setProvidersError] = useState("");
   const [providersSuccess, setProvidersSuccess] = useState("");
 
+  // ImgBB integration state definitions
+  const [imgbbApiKey, setImgbbApiKey] = useState("");
+  const [imgbbVerified, setImgbbVerified] = useState(false);
+  const [imgbbStatus, setImgbbStatus] = useState("Not Verified");
+  const [imgbbLoading, setImgbbLoading] = useState(false);
+  const [imgbbSaving, setImgbbSaving] = useState(false);
+  const [imgbbVerifying, setImgbbVerifying] = useState(false);
+  const [imgbbSuccess, setImgbbSuccess] = useState("");
+  const [imgbbError, setImgbbError] = useState("");
+  const [imgbbTestSuccess, setImgbbTestSuccess] = useState("");
+  const [imgbbTestError, setImgbbTestError] = useState("");
+  const [imgbbTestUrl, setImgbbTestUrl] = useState("");
+  const [imgbbTestDisplayUrl, setImgbbTestDisplayUrl] = useState("");
+  const [imgbbTestingUpload, setImgbbTestingUpload] = useState(false);
+
   // GamePix integration state definitions
   const [gamePixRssUrl, setGamePixRssUrl] = useState("");
   const [gamePixLoading, setGamePixLoading] = useState(false);
@@ -307,6 +322,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [editGameError, setEditGameError] = useState("");
   const [editGameSuccess, setEditGameSuccess] = useState("");
   const [editGameSaving, setEditGameSaving] = useState(false);
+  const [editBannerUploading, setEditBannerUploading] = useState(false);
+  const [editBannerUploadProgress, setEditBannerUploadProgress] = useState(0);
+  const [editThumbnailUploading, setEditThumbnailUploading] = useState(false);
+  const [editThumbnailUploadProgress, setEditThumbnailUploadProgress] = useState(0);
 
   const fetchGoogleDriveAccounts = async () => {
     setGoogleDriveLoading(true);
@@ -1588,6 +1607,151 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setProvidersSuccess("");
   };
 
+  const fetchImgbbConfig = async () => {
+    setImgbbLoading(true);
+    setImgbbError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/imgbb/config`);
+      if (res.ok) {
+        const data = await res.json();
+        setImgbbApiKey(data.apiKey || "");
+        setImgbbVerified(!!data.verified);
+        setImgbbStatus(data.testStatus || "Not Verified");
+      } else {
+        setImgbbError("Failed to fetch ImgBB configuration.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setImgbbError("Network error loading ImgBB config: " + err.message);
+    } finally {
+      setImgbbLoading(false);
+    }
+  };
+
+  const saveImgbbApiKey = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setImgbbError("");
+    setImgbbSuccess("");
+
+    const key = imgbbApiKey.trim();
+    if (!key) {
+      setImgbbError("ImgBB API Key is required.");
+      return;
+    }
+
+    setImgbbSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/imgbb/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: key,
+          verified: imgbbVerified,
+          testStatus: imgbbStatus
+        })
+      });
+
+      if (res.ok) {
+        setImgbbSuccess("✅ ImgBB API Key Saved Successfully");
+        setTimeout(() => setImgbbSuccess(""), 5000);
+      } else {
+        const data = await res.json();
+        setImgbbError(data.error || "Failed to save API Key.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setImgbbError("Network error saving API Key: " + err.message);
+    } finally {
+      setImgbbSaving(false);
+    }
+  };
+
+  const verifyImgbbApi = async () => {
+    setImgbbError("");
+    setImgbbSuccess("");
+    const key = imgbbApiKey.trim();
+    if (!key) {
+      setImgbbError("ImgBB API Key cannot be empty to verify.");
+      return;
+    }
+
+    setImgbbVerifying(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/imgbb/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: key })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setImgbbVerified(true);
+        setImgbbStatus("Connected");
+        setImgbbSuccess("✅ API Verified Successfully");
+        setTimeout(() => setImgbbSuccess(""), 5000);
+      } else {
+        setImgbbVerified(false);
+        setImgbbStatus("Not Verified");
+        setImgbbError(data.error || "❌ Invalid API Key");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setImgbbVerified(false);
+      setImgbbStatus("Not Verified");
+      setImgbbError("❌ Unable to connect to ImgBB");
+    } finally {
+      setImgbbVerifying(false);
+    }
+  };
+
+  const handleImgbbTestUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImgbbTestError("");
+    setImgbbTestSuccess("");
+    setImgbbTestUrl("");
+    setImgbbTestDisplayUrl("");
+
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImgbbTestingUpload(true);
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64String = reader.result as string;
+        try {
+          const res = await fetch(`${API_BASE}/api/admin/imgbb/upload`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ base64: base64String })
+          });
+
+          const data = await res.json();
+          if (res.ok && data.success) {
+            setImgbbTestUrl(data.url);
+            setImgbbTestDisplayUrl(data.displayUrl || data.url);
+            setImgbbTestSuccess("✅ Upload Successful");
+          } else {
+            setImgbbTestError(data.error || "❌ Upload Failed. Please try again.");
+          }
+        } catch (err: any) {
+          console.error(err);
+          setImgbbTestError("❌ Upload Failed. Please try again.");
+        } finally {
+          setImgbbTestingUpload(false);
+        }
+      };
+      reader.onerror = () => {
+        setImgbbTestError("Error reading image file.");
+        setImgbbTestingUpload(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error(err);
+      setImgbbTestError("Failed to initiate file upload.");
+      setImgbbTestingUpload(false);
+    }
+  };
+
   const fetchGameRewardsSettings = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/game/rewards/settings`);
@@ -1928,7 +2092,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         }, 120);
 
         try {
-          const res = await fetch(`${API_BASE}/api/admin/games/upload`, {
+          const res = await fetch(`${API_BASE}/api/admin/imgbb/upload`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -2726,6 +2890,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchTelegramSettings();
       fetchSupportSettings();
       fetchBonusSettings();
+      fetchImgbbConfig();
     } else if (activeTab === "🛡 Security Center") {
       fetchSecurityData();
     } else if (activeTab === "📜 Activity Logs") {
@@ -11183,25 +11348,243 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Banner Image Upload */}
                       <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-400">Banner URL</label>
-                        <input
-                          type="text"
-                          value={editingGame.bannerUrl}
-                          onChange={(e) => setEditingGame({ ...editingGame, bannerUrl: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
-                        />
+                        <label className="text-xs font-semibold text-slate-300 flex justify-between items-center">
+                          <span>Banner Image</span>
+                          <span className="text-[10px] text-slate-500">1600 × 900 • Max 5MB</span>
+                        </label>
+
+                        {editingGame.bannerUrl ? (
+                          <div className="relative rounded-xl overflow-hidden aspect-[16/9] border border-slate-800 bg-slate-950 group">
+                            <img
+                              src={editingGame.bannerUrl}
+                              alt="Banner Preview"
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-3 transition-opacity">
+                              <label className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-lg">
+                                Replace Image
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setEditBannerUploading(true);
+                                    setEditBannerUploadProgress(0);
+                                    try {
+                                      const url = await uploadGameImage(file, setEditBannerUploadProgress);
+                                      setEditingGame({ ...editingGame, bannerUrl: url });
+                                    } catch (err: any) {
+                                      alert(err.message || "Failed to upload banner image");
+                                    } finally {
+                                      setEditBannerUploading(false);
+                                    }
+                                  }}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingGame({ ...editingGame, bannerUrl: "" });
+                                }}
+                                className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-lg"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onDrop={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const file = e.dataTransfer.files?.[0];
+                              if (!file) return;
+                              setEditBannerUploading(true);
+                              setEditBannerUploadProgress(0);
+                              try {
+                                const url = await uploadGameImage(file, setEditBannerUploadProgress);
+                                setEditingGame({ ...editingGame, bannerUrl: url });
+                              } catch (err: any) {
+                                  alert(err.message || "Failed to upload banner image");
+                              } finally {
+                                setEditBannerUploading(false);
+                              }
+                            }}
+                            className="border-2 border-dashed border-slate-800 hover:border-purple-500/60 bg-slate-950 hover:bg-purple-950/5 rounded-xl aspect-[16/9] flex flex-col items-center justify-center text-center p-4 transition-all group relative cursor-pointer overflow-hidden"
+                          >
+                            {editBannerUploading ? (
+                              <div className="w-full max-w-[200px] space-y-3">
+                                <div className="flex justify-between text-xs text-slate-300 font-bold">
+                                  <span className="flex items-center gap-1">
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-400" /> Uploading...
+                                  </span>
+                                  <span>{editBannerUploadProgress}%</span>
+                                </div>
+                                <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                                  <div
+                                    className="bg-purple-600 h-1.5 rounded-full transition-all duration-150"
+                                    style={{ width: `${editBannerUploadProgress}%` }}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                                <Upload className="w-8 h-8 text-slate-500 group-hover:text-purple-400 transition-colors mb-2" />
+                                <span className="text-xs font-bold text-slate-200 group-hover:text-white transition-colors">
+                                  📤 Upload Banner Image
+                                </span>
+                                <span className="text-[10px] text-slate-500 mt-1">
+                                  Drag & Drop or click to browse
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setEditBannerUploading(true);
+                                    setEditBannerUploadProgress(0);
+                                    try {
+                                      const url = await uploadGameImage(file, setEditBannerUploadProgress);
+                                      setEditingGame({ ...editingGame, bannerUrl: url });
+                                    } catch (err: any) {
+                                      alert(err.message || "Failed to upload banner image");
+                                    } finally {
+                                      setEditBannerUploading(false);
+                                    }
+                                  }}
+                                />
+                              </label>
+                            )}
+                          </div>
+                        )}
                       </div>
 
+                      {/* Thumbnail Image Upload */}
                       <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-400">Thumbnail URL</label>
-                        <input
-                          type="text"
-                          value={editingGame.thumbnailUrl}
-                          onChange={(e) => setEditingGame({ ...editingGame, thumbnailUrl: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
-                        />
+                        <label className="text-xs font-semibold text-slate-300 flex justify-between items-center">
+                          <span>Thumbnail Image</span>
+                          <span className="text-[10px] text-slate-500">1:1 Square • Max 5MB</span>
+                        </label>
+
+                        {editingGame.thumbnailUrl ? (
+                          <div className="relative rounded-xl overflow-hidden aspect-square border border-slate-800 bg-slate-950 w-28 group">
+                            <img
+                              src={editingGame.thumbnailUrl}
+                              alt="Thumbnail Preview"
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
+                              <label className="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded-md transition-all cursor-pointer shadow-md">
+                                Replace
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setEditThumbnailUploading(true);
+                                    setEditThumbnailUploadProgress(0);
+                                    try {
+                                      const url = await uploadGameImage(file, setEditThumbnailUploadProgress);
+                                      setEditingGame({ ...editingGame, thumbnailUrl: url });
+                                    } catch (err: any) {
+                                      alert(err.message || "Failed to upload thumbnail");
+                                    } finally {
+                                      setEditThumbnailUploading(false);
+                                    }
+                                  }}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingGame({ ...editingGame, thumbnailUrl: "" });
+                                }}
+                                className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white font-bold text-[9px] rounded-md transition-all cursor-pointer shadow-md"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onDrop={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const file = e.dataTransfer.files?.[0];
+                              if (!file) return;
+                              setEditThumbnailUploading(true);
+                              setEditThumbnailUploadProgress(0);
+                              try {
+                                const url = await uploadGameImage(file, setEditThumbnailUploadProgress);
+                                setEditingGame({ ...editingGame, thumbnailUrl: url });
+                              } catch (err: any) {
+                                alert(err.message || "Failed to upload thumbnail");
+                              } finally {
+                                setEditThumbnailUploading(false);
+                              }
+                            }}
+                            className="border-2 border-dashed border-slate-800 hover:border-purple-500/60 bg-slate-950 hover:bg-purple-950/5 rounded-xl w-28 aspect-square flex flex-col items-center justify-center text-center p-2 transition-all group relative cursor-pointer overflow-hidden"
+                          >
+                            {editThumbnailUploading ? (
+                              <div className="w-full space-y-2 px-1">
+                                <span className="text-[10px] text-slate-300 font-bold block text-center">
+                                  {editThumbnailUploadProgress}%
+                                </span>
+                                <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
+                                  <div
+                                    className="bg-purple-600 h-1 rounded-full transition-all duration-150"
+                                    style={{ width: `${editThumbnailUploadProgress}%` }}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                                <Upload className="w-6 h-6 text-slate-500 group-hover:text-purple-400 transition-colors mb-1" />
+                                <span className="text-[10px] font-bold text-slate-200 group-hover:text-white transition-colors">
+                                  Upload
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setEditThumbnailUploading(true);
+                                    setEditThumbnailUploadProgress(0);
+                                    try {
+                                      const url = await uploadGameImage(file, setEditThumbnailUploadProgress);
+                                      setEditingGame({ ...editingGame, thumbnailUrl: url });
+                                    } catch (err: any) {
+                                      alert(err.message || "Failed to upload thumbnail");
+                                    } finally {
+                                      setEditThumbnailUploading(false);
+                                    }
+                                  }}
+                                />
+                              </label>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -11671,6 +12054,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       "🎫 Support Settings",
                       "🤖 AI Settings",
                       "🔗 URL Shortener",
+                      "🖼 Image Hosting (ImgBB)",
                       "🔄 Maintenance Mode",
                     ].map((tab) => (
                       <button
@@ -13904,6 +14288,200 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                     systemSettings.urlShortener.testedAt,
                                   ).toLocaleString()}
                                 </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsTab === "🖼 Image Hosting (ImgBB)" && (
+                      <div className="space-y-6 max-w-2xl">
+                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 space-y-6">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                            <div>
+                              <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                                🖼 Image Hosting (ImgBB)
+                              </h4>
+                              <p className="text-slate-400 text-xs mt-1">
+                                Configure ImgBB image hosting to replace Firebase Storage.
+                              </p>
+                            </div>
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${imgbbVerified ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"}`}>
+                              {imgbbStatus}
+                            </span>
+                          </div>
+
+                          {imgbbSuccess && (
+                            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm font-medium">
+                              {imgbbSuccess}
+                            </div>
+                          )}
+
+                          {imgbbError && (
+                            <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-sm font-medium">
+                              {imgbbError}
+                            </div>
+                          )}
+
+                          <form onSubmit={saveImgbbApiKey} className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-slate-400 mb-2">
+                                ImgBB API Key
+                              </label>
+                              <input
+                                type="password"
+                                value={imgbbApiKey}
+                                onChange={(e) => setImgbbApiKey(e.target.value)}
+                                placeholder="Paste your ImgBB API Key"
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500"
+                              />
+                              <p className="text-xs text-slate-500 mt-1">
+                                Get your API key from your ImgBB account settings (under API tab).
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-3 pt-2">
+                              <button
+                                type="submit"
+                                disabled={imgbbSaving || imgbbLoading}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-sm animate-none"
+                              >
+                                {imgbbSaving ? (
+                                  <>
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    Saving...
+                                  </>
+                                ) : (
+                                  <>✅ Save API Key</>
+                                )}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={verifyImgbbApi}
+                                disabled={imgbbVerifying || imgbbLoading || !imgbbApiKey}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white font-medium rounded-xl transition-all shadow-lg shadow-indigo-900/20 text-sm animate-none"
+                              >
+                                {imgbbVerifying ? (
+                                  <>
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    Verifying...
+                                  </>
+                                ) : (
+                                  <>🔍 Verify API</>
+                                )}
+                              </button>
+                            </div>
+                          </form>
+
+                          {/* Connection details box */}
+                          <div className="bg-slate-900 p-4 rounded-xl border border-slate-800/80 grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                              <span className="text-slate-500 text-xs block">Status:</span>
+                              <span className={`font-semibold ${imgbbVerified ? "text-emerald-400" : "text-amber-400"}`}>
+                                {imgbbVerified ? "Connected" : "Disconnected"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 text-xs block">Provider:</span>
+                              <span className="font-semibold text-white">ImgBB</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Test Upload Card */}
+                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 space-y-6">
+                          <div>
+                            <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                              🧪 Test Image Upload
+                            </h4>
+                            <p className="text-slate-400 text-xs mt-1">
+                              Verify the image hosting is working by uploading a local asset.
+                            </p>
+                          </div>
+
+                          {imgbbTestSuccess && (
+                            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm font-medium">
+                              {imgbbTestSuccess}
+                            </div>
+                          )}
+
+                          {imgbbTestError && (
+                            <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-sm font-medium">
+                              {imgbbTestError}
+                            </div>
+                          )}
+
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-center w-full">
+                              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-700 border-dashed rounded-xl cursor-pointer bg-slate-900 hover:bg-slate-800/50 transition-colors">
+                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                  {imgbbTestingUpload ? (
+                                    <div className="flex flex-col items-center gap-2">
+                                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                      <p className="text-sm text-slate-400">Uploading to ImgBB...</p>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <span className="text-2xl mb-1">📁</span>
+                                      <p className="text-sm text-slate-300 font-medium">Click to select a test image</p>
+                                      <p className="text-xs text-slate-500 mt-1">PNG, JPG, GIF up to 10MB</p>
+                                    </>
+                                  )}
+                                </div>
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  accept="image/*"
+                                  onChange={handleImgbbTestUpload}
+                                  disabled={imgbbTestingUpload || !imgbbVerified}
+                                />
+                              </label>
+                            </div>
+
+                            {imgbbTestUrl && (
+                              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                                <div>
+                                  <span className="text-slate-500 text-xs block mb-1">Uploaded Image URL:</span>
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="text"
+                                      readOnly
+                                      value={imgbbTestUrl}
+                                      className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 font-mono focus:outline-none"
+                                    />
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(imgbbTestUrl);
+                                        alert("URL Copied!");
+                                      }}
+                                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-white rounded-lg font-medium border border-slate-700 shrink-0 transition-colors"
+                                    >
+                                      📋 Copy
+                                    </button>
+                                    <a
+                                      href={imgbbTestUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs text-white rounded-lg font-medium shrink-0 transition-colors flex items-center"
+                                    >
+                                      🔗 Open
+                                    </a>
+                                  </div>
+                                </div>
+
+                                <div className="pt-2 border-t border-slate-800/60">
+                                  <span className="text-slate-500 text-xs block mb-2">Image Preview:</span>
+                                  <div className="max-w-xs bg-slate-950 p-2 rounded-xl border border-slate-800">
+                                    <img
+                                      src={imgbbTestDisplayUrl}
+                                      alt="ImgBB Test Preview"
+                                      referrerPolicy="no-referrer"
+                                      className="w-full max-h-48 object-contain rounded-lg"
+                                    />
+                                  </div>
+                                </div>
                               </div>
                             )}
                           </div>

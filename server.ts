@@ -4129,6 +4129,146 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // ImgBB API Endpoints
+  app.get("/api/admin/imgbb/config", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "imgbb");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        return res.json({ apiKey: "", verified: false, testStatus: "Not Verified" });
+      }
+      return res.json(docSnap.data());
+    } catch (e: any) {
+      console.error("Error fetching ImgBB config:", e);
+      return res.status(500).json({ error: "Server error fetching ImgBB config" });
+    }
+  });
+
+  app.put("/api/admin/imgbb/config", async (req, res) => {
+    try {
+      const { apiKey, verified, testStatus } = req.body;
+      if (!apiKey || !apiKey.trim()) {
+        return res.status(400).json({ error: "API key is required." });
+      }
+      const docRef = doc(db, "settings", "imgbb");
+      await setDoc(docRef, {
+        apiKey: apiKey.trim(),
+        verified: verified ?? false,
+        testStatus: testStatus ?? "Not Verified",
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error updating ImgBB config:", e);
+      return res.status(500).json({ error: "Server error updating ImgBB config" });
+    }
+  });
+
+  app.post("/api/admin/imgbb/verify", async (req, res) => {
+    try {
+      const { apiKey } = req.body;
+      const keyToUse = apiKey || "";
+      if (!keyToUse.trim()) {
+        return res.status(400).json({ success: false, error: "API key is required" });
+      }
+
+      // Perform a small test upload request with 1x1 png transparent pixel
+      const testBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+      const params = new URLSearchParams();
+      params.append("image", testBase64);
+
+      const response = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(keyToUse.trim())}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: params
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.error("ImgBB verify failed:", text);
+        return res.status(400).json({ success: false, error: "Invalid API Key or unable to connect to ImgBB." });
+      }
+
+      const resData = await response.json();
+      if (resData && resData.success) {
+        // Save verified status in DB
+        const docRef = doc(db, "settings", "imgbb");
+        await setDoc(docRef, {
+          apiKey: keyToUse.trim(),
+          verified: true,
+          testStatus: "Connected",
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        return res.json({
+          success: true,
+          message: "API Verified Successfully",
+          status: "Connected",
+          provider: "ImgBB"
+        });
+      } else {
+        return res.status(400).json({ success: false, error: "Invalid API Key" });
+      }
+    } catch (e: any) {
+      console.error("ImgBB verification error:", e);
+      return res.status(500).json({ success: false, error: "Unable to connect to ImgBB: " + e.message });
+    }
+  });
+
+  app.post("/api/admin/imgbb/upload", express.json({ limit: "15mb" }), async (req, res) => {
+    try {
+      const { base64 } = req.body;
+      if (!base64) {
+        return res.status(400).json({ success: false, error: "No image file provided." });
+      }
+
+      // Retrieve stored key
+      const docRef = doc(db, "settings", "imgbb");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        return res.status(400).json({ success: false, error: "ImgBB API Key is not configured." });
+      }
+      const { apiKey } = docSnap.data();
+      if (!apiKey) {
+        return res.status(400).json({ success: false, error: "ImgBB API Key is missing or empty." });
+      }
+
+      const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
+      const params = new URLSearchParams();
+      params.append("image", cleanBase64);
+
+      const response = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: params
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.error("ImgBB upload error response:", text);
+        return res.status(400).json({ success: false, error: "Upload Failed. Please check ImgBB status or API Key." });
+      }
+
+      const resData = await response.json();
+      if (resData && resData.success && resData.data && resData.data.url) {
+        return res.json({
+          success: true,
+          url: resData.data.url,
+          displayUrl: resData.data.display_url || resData.data.url
+        });
+      } else {
+        return res.status(400).json({ success: false, error: "Upload Failed. Response format invalid." });
+      }
+    } catch (e: any) {
+      console.error("ImgBB proxy upload error:", e);
+      return res.status(500).json({ success: false, error: "Upload Failed: " + e.message });
+    }
+  });
+
   // Helper function for URL shorteners
   async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
     let endpoint = "";
