@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
-  Users, Award, Gift, Clock, ShieldCheck, CheckCircle2, 
+  Users, Award, Gift, ShieldCheck, CheckCircle2, 
   HelpCircle, ExternalLink, Loader2, Sparkles, MessageCircle, BookOpen, AlertCircle
 } from "lucide-react";
 import { API_BASE } from "../config/api";
@@ -18,11 +18,10 @@ interface ReferrerInfo {
 export default function ReferralLandingPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1); // 1: verifying token, 2: landing page, 3: success page
   const [inviteToken, setInviteToken] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [rewardAmount, setRewardAmount] = useState<number>(10);
   const [verifying, setVerifying] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [referrer, setReferrer] = useState<ReferrerInfo | null>(null);
-  const [startedLogin, setStartedLogin] = useState(false);
   
   const [telegramConfig, setTelegramConfig] = useState<{
     clientId: string;
@@ -36,16 +35,20 @@ export default function ReferralLandingPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const successParam = params.get("success");
+    const verifiedParam = params.get("verified");
     let token = params.get("code") || params.get("ref") || params.get("startapp") || params.get("start_param");
     
     if (!token) {
-      const pathMatch = window.location.pathname.match(/^\/ref\/([a-zA-Z0-9_-]+)/);
+      const pathMatch = window.location.pathname.match(/^\/ref\/([a-zA-Z0-9_-]+)/) ||
+                          window.location.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)/);
       if (pathMatch) {
         token = pathMatch[1];
       }
     }
 
-    if (successParam === "true") {
+    const isSuccessState = window.location.pathname === "/referral-success" || successParam === "true" || verifiedParam === "1";
+
+    if (isSuccessState) {
       setStep(3);
       setVerifying(false);
       if (token) {
@@ -56,6 +59,9 @@ export default function ReferralLandingPage() {
           .then(data => {
             if (data.success) {
               setReferrer(data.referrer);
+              if (data.rewardAmount) {
+                setRewardAmount(data.rewardAmount);
+              }
             }
           })
           .catch(err => console.error("Error loading referrer quietly:", err));
@@ -68,7 +74,7 @@ export default function ReferralLandingPage() {
       verifyReferralToken(token);
     } else {
       setVerifying(false);
-      setStep(2); // continue to landing page even without a referrer (direct login)
+      setStep(2); // continue to landing page even without a referrer
     }
 
     // Fetch Telegram public config
@@ -90,42 +96,6 @@ export default function ReferralLandingPage() {
       });
   }, []);
 
-  // Dynamically load the Telegram Login widget once the page/step is ready AND user explicitly started login
-  useEffect(() => {
-    if (step === 2 && telegramConfig && telegramConfig.botUsername && startedLogin) {
-      console.log("Telegram Config:", telegramConfig);
-      
-      const botUser = telegramConfig.botUsername;
-      console.log("Telegram Login Username:", botUser);
-
-      // Clean up any old script first
-      const container = document.getElementById("telegram-login-container");
-      if (container) {
-        container.innerHTML = "";
-        
-        // Define the global callback
-        (window as any).onTelegramAuth = (user: any) => {
-          console.log("[TelegramAuth] Callback received user:", user);
-          handleTelegramWidgetLogin(user);
-        };
-
-        const script = document.createElement("script");
-        script.src = "https://telegram.org/js/telegram-widget.js?22";
-        script.async = true;
-        script.setAttribute("data-telegram-login", botUser);
-        script.setAttribute("data-size", "large");
-        script.setAttribute("data-radius", "16");
-        
-        // Use the modern callback-based mode (data-onauth) which avoids full-page redirects
-        // and works perfectly in all modern browsers (avoiding oauth.telegram.org redirect deprecations)
-        script.setAttribute("data-onauth", "onTelegramAuth(user)");
-        script.setAttribute("data-request-access", "write");
-        
-        container.appendChild(script);
-      }
-    }
-  }, [step, telegramConfig, startedLogin]);
-
   const verifyReferralToken = async (tokenToVerify: string) => {
     if (!tokenToVerify.trim()) return;
     setVerifying(true);
@@ -135,6 +105,9 @@ export default function ReferralLandingPage() {
       const data = await res.json();
       if (res.ok && data.success) {
         setReferrer(data.referrer);
+        if (data.rewardAmount) {
+          setRewardAmount(data.rewardAmount);
+        }
         setStep(2); // move to beautiful landing page
       } else {
         setReferrer(null);
@@ -150,62 +123,28 @@ export default function ReferralLandingPage() {
     }
   };
 
-  const handleTelegramWidgetLogin = async (tgUser: any) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/telegram-login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user: tgUser,
-          token: inviteToken
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        // Success! Go to Success Page (Step 3)
-        setStep(3);
-      } else {
-        setError(data.error || "Telegram Login verification failed. Please try again.");
-      }
-    } catch (err) {
-      console.error("Telegram Login Error:", err);
-      setError("A server connection error occurred. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+  const handleOpenTelegram = () => {
+    const botUser = telegramConfig?.botUsername || "Roysharearn_bot";
+    const codeParam = inviteToken || "none";
+    const deepLink = `https://t.me/${botUser}?start=${codeParam}`;
+    window.location.href = deepLink;
   };
 
-  // Quick fallback/mock login for test environments (e.g. preview) so it can be fully tested without a live domain
   const handleSimulatedTestLogin = () => {
-    const testUser = {
-      id: 99128374,
-      first_name: "John",
-      last_name: "Doe",
-      username: "john_doe_test",
-      photo_url: "https://avatar.iran.liara.run/public/boy",
-      auth_date: Math.floor(Date.now() / 1000),
-      hash: "simulated_hash"
-    };
-    handleTelegramWidgetLogin(testUser);
+    // Navigate straight to step 3 (success) for development preview testing
+    setStep(3);
   };
 
   const getBotDeepLink = () => {
+    const botUser = telegramConfig?.botUsername || "Roysharearn_bot";
     const codeParam = inviteToken || "none";
-    if (!telegramConfig) {
-      return `https://t.me/Roysharearn_bot?start=${codeParam}`;
-    }
-    if (telegramConfig.miniAppShortName) {
-      return `https://t.me/${telegramConfig.botUsername}/${telegramConfig.miniAppShortName}?startapp=${codeParam}`;
-    }
-    return `https://t.me/${telegramConfig.botUsername}?start=${codeParam}`;
+    return `https://t.me/${botUser}?start=${codeParam}`;
   };
 
   if (verifying) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-slate-100 p-4">
-        <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4 animate-duration-500"></div>
         <p className="text-slate-400 font-medium tracking-wide animate-pulse">Securing connection & verifying invitation...</p>
       </div>
     );
@@ -228,7 +167,7 @@ export default function ReferralLandingPage() {
           </span>
         </div>
         <div className="bg-slate-900 border border-slate-800 px-3 py-1 rounded-full text-[10px] font-mono text-indigo-400">
-          V4.2.0 • Secure
+          V5.0.0 • Secure
         </div>
       </div>
 
@@ -249,7 +188,7 @@ export default function ReferralLandingPage() {
                 <div className="relative inline-block">
                   <div className="w-20 h-20 rounded-full border-2 border-indigo-500/40 p-1 mx-auto bg-slate-900 overflow-hidden shadow-lg shadow-indigo-500/10 flex items-center justify-center">
                     {referrer.avatar ? (
-                      <img src={referrer.avatar} alt={referrer.name} className="w-full h-full object-cover rounded-full" />
+                      <img src={referrer.avatar} alt={referrer.name} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
                     ) : (
                       <div className="w-full h-full rounded-full bg-indigo-950 flex items-center justify-center text-indigo-400 font-bold text-2xl">
                         {referrer.name[0]}
@@ -306,7 +245,7 @@ export default function ReferralLandingPage() {
                 <div className="flex gap-2 items-start bg-slate-900/30 p-2.5 rounded-xl border border-slate-800/40">
                   <span className="text-indigo-400 font-bold mt-0.5">💰</span>
                   <div>
-                    <span className="font-bold text-white block">₹10 Welcome Reward</span>
+                    <span className="font-bold text-white block">₹{rewardAmount} Welcome Reward</span>
                     Instant balance after first login.
                   </div>
                 </div>
@@ -329,76 +268,41 @@ export default function ReferralLandingPage() {
               <div className="space-y-2.5 text-xs text-slate-400">
                 <div className="flex gap-3">
                   <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center shrink-0">1</span>
-                  <p>Log in with your official Telegram account securely below.</p>
+                  <p>Click the button below to launch our verified Telegram bot.</p>
                 </div>
                 <div className="flex gap-3">
                   <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center shrink-0">2</span>
-                  <p>Open our Telegram Bot to verify community membership.</p>
+                  <p>Claim your invitation reward instantly through deep-link verification.</p>
                 </div>
                 <div className="flex gap-3">
                   <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center shrink-0">3</span>
-                  <p>Open the Mini App to instantly claim rewards & start earning!</p>
+                  <p>Open the Mini App to instantly manage your earnings!</p>
                 </div>
               </div>
             </div>
 
-            {/* Telegram Login Button Wrapper */}
+            {/* Referral Deep Link Action Button */}
             <div className="space-y-4 pt-2">
-              {!telegramConfig ? (
-                <div className="flex justify-center py-4">
-                  <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
-                </div>
-              ) : !telegramConfig.botUsername || telegramConfig.botUsername.trim() === "" ? (
-                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 px-4 py-3.5 rounded-2xl flex items-start gap-3 text-sm">
-                  <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                  <span>
-                    <strong>Configuration Error:</strong> The Telegram Bot Username is not configured in settings. Please contact the administrator to complete setup.
-                  </span>
-                </div>
-              ) : !startedLogin ? (
-                <button
-                  type="button"
-                  onClick={() => setStartedLogin(true)}
-                  className="w-full bg-[#229ED9] hover:bg-[#1d8db2] text-white font-black py-4 px-6 rounded-2xl shadow-lg shadow-indigo-950/20 flex items-center justify-center gap-2 text-sm transition-all tracking-wide cursor-pointer"
-                  id="btn-continue-telegram"
-                >
-                  <MessageCircle className="w-5 h-5 fill-white text-[#229ED9]" />
-                  Continue with Telegram
-                </button>
-              ) : (
-                <div className="text-center space-y-3 p-4 bg-slate-900/40 border border-slate-800/80 rounded-2xl animate-fade-in">
-                  <p className="text-xs font-bold text-indigo-400">
-                    🔒 Secure Telegram Auth Ready
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    Please click the official button below to verify your Telegram account:
-                  </p>
-                  <div className="flex justify-center py-2">
-                    <div id="telegram-login-container" className="inline-block" />
-                  </div>
-                  <p className="text-[10px] text-slate-500 leading-relaxed">
-                    Secured by Telegram OpenID Connect. Your credentials are encrypted server-side.
-                  </p>
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={handleOpenTelegram}
+                className="w-full bg-[#229ED9] hover:bg-[#1d8db2] text-white font-black py-4 px-6 rounded-2xl shadow-lg shadow-indigo-950/20 flex items-center justify-center gap-2 text-sm transition-all tracking-wide cursor-pointer active:scale-[0.98]"
+                id="btn-open-telegram-referral"
+              >
+                <MessageCircle className="w-5 h-5 fill-white text-[#229ED9]" />
+                🚀 Open Telegram & Claim Reward
+              </button>
 
               {/* simulated/fallback button for dev preview environment */}
               {(process.env.NODE_ENV !== "production" || (typeof window !== "undefined" && !window.location.hostname.includes("royshare.online"))) && (
                 <button
                   type="button"
                   onClick={handleSimulatedTestLogin}
-                  disabled={loading}
                   className="w-full bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded-2xl py-3 px-4 font-bold text-xs flex items-center justify-center gap-2 transition-all mt-4"
                   id="btn-simulated-login"
                 >
-                  {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                  ) : (
-                    <>
-                      <span>🔧 Dev Sandbox Fallback: Login Instantly</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </>
-                  )}
+                  <span>🔧 Dev Sandbox Fallback: Bypass to Success Page</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
@@ -418,12 +322,12 @@ export default function ReferralLandingPage() {
             </div>
 
             <div className="space-y-2">
-              <h1 className="text-2xl font-black text-white">Authorization Successful</h1>
+              <h1 className="text-2xl font-black text-white">Referral Verified Successfully</h1>
               <p className="text-emerald-400 text-sm font-semibold tracking-wide">
-                ✅ Telegram Connected • ✅ Referral Verified
+                ✅ Connected • ✅ Reward Claimed
               </p>
               <p className="text-slate-400 text-xs px-2 leading-relaxed mt-2">
-                Your secure referral link has been recorded. To activate your welcome bonus and finish your registration, click the button below to launch our bot.
+                Your secure referral link has been recorded and the welcome bonus of ₹{rewardAmount} has been added to your account balance! Click below to start earning or check your bot settings.
               </p>
             </div>
 

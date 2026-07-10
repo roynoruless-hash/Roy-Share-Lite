@@ -922,6 +922,185 @@ Welcome to Roy Share Earn ❤️`;
     });
 }
 
+async function handleDeepLinkReferral(db: any, botToken: string, chatId: number, user: any, rawCode: string) {
+    const referredUserId = String(user.id);
+    
+    // 1. Verify inviteToken from Firestore
+    const referrer = await findReferrerByCode(db, rawCode);
+    if (!referrer) {
+        await sendTelegramMessage(botToken, chatId, "❌ Invalid or expired referral code. You can still register directly!");
+        return;
+    }
+    
+    const referrerId = referrer.id;
+    const referrerData = referrer.data;
+    
+    // 2. Prevent self-referrals
+    if (referredUserId === referrerId) {
+        await sendTelegramMessage(botToken, chatId, "❌ You cannot refer yourself!");
+        return;
+    }
+    
+    // 3. Prevent duplicate claims
+    const claimDocRef = doc(db, "referral_claims", referredUserId);
+    const claimSnap = await getDoc(claimDocRef);
+    if (claimSnap.exists()) {
+        await sendTelegramMessage(botToken, chatId, "⚠️ You have already claimed your referral reward!", {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "✅ Return to RoyShare", url: `https://www.royshare.online/referral-success?code=${rawCode}&success=true` }],
+                    [{ text: "📱 Open Mini App", web_app: { url: "https://www.royshare.online/" } }]
+                ]
+            }
+        });
+        return;
+    }
+    
+    // Also check if user document already exists and is already completed
+    const userDocRef = doc(db, "users", referredUserId);
+    const userSnap = await getDoc(userDocRef);
+    if (userSnap.exists() && userSnap.data()?.registrationStep === 'completed' && userSnap.data()?.referredBy) {
+        await sendTelegramMessage(botToken, chatId, "⚠️ You have already completed your registration via a referral link!", {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "✅ Return to RoyShare", url: `https://www.royshare.online/referral-success?code=${rawCode}&success=true` }],
+                    [{ text: "📱 Open Mini App", web_app: { url: "https://www.royshare.online/" } }]
+                ]
+            }
+        });
+        return;
+    }
+    
+    // 4. Save: telegramUserId, username, inviteToken, joinedAt
+    const now = new Date().toISOString();
+    await setDoc(claimDocRef, {
+        telegramUserId: referredUserId,
+        username: user.username || "",
+        inviteToken: rawCode,
+        referrerId: referrerId,
+        joinedAt: now
+    });
+    
+    // 5. Credit rewards after successful verification
+    let rewardAmount = 10;
+    try {
+        const systemDoc = await getDoc(doc(db, "settings", "system"));
+        if (systemDoc.exists()) {
+            const rSettings = systemDoc.data()?.referralSettings;
+            if (rSettings && rSettings["Referral Reward"]) {
+                rewardAmount = parseFloat(rSettings["Referral Reward"]) || 10;
+            }
+        }
+    } catch (e) {
+        console.error("Error fetching referral reward:", e);
+    }
+    
+    // Credit referred user
+    let existingBalance = 0;
+    let existingAvailableBalance = 0;
+    let existingTotalEarnings = 0;
+    let existingRewards = 0;
+    let referralCode = `RS${referredUserId.slice(-6).toUpperCase()}`;
+    
+    if (userSnap.exists()) {
+        const uData = userSnap.data();
+        existingBalance = Number(uData.balance || 0);
+        existingAvailableBalance = Number(uData.availableBalance || 0);
+        existingTotalEarnings = Number(uData.totalEarnings || 0);
+        existingRewards = Number(uData.rewards || 0);
+        referralCode = uData.referralCode || referralCode;
+    }
+    
+    await setDoc(userDocRef, {
+        id: referredUserId,
+        telegramId: user.id,
+        username: user.username || "",
+        firstName: user.first_name || "",
+        lastName: user.last_name || "",
+        createdAt: userSnap.exists() ? (userSnap.data()?.createdAt || now) : now,
+        balance: existingBalance + rewardAmount,
+        availableBalance: existingAvailableBalance + rewardAmount,
+        totalEarnings: existingTotalEarnings + rewardAmount,
+        rewards: existingRewards + rewardAmount,
+        referredBy: referrerId,
+        referrerName: referrerData.enteredName || referrerData.firstName || referrerData.username || "Referrer",
+        registrationStep: 'completed',
+        membershipVerified: true,
+        contactVerified: true,
+        verified: true,
+        referralCode,
+        status: "Active",
+        lastActive: now,
+        updatedAt: now
+    }, { merge: true });
+    
+    // Create referral document to display in dashboard
+    const refDocRef = doc(db, "referrals", referredUserId);
+    await setDoc(refDocRef, {
+        referrerId: referrerId,
+        referredUserId: referredUserId,
+        referrerName: referrerData.enteredName || referrerData.firstName || referrerData.username || "Referrer",
+        referredName: user.first_name || "Referred Friend",
+        referredUsername: user.username || "",
+        referredFirstName: user.first_name || "",
+        referredLastName: user.last_name || "",
+        joinDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+        createdAt: now,
+        status: "Referral Approved", // pre-approve
+        urlClickCount: 0,
+        downloadCount: 0,
+        withdrawalStatus: "None",
+        rewardAmount: rewardAmount,
+        rewardCredited: true
+    });
+    
+    // Credit referrer too!
+    const referrerDocRef = doc(db, "users", referrerId);
+    const referrerSnap = await getDoc(referrerDocRef);
+    if (referrerSnap.exists()) {
+        const rData = referrerSnap.data();
+        const currentRefs = Number(rData.referrals || 0) + 1;
+        const currentBalance = Number(rData.availableBalance || 0) + rewardAmount;
+        const currentTotalEarnings = Number(rData.totalEarnings || 0) + rewardAmount;
+        const currentReferralEarnings = Number(rData.referralEarnings || 0) + rewardAmount;
+        
+        await setDoc(referrerDocRef, {
+            referrals: currentRefs,
+            availableBalance: currentBalance,
+            totalEarnings: currentTotalEarnings,
+            referralEarnings: currentReferralEarnings,
+            updatedAt: now
+        }, { merge: true });
+        
+        // Notify referrer
+        const referrerNotifyMsg = `🎉 *New Referral Registered via Telegram Deep Link!*
+
+👤 *Friend:* ${user.first_name || "New Friend"} (@${user.username || "None"})
+
+Welcome Reward *₹${rewardAmount}* has been added to your available balance!`;
+        await sendTelegramMessage(botToken, Number(referrerId), referrerNotifyMsg, { parse_mode: "Markdown" });
+    }
+    
+    // 7. Send confirmation message to referred user
+    const successMsg = `✅ *Referral verified successfully.*
+Reward has been added to your account.
+
+💰 Welcome Bonus: *₹${rewardAmount}*
+👤 Referrer: *${referrerData.enteredName || referrerData.firstName || referrerData.username || "Referrer"}*
+
+Click below to return to RoyShare or open the app!`;
+    
+    await sendTelegramMessage(botToken, chatId, successMsg, {
+        parse_mode: "Markdown",
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: "✅ Return to RoyShare", url: `https://www.royshare.online/referral-success?code=${rawCode}&success=true` }],
+                [{ text: "📱 Open Mini App", web_app: { url: "https://www.royshare.online/" } }]
+            ]
+        }
+    });
+}
+
 async function processStart(botToken: string, chatId: number, user: any, startText?: string) {
     try {
         console.log(`[USER LOG] START RECEIVED: ${user.id}`);
@@ -934,29 +1113,11 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
                 const rawCode = parts[1].trim();
                 if (rawCode) {
                     console.log(`[USER LOG] Start parameter detected: ${rawCode}`);
-                    const referrer = await findReferrerByCode(db, rawCode);
-                    if (referrer) {
-                        const referrerId = referrer.id;
-                        const referredUserId = String(user.id);
-                        
-                        if (referredUserId === referrerId) {
-                            console.log(`Referral Rejected: Self Referral (${referredUserId})`);
-                        } else {
-                            const userDocRef = doc(db, "users", referredUserId);
-                            const userDoc = await getDoc(userDocRef);
-                            const isExistingCompleted = userDoc.exists() && userDoc.data()?.registrationStep === 'completed';
-                            
-                            if (isExistingCompleted) {
-                                console.log(`Referral Rejected: Existing Registered User (${referredUserId})`);
-                            } else {
-                                await setDoc(userDocRef, {
-                                    pendingReferrerId: referrerId
-                                }, { merge: true });
-                                console.log(`Saved pendingReferrerId: ${referrerId} for user ${referredUserId}`);
-                            }
-                        }
-                    } else {
-                        console.log(`No referrer found for code: ${rawCode}`);
+                    
+                    // If it is NOT a download deep link, handle it as a referral link!
+                    if (!rawCode.startsWith("dl_")) {
+                        await handleDeepLinkReferral(db, botToken, chatId, user, rawCode);
+                        return;
                     }
                 }
             }

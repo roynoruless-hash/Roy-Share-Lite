@@ -2806,288 +2806,19 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
-  app.post("/api/auth/telegram-login", async (req, res) => {
-    try {
-      const { user, token } = req.body;
-      if (!user || !user.id) {
-        return res.status(400).json({ error: "Missing user details" });
-      }
-
-      let clientSecret = "";
-      const configRef = doc(db, "settings", "telegram");
-      const configSnap = await getDoc(configRef);
-      if (configSnap.exists()) {
-        const enc = configSnap.data().clientSecret;
-        if (enc) clientSecret = decryptSecret(enc);
-      }
-      
-      // Legacy fallback
-      if (!clientSecret) {
-        const legacyRef = doc(db, "telegram_settings", "config");
-        const legacySnap = await getDoc(legacyRef);
-        if (legacySnap.exists()) {
-          const enc = legacySnap.data().encryptedClientSecret;
-          if (enc) clientSecret = decryptSecret(enc);
-        }
-      }
-      if (!clientSecret) {
-        clientSecret = process.env.TELEGRAM_BOT_TOKEN || "";
-      }
-
-      let isValid = false;
-      if (user.hash === "simulated_hash") {
-        isValid = true;
-      } else if (clientSecret) {
-        isValid = verifyTelegramWidgetAuth(user, clientSecret);
-      }
-
-      if (!isValid) {
-        return res.status(401).json({ error: "Invalid Telegram authentication hash" });
-      }
-
-      let pendingReferrerId = null;
-      let usedReferralCode = "";
-      if (token) {
-        const decoded = verifySecureReferralToken(token);
-        if (decoded) {
-          pendingReferrerId = decoded.userId;
-          usedReferralCode = decoded.referralCode;
-          
-          const tokenRef = doc(db, "secureReferralTokens", token);
-          await setDoc(tokenRef, {
-            used: true,
-            usedAt: new Date().toISOString(),
-            usedBy: String(user.id)
-          }, { merge: true });
-        } else {
-          const referrer = await findReferrerByCode(db, token);
-          if (referrer) {
-            pendingReferrerId = referrer.id;
-            usedReferralCode = token;
-          }
-        }
-      }
-
-      if (pendingReferrerId && String(user.id) === String(pendingReferrerId)) {
-        pendingReferrerId = null;
-      }
-
-      const userDocRef = doc(db, "users", String(user.id));
-      const userSnap = await getDoc(userDocRef);
-      const nowIso = new Date().toISOString();
-      
-      let referralCode = `RS${String(user.id).slice(-6).toUpperCase()}`;
-
-      const uData: any = {
-        telegramId: user.id,
-        username: user.username || "",
-        firstName: user.first_name || "",
-        lastName: user.last_name || "",
-        photoUrl: user.photo_url || "",
-        loginTime: nowIso,
-        lastLogin: nowIso,
-        lastActive: nowIso,
-        updatedAt: nowIso
-      };
-
-      if (pendingReferrerId) {
-        uData.pendingReferrerId = pendingReferrerId;
-        uData.joinedViaReferral = true;
-      }
-
-      if (userSnap.exists()) {
-        const existing = userSnap.data();
-        referralCode = existing.referralCode || referralCode;
-        await updateDoc(userDocRef, uData);
-      } else {
-        const newUser = {
-          ...uData,
-          id: String(user.id),
-          createdAt: nowIso,
-          balance: 0,
-          availableBalance: 0,
-          totalEarnings: 0,
-          todayEarnings: 0,
-          level: "Bronze",
-          referralCode,
-          status: "Active"
-        };
-        await setDoc(userDocRef, newUser);
-      }
-
-      res.json({ 
-        success: true, 
-        user: { id: String(user.id), ...uData, referralCode },
-        referralVerified: !!pendingReferrerId
-      });
-    } catch (e: any) {
-      console.error("Telegram Login Error:", e);
-      res.status(500).json({ error: e.message || "Failed to process Telegram login" });
-    }
+  // Deprecated: Legacy Telegram Login Widget endpoints replaced by secure direct deep link referrals
+  app.post("/api/auth/telegram-login", (req, res) => {
+    res.status(410).json({ success: false, error: "Telegram Login Widget is deprecated and removed. Please use direct deep link referrals." });
   });
 
-  // Secure Telegram Callback Route (GET) for Redirect-based widgets
-  app.get("/auth/telegram/callback", async (req, res) => {
-    try {
-      console.log("[Telegram Callback] Received query parameters:", req.query);
-      const { id, first_name, last_name, username, photo_url, auth_date, hash, r } = req.query;
-
-      if (!id || !hash) {
-        return res.status(400).send(`
-          <div style="font-family: sans-serif; text-align: center; padding: 40px; background: #020617; color: #f1f5f9; min-h: 100vh;">
-            <h2 style="color: #ef4444;">Missing Required Authentication Parameters</h2>
-            <p style="color: #94a3b8;">The authentication response from Telegram was incomplete. Please try again.</p>
-            <a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Home</a>
-          </div>
-        `);
-      }
-
-      // 1. Retrieve and decrypt bot token (clientSecret) to validate hash
-      let clientSecret = "";
-      const configRef = doc(db, "settings", "telegram");
-      const configSnap = await getDoc(configRef);
-      if (configSnap.exists()) {
-        const enc = configSnap.data().clientSecret;
-        if (enc) clientSecret = decryptSecret(enc);
-      }
-      
-      // Legacy fallback
-      if (!clientSecret) {
-        const legacyRef = doc(db, "telegram_settings", "config");
-        const legacySnap = await getDoc(legacyRef);
-        if (legacySnap.exists()) {
-          const enc = legacySnap.data().encryptedClientSecret;
-          if (enc) clientSecret = decryptSecret(enc);
-        }
-      }
-
-      if (!clientSecret) {
-        clientSecret = process.env.TELEGRAM_BOT_TOKEN || "";
-      }
-
-      // Reconstruct user object for verification
-      const userObj: any = {
-        id: String(id),
-        first_name: first_name || "",
-        last_name: last_name || "",
-        username: username || "",
-        photo_url: photo_url || "",
-        auth_date: auth_date || "",
-        hash: hash
-      };
-
-      // 2. Cryptographically secure hash validation
-      let isValid = false;
-      if (userObj.hash === "simulated_hash") {
-        isValid = true;
-      } else if (clientSecret) {
-        isValid = verifyTelegramWidgetAuth(userObj, clientSecret);
-      }
-
-      if (!isValid) {
-        return res.status(401).send(`
-          <div style="font-family: sans-serif; text-align: center; padding: 40px; background: #020617; color: #f1f5f9; min-h: 100vh;">
-            <h2 style="color: #ef4444;">Invalid Cryptographic Hash</h2>
-            <p style="color: #94a3b8;">Telegram authentication verification failed. The secure hash did not match.</p>
-            <a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Home</a>
-          </div>
-        `);
-      }
-
-      // 3. Handle referral processing
-      let pendingReferrerId = null;
-      let usedReferralCode = "";
-      const referralCodeParam = r ? String(r) : "";
-
-      if (referralCodeParam) {
-        const decoded = verifySecureReferralToken(referralCodeParam);
-        if (decoded) {
-          pendingReferrerId = decoded.userId;
-          usedReferralCode = decoded.referralCode;
-          
-          const tokenRef = doc(db, "secureReferralTokens", referralCodeParam);
-          await setDoc(tokenRef, {
-            used: true,
-            usedAt: new Date().toISOString(),
-            usedBy: String(id)
-          }, { merge: true });
-        } else {
-          const referrer = await findReferrerByCode(db, referralCodeParam);
-          if (referrer) {
-            pendingReferrerId = referrer.id;
-            usedReferralCode = referralCodeParam;
-          }
-        }
-      }
-
-      if (pendingReferrerId && String(id) === String(pendingReferrerId)) {
-        pendingReferrerId = null;
-      }
-
-      const userDocRef = doc(db, "users", String(id));
-      const userSnap = await getDoc(userDocRef);
-      const nowIso = new Date().toISOString();
-      
-      let userReferralCode = `RS${String(id).slice(-6).toUpperCase()}`;
-
-      const uData: any = {
-        telegramId: Number(id),
-        username: username || "",
-        firstName: first_name || "",
-        lastName: last_name || "",
-        photoUrl: photo_url || "",
-        loginTime: nowIso,
-        lastLogin: nowIso,
-        lastActive: nowIso,
-        updatedAt: nowIso
-      };
-
-      if (pendingReferrerId) {
-        uData.pendingReferrerId = pendingReferrerId;
-        uData.joinedViaReferral = true;
-      }
-
-      if (userSnap.exists()) {
-        const existing = userSnap.data();
-        userReferralCode = existing.referralCode || userReferralCode;
-        await updateDoc(userDocRef, uData);
-      } else {
-        const newUser = {
-          ...uData,
-          id: String(id),
-          createdAt: nowIso,
-          balance: 0,
-          availableBalance: 0,
-          totalEarnings: 0,
-          todayEarnings: 0,
-          level: "Bronze",
-          referralCode: userReferralCode,
-          status: "Active"
-        };
-        await setDoc(userDocRef, newUser);
-      }
-
-      // 4. Generate dynamic redirect back to the app in the correct environment (dev, stage, or production)
-      const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
-      const host = req.get('host') || 'www.royshare.online';
-      const baseUrl = `${protocol}://${host}`;
-      
-      const redirectUrl = referralCodeParam 
-        ? `${baseUrl}/ref/${referralCodeParam}?success=true`
-        : `${baseUrl}/referral?success=true`;
-
-      console.log(`[Telegram Callback] Successful auth. Redirecting to: ${redirectUrl}`);
-      return res.redirect(redirectUrl);
-    } catch (e: any) {
-      console.error("[Telegram Callback] Unhandled error:", e);
-      return res.status(500).send(`
-        <div style="font-family: sans-serif; text-align: center; padding: 40px; background: #020617; color: #f1f5f9; min-h: 100vh;">
-          <h2 style="color: #ef4444;">Server Error</h2>
-          <p style="color: #94a3b8;">Failed to process Telegram callback: ${e.message}</p>
-          <a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Home</a>
-        </div>
-      `);
-    }
+  app.get("/auth/telegram/callback", (req, res) => {
+    res.status(410).send(`
+      <div style="font-family: sans-serif; text-align: center; padding: 40px; background: #020617; color: #f1f5f9; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+        <h2 style="color: #38bdf8;">Legacy Telegram Login Deprecated</h2>
+        <p style="color: #94a3b8; max-width: 500px; line-height: 1.6;">The Telegram login widget flow has been replaced with a secure, direct deep-link referral system.</p>
+        <a href="/" style="margin-top: 20px; display: inline-block; background: #6366f1; color: white; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: bold; transition: all 0.2s;">Return to Home</a>
+      </div>
+    `);
   });
 
   app.get("/api/telegram-config", async (req, res) => {
@@ -3991,8 +3722,17 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         }
       }
 
+      let rewardAmount = 10;
+      if (systemDoc.exists()) {
+        const rSettings = systemDoc.data()?.referralSettings;
+        if (rSettings && rSettings["Referral Reward"]) {
+          rewardAmount = parseFloat(rSettings["Referral Reward"]) || 10;
+        }
+      }
+
       res.json({
         success: true,
+        rewardAmount: rewardAmount,
         referrer: {
           id: referrerDoc.id,
           name: rData.enteredName || rData.firstName || rData.username || "Admin",

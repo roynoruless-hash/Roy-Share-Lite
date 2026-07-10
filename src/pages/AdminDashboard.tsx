@@ -50,7 +50,6 @@ import {
 import React from 'react';
 import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
-import TelegramLoginSettingsAdmin from "../components/TelegramLoginSettingsAdmin";
 import buildInfo from "../build-info.json";
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -2714,7 +2713,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "📥 Backup & Restore",
               "🚀 Referral System",
               "⚙️ System Settings",
-              "🤖 Telegram Login Settings",
             ].map((btn) => (
               <button
                 key={btn}
@@ -8736,9 +8734,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 </div>
               )}
             </div>
-          )}
-          {activeTab === "🤖 Telegram Login Settings" && (
-            <TelegramLoginSettingsAdmin />
           )}
           {activeTab === "⚙️ System Settings" && (
             <div className="space-y-6">

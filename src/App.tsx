@@ -103,8 +103,9 @@ export default function App() {
       );
     }
 
-    // PRIORITIZE Referral Landing Page routing for ALL /ref requests
-    if (window.location.pathname.startsWith("/ref") || window.location.pathname === "/ref") {
+    // PRIORITIZE Referral Landing Page routing for /ref, /r, and /referral-success requests
+    const path = window.location.pathname;
+    if (path.startsWith("/ref") || path === "/ref" || path.startsWith("/r/") || path === "/r" || path === "/referral-success") {
       return <ReferralLandingPage />;
     }
 
