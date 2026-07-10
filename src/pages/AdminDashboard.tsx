@@ -49,6 +49,9 @@ import {
   Edit,
   Gamepad2,
   X,
+  Upload,
+  Image,
+  FolderPlus,
 } from "lucide-react";
 
 
@@ -215,6 +218,20 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [gamePixSyncStatus, setGamePixSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
   const [gamePixSyncResult, setGamePixSyncResult] = useState<{ imported: number; updated: number; failed: number } | null>(null);
 
+  // Game Rewards States
+  const [rewardAmount, setRewardAmount] = useState<number>(15);
+  const [minPlayDuration, setMinPlayDuration] = useState<number>(30);
+  const [dailyLimit, setDailyLimit] = useState<number>(10);
+  const [maxCoinsPerDay, setMaxCoinsPerDay] = useState<number>(150);
+  const [cooldown, setCooldown] = useState<number>(60);
+  const [rewardEnabled, setRewardEnabled] = useState<boolean>(true);
+  const [rewardsSaving, setRewardsSaving] = useState(false);
+  const [rewardsSuccess, setRewardsSuccess] = useState(false);
+
+  // Game Analytics States
+  const [gameAnalytics, setGameAnalytics] = useState<any>(null);
+  const [gameAnalyticsLoading, setGameAnalyticsLoading] = useState(false);
+
   // Catalog State
   const [catalogGames, setCatalogGames] = useState<any[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -236,6 +253,26 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [customGameError, setCustomGameError] = useState("");
   const [customGameSuccess, setCustomGameSuccess] = useState("");
   const [customGameSaving, setCustomGameSaving] = useState(false);
+
+  // Improved Category Management State
+  const [gameCategories, setGameCategories] = useState<any[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryIcon, setNewCategoryIcon] = useState("");
+  const [categoryEditingId, setCategoryEditingId] = useState<string | null>(null);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+
+  // Improved Upload States
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const [bannerUploadProgress, setBannerUploadProgress] = useState(0);
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null);
+
+  const [thumbnailUploading, setThumbnailUploading] = useState(false);
+  const [thumbnailUploadProgress, setThumbnailUploadProgress] = useState(0);
+  const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null);
+  const [thumbnailOption, setThumbnailOption] = useState<"upload" | "url">("upload");
 
   // Published Games Management State
   const [publishedGames, setPublishedGames] = useState<any[]>([]);
@@ -1363,6 +1400,69 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const fetchGameRewardsSettings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/game/rewards/settings`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.settings) {
+          setRewardAmount(Number(data.settings.rewardAmount) || 15);
+          setMinPlayDuration(Number(data.settings.minPlayDuration) || 30);
+          setDailyLimit(Number(data.settings.dailyLimit) || 10);
+          setMaxCoinsPerDay(Number(data.settings.maxCoinsPerDay) || 150);
+          setCooldown(Number(data.settings.cooldown) || 60);
+          setRewardEnabled(data.settings.enabled !== false);
+        }
+      }
+    } catch (e) {
+      console.error("Error loading reward settings in admin:", e);
+    }
+  };
+
+  const fetchGameAnalytics = async () => {
+    setGameAnalyticsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/game/analytics`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.analytics) {
+          setGameAnalytics(data.analytics);
+        }
+      }
+    } catch (e) {
+      console.error("Error loading game analytics in admin:", e);
+    } finally {
+      setGameAnalyticsLoading(false);
+    }
+  };
+
+  const saveGameRewardsSettings = async () => {
+    setRewardsSaving(true);
+    setRewardsSuccess(false);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/game/rewards/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rewardAmount: Number(rewardAmount),
+          minPlayDuration: Number(minPlayDuration),
+          dailyLimit: Number(dailyLimit),
+          maxCoinsPerDay: Number(maxCoinsPerDay),
+          cooldown: Number(cooldown),
+          enabled: rewardEnabled
+        })
+      });
+      if (res.ok) {
+        setRewardsSuccess(true);
+        setTimeout(() => setRewardsSuccess(false), 5000);
+      }
+    } catch (e) {
+      console.error("Error saving reward settings:", e);
+    } finally {
+      setRewardsSaving(false);
+    }
+  };
+
   const fetchGamePixConfig = async () => {
     setGamePixLoading(true);
     setGamePixError("");
@@ -1379,6 +1479,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       } else {
         setGamePixError("Failed to fetch GamePix configuration from server.");
       }
+      
+      // Load Rewards & Analytics
+      await fetchGameRewardsSettings();
+      await fetchGameAnalytics();
     } catch (err: any) {
       console.error(err);
       setGamePixError("Network error fetching GamePix configuration: " + err.message);
@@ -1523,12 +1627,170 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const fetchCategories = async () => {
+    setCategoriesLoading(true);
+    setCategoryError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/game-categories`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.categories)) {
+          setGameCategories(data.categories);
+          // If the customGameCategory is not set to any loaded category, set it to the first category's name
+          if (data.categories.length > 0 && !data.categories.some(c => c.name === customGameCategory)) {
+            setCustomGameCategory(data.categories[0].name);
+          }
+        }
+      } else {
+        throw new Error("Failed to load categories");
+      }
+    } catch (err: any) {
+      console.error("Error fetching game categories:", err);
+      setCategoryError(err.message || "Failed to load categories.");
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
+  const saveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) {
+      setCategoryError("Category Name is required.");
+      return;
+    }
+    setCategorySaving(true);
+    setCategoryError(null);
+    try {
+      const url = categoryEditingId 
+        ? `${API_BASE}/api/admin/game-categories/${categoryEditingId}`
+        : `${API_BASE}/api/admin/game-categories`;
+      const method = categoryEditingId ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newCategoryName.trim(),
+          icon: newCategoryIcon.trim()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setNewCategoryName("");
+        setNewCategoryIcon("");
+        setCategoryEditingId(null);
+        await fetchCategories();
+      } else {
+        setCategoryError(data.error || "Failed to save category.");
+      }
+    } catch (err: any) {
+      console.error("Error saving category:", err);
+      setCategoryError(err.message || "Network error while saving category.");
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const deleteCategory = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this category?")) return;
+    setCategoryError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/game-categories/${id}`, {
+        method: "DELETE"
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        await fetchCategories();
+      } else {
+        setCategoryError(data.error || "Failed to delete category.");
+      }
+    } catch (err: any) {
+      console.error("Error deleting category:", err);
+      setCategoryError(err.message || "Network error while deleting category.");
+    }
+  };
+
+  const uploadGameImage = async (
+    file: File,
+    onProgress: (progress: number) => void
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      // Validate file size and formats
+      const allowedFormats = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+      if (!allowedFormats.includes(file.type)) {
+        reject(new Error("Allowed formats are: JPG, JPEG, PNG, WEBP"));
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        reject(new Error("Maximum allowed file size is 5 MB."));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result as string;
+        
+        let progress = 5;
+        onProgress(progress);
+        const progressTimer = setInterval(() => {
+          if (progress < 90) {
+            progress += Math.floor(Math.random() * 15) + 5;
+            if (progress > 90) progress = 90;
+            onProgress(progress);
+          }
+        }, 120);
+
+        try {
+          const res = await fetch(`${API_BASE}/api/admin/games/upload`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              fileName: file.name,
+              fileType: file.type,
+              base64
+            })
+          });
+
+          clearInterval(progressTimer);
+
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || "Upload failed");
+          }
+
+          const data = await res.json();
+          onProgress(100);
+          if (data.success && data.url) {
+            resolve(data.url);
+          } else {
+            throw new Error("Invalid response from server");
+          }
+        } catch (err: any) {
+          clearInterval(progressTimer);
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error("File reading failed"));
+      reader.readAsDataURL(file);
+    });
+  };
+
   const saveCustomGame = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customGameTitle || !customGameUrl) {
       setCustomGameError("Title and Play URL are required.");
       return;
     }
+    if (!customGameBannerUrl) {
+      setCustomGameError("Banner image is required. Please upload a banner image.");
+      return;
+    }
+    if (!customGameThumbnailUrl) {
+      setCustomGameError("Thumbnail image is required. Please upload or paste a thumbnail URL.");
+      return;
+    }
+
     setCustomGameSaving(true);
     setCustomGameError("");
     setCustomGameSuccess("");
@@ -1556,7 +1818,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         // Reset manual form
         setCustomGameTitle("");
         setCustomGameDescription("");
-        setCustomGameCategory("Casual");
+        setCustomGameCategory(gameCategories.length > 0 ? gameCategories[0].name : "Casual");
         setCustomGameBannerUrl("");
         setCustomGameThumbnailUrl("");
         setCustomGameUrl("");
@@ -1565,6 +1827,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         setCustomGameHeight("");
         setCustomGameFeatured(false);
         setCustomGameEnabled(true);
+        setBannerPreview(null);
+        setThumbnailPreview(null);
         fetchPublishedGames();
         fetchCatalogGames();
       } else {
@@ -2292,6 +2556,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchCatalogGames();
     } else if (activeTab === "✏️ Manage Games") {
       fetchPublishedGames();
+      fetchCategories();
+    } else if (activeTab === "➕ Add Custom Game") {
+      fetchCategories();
     }
 
     return () => {
@@ -9312,6 +9579,214 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       )}
                     </button>
                   </div>
+
+                  {/* ==========================================
+                      GAME REWARDS CONFIGURATION PANEL
+                     ========================================== */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl mt-6">
+                    <div>
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        🎁 Game Rewards Configuration
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Configure the exact play requirements and reward coins credited directly to the user's wallet.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-200">
+                          Reward Coins per Valid Session
+                        </label>
+                        <input
+                          type="number"
+                          value={rewardAmount}
+                          onChange={(e) => setRewardAmount(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-200">
+                          Minimum Required Play Time (Seconds)
+                        </label>
+                        <input
+                          type="number"
+                          value={minPlayDuration}
+                          onChange={(e) => setMinPlayDuration(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-200">
+                          Daily Claim Limit per User (Plays)
+                        </label>
+                        <input
+                          type="number"
+                          value={dailyLimit}
+                          onChange={(e) => setDailyLimit(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-200">
+                          Daily Earning Cap per User (Coins)
+                        </label>
+                        <input
+                          type="number"
+                          value={maxCoinsPerDay}
+                          onChange={(e) => setMaxCoinsPerDay(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-200">
+                          Cooldown Duration between Claims (Seconds)
+                        </label>
+                        <input
+                          type="number"
+                          value={cooldown}
+                          onChange={(e) => setCooldown(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+
+                      <div className="space-y-2 flex flex-col justify-end pb-1">
+                        <span className="text-xs font-semibold text-slate-200 mb-2 block">
+                          Reward System Status
+                        </span>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setRewardEnabled(!rewardEnabled)}
+                            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                              rewardEnabled 
+                                ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" 
+                                : "bg-red-500/10 border border-red-500/30 text-red-400"
+                            }`}
+                          >
+                            {rewardEnabled ? "● Enabled" : "○ Disabled"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {rewardsSuccess && (
+                      <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-sm flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                        <span>Game Rewards Settings Saved Successfully</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end pt-2">
+                      <button
+                        onClick={saveGameRewardsSettings}
+                        disabled={rewardsSaving}
+                        className="flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg text-sm active:scale-95 disabled:opacity-50 cursor-pointer"
+                      >
+                        {rewardsSaving ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4" /> Save Rewards Config
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* ==========================================
+                      GAME PERFORMANCE & ANALYTICS INSIGHTS
+                     ========================================== */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl mt-6">
+                    <div>
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        📊 Game Performance & Analytics
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Live dashboard compiling global gaming interactions, play retention, and CTR inside RoyShare.
+                      </p>
+                    </div>
+
+                    {gameAnalyticsLoading ? (
+                      <div className="flex justify-center py-6">
+                        <RefreshCw className="w-6 h-6 text-purple-500 animate-spin" />
+                      </div>
+                    ) : gameAnalytics ? (
+                      <div className="space-y-6">
+                        {/* Core KPI widgets */}
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                          <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Total Plays</span>
+                            <span className="text-xl font-black text-white block mt-1">{gameAnalytics.totalPlays}</span>
+                          </div>
+                          <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Valid Plays (30s+)</span>
+                            <span className="text-xl font-black text-emerald-400 block mt-1">{gameAnalytics.validPlays}</span>
+                          </div>
+                          <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Avg Play Time</span>
+                            <span className="text-xl font-black text-purple-400 block mt-1">
+                              {Math.floor(gameAnalytics.avgPlayTime / 60)}m {Math.floor(gameAnalytics.avgPlayTime % 60)}s
+                            </span>
+                          </div>
+                          <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Unique Players</span>
+                            <span className="text-xl font-black text-blue-400 block mt-1">{gameAnalytics.uniquePlayers}</span>
+                          </div>
+                          <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Valid Rate</span>
+                            <span className="text-xl font-black text-white block mt-1">
+                              {gameAnalytics.completionRate.toFixed(1)}%
+                            </span>
+                          </div>
+                          <div className="p-4 bg-slate-950 border border-slate-850 rounded-xl">
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Est. CTR</span>
+                            <span className="text-xl font-black text-amber-400 block mt-1">
+                              {gameAnalytics.ctr.toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Staggered progress columns represent play timeline */}
+                        <div className="space-y-3 pt-2">
+                          <span className="text-xs font-semibold text-slate-300 block">Play Frequency Timeline</span>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-400">Today</span>
+                              <span className="font-bold text-white">{gameAnalytics.todayPlays} Plays</span>
+                            </div>
+                            <div className="h-2 bg-slate-950 rounded-full overflow-hidden">
+                              <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min((gameAnalytics.todayPlays / Math.max(gameAnalytics.weeklyPlays, 1)) * 100, 100)}%` }} />
+                            </div>
+
+                            <div className="flex items-center justify-between text-xs pt-2">
+                              <span className="text-slate-400">Weekly Plays</span>
+                              <span className="font-bold text-white">{gameAnalytics.weeklyPlays} Plays</span>
+                            </div>
+                            <div className="h-2 bg-slate-950 rounded-full overflow-hidden">
+                              <div className="h-full bg-purple-500 rounded-full" style={{ width: `${Math.min((gameAnalytics.weeklyPlays / Math.max(gameAnalytics.monthlyPlays, 1)) * 100, 100)}%` }} />
+                            </div>
+
+                            <div className="flex items-center justify-between text-xs pt-2">
+                              <span className="text-slate-400">Monthly Plays</span>
+                              <span className="font-bold text-white">{gameAnalytics.monthlyPlays} Plays</span>
+                            </div>
+                            <div className="h-2 bg-slate-950 rounded-full overflow-hidden">
+                              <div className="h-full bg-emerald-500 rounded-full" style={{ width: "100%" }} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">No gameplay session logs available yet.</p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -9524,7 +9999,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     ➕ Add Custom Game
                   </h2>
                   <p className="text-sm text-slate-400 mt-1">
-                    Upload or manually configure proprietary, premium, or third-party web games directly into the games collection.
+                    Upload or manually configure proprietary, premium, or third-party web games directly into the games collection with live assets.
                   </p>
                 </div>
               </div>
@@ -9533,12 +10008,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 {/* Manual form */}
                 <form
                   onSubmit={saveCustomGame}
-                  className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl"
+                  className="lg:col-span-7 bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl"
                 >
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Game Details</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-purple-400">Game Details</h3>
 
                   {customGameError && (
-                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2">
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2 animate-pulse">
                       <AlertCircle className="w-4 h-4 flex-shrink-0" />
                       <span>{customGameError}</span>
                     </div>
@@ -9565,16 +10040,39 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-300">Category / Genre <span className="text-purple-400">*</span></label>
-                      <select
-                        value={customGameCategory}
-                        onChange={(e) => setCustomGameCategory(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
-                      >
-                        {["Casual", "Action", "Sports", "Puzzle", "Racing", "Adventure", "Strategy", "Arcade", "Simulation"].map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
+                      <label className="text-xs font-semibold text-slate-300 flex justify-between">
+                        <span>Category / Genre <span className="text-purple-400">*</span></span>
+                      </label>
+                      <div className="flex gap-2">
+                        <select
+                          value={customGameCategory}
+                          onChange={(e) => setCustomGameCategory(e.target.value)}
+                          className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 cursor-pointer"
+                        >
+                          {(gameCategories.length > 0 ? gameCategories : [
+                            { id: "casual", name: "Casual", icon: "🎈" },
+                            { id: "action", name: "Action", icon: "💥" },
+                            { id: "sports", name: "Sports", icon: "⚽" },
+                            { id: "puzzle", name: "Puzzle", icon: "🧩" },
+                            { id: "racing", name: "Racing", icon: "🏎️" },
+                            { id: "adventure", name: "Adventure", icon: "🗺️" },
+                            { id: "strategy", name: "Strategy", icon: "🧠" },
+                            { id: "arcade", name: "Arcade", icon: "🕹️" },
+                            { id: "simulation", name: "Simulation", icon: "🚌" }
+                          ]).map((c) => (
+                            <option key={c.id || c.name} value={c.name}>
+                              {c.icon ? `${c.icon} ${c.name}` : c.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setCategoryModalOpen(true)}
+                          className="px-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                        >
+                          <FolderPlus className="w-3.5 h-3.5" /> Add Category
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -9601,20 +10099,270 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-300">Banner Image URL</label>
-                      <input
-                        type="url"
-                        value={customGameBannerUrl}
-                        onChange={(e) => setCustomGameBannerUrl(e.target.value)}
-                        placeholder="https://images.unsplash.com/..."
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
-                      />
+                  {/* Banner Image Upload (Option 1) */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-300 flex justify-between items-center">
+                      <span>Banner Image <span className="text-purple-400">*</span></span>
+                      <span className="text-[10px] text-slate-500">Recommended: 1600 × 900 • Max 5MB</span>
+                    </label>
+
+                    {customGameBannerUrl ? (
+                      <div className="relative rounded-xl overflow-hidden aspect-[16/9] border border-slate-800 bg-slate-950 group">
+                        <img
+                          src={customGameBannerUrl}
+                          alt="Banner Preview"
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-3 transition-opacity">
+                          <label className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-lg">
+                            Replace Image
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/jpg,image/png,image/webp"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                setBannerUploading(true);
+                                setBannerUploadProgress(0);
+                                try {
+                                  const url = await uploadGameImage(file, setBannerUploadProgress);
+                                  setCustomGameBannerUrl(url);
+                                  setBannerPreview(url);
+                                } catch (err: any) {
+                                  alert(err.message || "Failed to upload banner image");
+                                } finally {
+                                  setBannerUploading(false);
+                                }
+                              }}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomGameBannerUrl("");
+                              setBannerPreview(null);
+                            }}
+                            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-lg"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        onDrop={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const file = e.dataTransfer.files?.[0];
+                          if (!file) return;
+                          setBannerUploading(true);
+                          setBannerUploadProgress(0);
+                          try {
+                            const url = await uploadGameImage(file, setBannerUploadProgress);
+                            setCustomGameBannerUrl(url);
+                            setBannerPreview(url);
+                          } catch (err: any) {
+                            alert(err.message || "Failed to upload banner image");
+                          } finally {
+                            setBannerUploading(false);
+                          }
+                        }}
+                        className="border-2 border-dashed border-slate-800 hover:border-purple-500/60 bg-slate-950 hover:bg-purple-950/5 rounded-xl aspect-[16/9] flex flex-col items-center justify-center text-center p-4 transition-all group relative cursor-pointer overflow-hidden"
+                      >
+                        {bannerUploading ? (
+                          <div className="w-full max-w-[200px] space-y-3">
+                            <div className="flex justify-between text-xs text-slate-300 font-bold">
+                              <span className="flex items-center gap-1">
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-400" /> Uploading...
+                              </span>
+                              <span>{bannerUploadProgress}%</span>
+                            </div>
+                            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="bg-purple-600 h-1.5 rounded-full transition-all duration-150"
+                                style={{ width: `${bannerUploadProgress}%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                            <Upload className="w-10 h-10 text-slate-500 group-hover:text-purple-400 transition-colors mb-2" />
+                            <span className="text-sm font-bold text-slate-200 group-hover:text-white transition-colors">
+                              📤 Upload Banner Image
+                            </span>
+                            <span className="text-[11px] text-slate-500 mt-1">
+                              Drag & Drop or click to browse (JPG, PNG, WEBP)
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/jpg,image/png,image/webp"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                setBannerUploading(true);
+                                setBannerUploadProgress(0);
+                                try {
+                                  const url = await uploadGameImage(file, setBannerUploadProgress);
+                                  setCustomGameBannerUrl(url);
+                                  setBannerPreview(url);
+                                } catch (err: any) {
+                                  alert(err.message || "Failed to upload banner image");
+                                } finally {
+                                  setBannerUploading(false);
+                                }
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Thumbnail Image Section */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-semibold text-slate-300">Thumbnail Image <span className="text-purple-400">*</span></label>
+                      <div className="flex gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setThumbnailOption("upload")}
+                          className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${thumbnailOption === "upload" ? "bg-purple-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
+                        >
+                          Upload
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setThumbnailOption("url")}
+                          className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${thumbnailOption === "url" ? "bg-purple-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
+                        >
+                          Paste URL
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-300">Thumbnail Image URL</label>
+                    {thumbnailOption === "upload" ? (
+                      <div className="flex items-center gap-4">
+                        {customGameThumbnailUrl ? (
+                          <div className="relative rounded-xl overflow-hidden aspect-square border border-slate-800 bg-slate-950 w-28 group">
+                            <img
+                              src={customGameThumbnailUrl}
+                              alt="Thumbnail Preview"
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
+                              <label className="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded-md transition-all cursor-pointer shadow-md">
+                                Replace
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setThumbnailUploading(true);
+                                    setThumbnailUploadProgress(0);
+                                    try {
+                                      const url = await uploadGameImage(file, setThumbnailUploadProgress);
+                                      setCustomGameThumbnailUrl(url);
+                                      setThumbnailPreview(url);
+                                    } catch (err: any) {
+                                      alert(err.message || "Failed to upload thumbnail");
+                                    } finally {
+                                      setThumbnailUploading(false);
+                                    }
+                                  }}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCustomGameThumbnailUrl("");
+                                  setThumbnailPreview(null);
+                                }}
+                                className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white font-bold text-[9px] rounded-md transition-all cursor-pointer shadow-md"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onDrop={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const file = e.dataTransfer.files?.[0];
+                              if (!file) return;
+                              setThumbnailUploading(true);
+                              setThumbnailUploadProgress(0);
+                              try {
+                                const url = await uploadGameImage(file, setThumbnailUploadProgress);
+                                setCustomGameThumbnailUrl(url);
+                                setThumbnailPreview(url);
+                              } catch (err: any) {
+                                alert(err.message || "Failed to upload thumbnail");
+                              } finally {
+                                setThumbnailUploading(false);
+                              }
+                            }}
+                            className="border-2 border-dashed border-slate-800 hover:border-purple-500/60 bg-slate-950 hover:bg-purple-950/5 rounded-xl w-28 aspect-square flex flex-col items-center justify-center text-center p-2 transition-all group relative cursor-pointer overflow-hidden"
+                          >
+                            {thumbnailUploading ? (
+                              <div className="w-full space-y-2 px-1">
+                                <span className="text-[10px] text-slate-300 font-bold block text-center">
+                                  {thumbnailUploadProgress}%
+                                </span>
+                                <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
+                                  <div
+                                    className="bg-purple-600 h-1 rounded-full transition-all duration-150"
+                                    style={{ width: `${thumbnailUploadProgress}%` }}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                                <Upload className="w-6 h-6 text-slate-500 group-hover:text-purple-400 transition-colors mb-1" />
+                                <span className="text-[10px] font-bold text-slate-200 group-hover:text-white transition-colors">
+                                  Upload
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setThumbnailUploading(true);
+                                    setThumbnailUploadProgress(0);
+                                    try {
+                                      const url = await uploadGameImage(file, setThumbnailUploadProgress);
+                                      setCustomGameThumbnailUrl(url);
+                                      setThumbnailPreview(url);
+                                    } catch (err: any) {
+                                      alert(err.message || "Failed to upload thumbnail");
+                                    } finally {
+                                      setThumbnailUploading(false);
+                                    }
+                                  }}
+                                />
+                              </label>
+                            )}
+                          </div>
+                        )}
+                        <span className="text-xs text-slate-500 italic">Drag & drop or browse a 1:1 square game icon.</span>
+                      </div>
+                    ) : (
                       <input
                         type="url"
                         value={customGameThumbnailUrl}
@@ -9622,7 +10370,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                         placeholder="https://images.unsplash.com/..."
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
                       />
-                    </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -9631,7 +10379,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       <select
                         value={customGameOrientation}
                         onChange={(e) => setCustomGameOrientation(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 cursor-pointer"
                       >
                         <option value="landscape">Landscape</option>
                         <option value="portrait">Portrait</option>
@@ -9662,28 +10410,28 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   </div>
 
                   <div className="flex gap-6 items-center pt-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={customGameFeatured}
                         onChange={(e) => setCustomGameFeatured(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500"
+                        className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500 cursor-pointer"
                       />
                       <span className="text-xs font-bold text-slate-300">Featured Game</span>
                     </label>
 
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={customGameEnabled}
                         onChange={(e) => setCustomGameEnabled(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500"
+                        className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500 cursor-pointer"
                       />
                       <span className="text-xs font-bold text-slate-300">Publish Immediately (Enabled)</span>
                     </label>
                   </div>
 
-                  <div className="flex gap-3 pt-4">
+                  <div className="flex gap-3 pt-4 border-t border-slate-800">
                     <button
                       type="submit"
                       disabled={customGameSaving}
@@ -9793,6 +10541,139 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   </div>
                 </div>
               </div>
+
+              {/* Dynamic Category Management Modal */}
+              {categoryModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+                  <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCategoryModalOpen(false);
+                        setCategoryEditingId(null);
+                        setNewCategoryName("");
+                        setNewCategoryIcon("");
+                      }}
+                      className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+
+                    <div className="flex items-center gap-2 mb-4 border-b border-slate-800 pb-3">
+                      <FolderPlus className="w-6 h-6 text-purple-400" />
+                      <h3 className="text-lg font-bold text-white">Manage Game Categories</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto pr-1 flex-1">
+                      {/* Left Side: Create / Edit Form */}
+                      <form onSubmit={saveCategory} className="space-y-4">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-purple-400">
+                          {categoryEditingId ? "✏️ Edit Category" : "➕ Create Category"}
+                        </h4>
+
+                        {categoryError && (
+                          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                            <span>{categoryError}</span>
+                          </div>
+                        )}
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-slate-400">Category Name <span className="text-purple-400">*</span></label>
+                          <input
+                            type="text"
+                            required
+                            value={newCategoryName}
+                            onChange={(e) => setNewCategoryName(e.target.value)}
+                            placeholder="e.g. Multiplayer, Fighting"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-slate-400">Category Icon (Optional Emoji)</label>
+                          <input
+                            type="text"
+                            value={newCategoryIcon}
+                            onChange={(e) => setNewCategoryIcon(e.target.value)}
+                            placeholder="e.g. 🎮, 👾, 🎯"
+                            maxLength={4}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
+                          />
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                          <button
+                            type="submit"
+                            disabled={categorySaving}
+                            className="flex-1 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            {categorySaving ? "Saving..." : categoryEditingId ? "Update Category" : "Create Category"}
+                          </button>
+                          {categoryEditingId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCategoryEditingId(null);
+                                setNewCategoryName("");
+                                setNewCategoryIcon("");
+                              }}
+                              className="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </form>
+
+                      {/* Right Side: Manage Categories List */}
+                      <div className="flex flex-col">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+                          Categories List
+                        </h4>
+                        <div className="border border-slate-800 rounded-xl bg-slate-950 divide-y divide-slate-800/60 max-h-[40vh] overflow-y-auto">
+                          {categoriesLoading ? (
+                            <div className="p-4 text-center text-xs text-slate-500">Loading categories...</div>
+                          ) : gameCategories.length === 0 ? (
+                            <div className="p-4 text-center text-xs text-slate-500">No categories found.</div>
+                          ) : (
+                            gameCategories.map((cat) => (
+                              <div key={cat.id} className="flex justify-between items-center p-3 hover:bg-slate-900/40 transition-colors">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg">{cat.icon || "🎮"}</span>
+                                  <span className="text-sm font-semibold text-slate-200">{cat.name}</span>
+                                </div>
+                                <div className="flex gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCategoryEditingId(cat.id);
+                                      setNewCategoryName(cat.name);
+                                      setNewCategoryIcon(cat.icon || "");
+                                    }}
+                                    className="p-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 rounded transition-colors"
+                                    title="Edit"
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteCategory(cat.id)}
+                                    className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
+                                    title="Delete"
+                                  >
+                                    <Trash className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -10073,8 +10954,20 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                           onChange={(e) => setEditingGame({ ...editingGame, category: e.target.value })}
                           className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2.5 text-xs text-white focus:outline-none"
                         >
-                          {["Casual", "Action", "Sports", "Puzzle", "Racing", "Adventure", "Strategy", "Arcade", "Simulation"].map((c) => (
-                            <option key={c} value={c}>{c}</option>
+                          {(gameCategories.length > 0 ? gameCategories : [
+                            { name: "Casual" },
+                            { name: "Action" },
+                            { name: "Sports" },
+                            { name: "Puzzle" },
+                            { name: "Racing" },
+                            { name: "Adventure" },
+                            { name: "Strategy" },
+                            { name: "Arcade" },
+                            { name: "Simulation" }
+                          ]).map((c) => (
+                            <option key={c.id || c.name} value={c.name}>
+                              {c.name}
+                            </option>
                           ))}
                         </select>
                       </div>

@@ -64,7 +64,7 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
     }
   });
 
-  const categories = [
+  const [categories, setCategories] = useState<string[]>([
     "All",
     "Action",
     "Arcade",
@@ -77,7 +77,26 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
     "Boys",
     "Casual",
     "Multiplayer"
-  ];
+  ]);
+
+  useEffect(() => {
+    const fetchDynamicCategories = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/game-categories`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.categories)) {
+            const fetchedNames = data.categories.map((c: any) => c.name);
+            const merged = Array.from(new Set(["All", ...fetchedNames, ...categories.filter(c => c !== "All")]));
+            setCategories(merged);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading dynamic categories in GameCenterPage:", err);
+      }
+    };
+    fetchDynamicCategories();
+  }, []);
 
   useEffect(() => {
     // Check if user has already seen the intro. If so, let them go straight to the center if they prefer.

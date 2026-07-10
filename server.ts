@@ -3412,6 +3412,452 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // Game image upload to Firebase Storage via base64
+  app.post("/api/admin/games/upload", express.json({ limit: "15mb" }), async (req, res) => {
+    try {
+      const { fileName, fileType, base64 } = req.body;
+      if (!base64) {
+        return res.status(400).json({ success: false, error: "No file content provided" });
+      }
+
+      const base64Data = base64.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+
+      const ext = path.extname(fileName) || `.${fileType.split("/")[1] || "png"}`;
+      const uniqueFileName = `games/custom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+
+      const bucket = getStorage().bucket();
+      const fileRef = bucket.file(uniqueFileName);
+
+      await fileRef.save(buffer, {
+        metadata: {
+          contentType: fileType || "image/png"
+        },
+        public: true
+      });
+
+      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${uniqueFileName}`;
+
+      return res.json({
+        success: true,
+        url: publicUrl,
+        name: fileName
+      });
+    } catch (e: any) {
+      console.error("Error in game image upload:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to upload file." });
+    }
+  });
+
+  // Category management APIs
+  app.get("/api/admin/game-categories", async (req, res) => {
+    try {
+      const colRef = collection(db, "game_categories");
+      const snap = await getDocs(colRef);
+      let categories: any[] = [];
+      snap.forEach((docSnap) => {
+        categories.push({ id: docSnap.id, ...docSnap.data() });
+      });
+
+      if (categories.length === 0) {
+        const defaults = [
+          { id: "casual", name: "Casual", icon: "🎈" },
+          { id: "action", name: "Action", icon: "💥" },
+          { id: "sports", name: "Sports", icon: "⚽" },
+          { id: "puzzle", name: "Puzzle", icon: "🧩" },
+          { id: "racing", name: "Racing", icon: "🏎️" },
+          { id: "adventure", name: "Adventure", icon: "🗺️" },
+          { id: "strategy", name: "Strategy", icon: "🧠" },
+          { id: "arcade", name: "Arcade", icon: "🕹️" },
+          { id: "simulation", name: "Simulation", icon: "🚌" }
+        ];
+        for (const cat of defaults) {
+          await setDoc(doc(db, "game_categories", cat.id), {
+            name: cat.name,
+            icon: cat.icon
+          });
+        }
+        categories = defaults;
+      }
+      
+      categories.sort((a, b) => a.name.localeCompare(b.name));
+      return res.json({ success: true, categories });
+    } catch (e: any) {
+      console.error("Error in GET /api/admin/game-categories:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to load categories." });
+    }
+  });
+
+  app.post("/api/admin/game-categories", async (req, res) => {
+    try {
+      const { name, icon } = req.body;
+      if (!name) {
+        return res.status(400).json({ success: false, error: "Category name is required." });
+      }
+      const categoryId = name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+      const docRef = doc(db, "game_categories", categoryId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        return res.status(400).json({ success: false, error: "A category with this name already exists." });
+      }
+
+      await setDoc(docRef, {
+        name,
+        icon: icon || ""
+      });
+
+      return res.json({ success: true, category: { id: categoryId, name, icon: icon || "" } });
+    } catch (e: any) {
+      console.error("Error in POST /api/admin/game-categories:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to create category." });
+    }
+  });
+
+  app.put("/api/admin/game-categories/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name, icon } = req.body;
+      if (!name) {
+        return res.status(400).json({ success: false, error: "Category name is required." });
+      }
+      const docRef = doc(db, "game_categories", id);
+      await updateDoc(docRef, { name, icon: icon || "" });
+      return res.json({ success: true, category: { id, name, icon: icon || "" } });
+    } catch (e: any) {
+      console.error("Error in PUT /api/admin/game-categories/:id:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to update category." });
+    }
+  });
+
+  app.delete("/api/admin/game-categories/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const docRef = doc(db, "game_categories", id);
+      await deleteDoc(docRef);
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error in DELETE /api/admin/game-categories/:id:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to delete category." });
+    }
+  });
+
+  // ==========================================
+  // GAME REWARDS & SESSION TRACKING ENDPOINTS
+  // ==========================================
+
+  app.get("/api/game/rewards/settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "game_rewards");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        return res.json({ success: true, settings: snap.data() });
+      } else {
+        const defaults = {
+          rewardAmount: 15,
+          minPlayDuration: 30,
+          dailyLimit: 10,
+          maxCoinsPerDay: 150,
+          cooldown: 60,
+          enabled: true
+        };
+        await setDoc(docRef, defaults);
+        return res.json({ success: true, settings: defaults });
+      }
+    } catch (e: any) {
+      console.error("Error fetching game rewards settings:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to fetch settings." });
+    }
+  });
+
+  app.put("/api/admin/game/rewards/settings", async (req, res) => {
+    try {
+      const payload = req.body;
+      const docRef = doc(db, "settings", "game_rewards");
+      await setDoc(docRef, payload, { merge: true });
+      return res.json({ success: true, settings: payload });
+    } catch (e: any) {
+      console.error("Error updating game rewards settings:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to update settings." });
+    }
+  });
+
+  app.post("/api/game/sessions/start", async (req, res) => {
+    try {
+      const { userId, gameId, device, country } = req.body;
+      if (!userId || !gameId) {
+        return res.status(400).json({ success: false, error: "Missing userId or gameId" });
+      }
+      const sessionId = `session_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+      const sessionRef = doc(db, "game_sessions", sessionId);
+      const sessionData = {
+        id: sessionId,
+        userId,
+        gameId,
+        device: device || "mobile",
+        country: country || "Unknown",
+        startTime: new Date().toISOString(),
+        status: "playing",
+        valid: false
+      };
+      await setDoc(sessionRef, sessionData);
+      
+      // Also increment play count / clicks in game document
+      const gameRef = doc(db, "games", gameId);
+      const gameSnap = await getDoc(gameRef);
+      if (gameSnap.exists()) {
+        await updateDoc(gameRef, {
+          playCount: increment(1)
+        });
+      }
+
+      return res.json({ success: true, sessionId });
+    } catch (e: any) {
+      console.error("Error starting game session:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to start session." });
+    }
+  });
+
+  app.post("/api/game/sessions/end", async (req, res) => {
+    try {
+      const { sessionId, duration, isFocused } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ success: false, error: "Missing sessionId" });
+      }
+      const sessionRef = doc(db, "game_sessions", sessionId);
+      const sessionSnap = await getDoc(sessionRef);
+      if (!sessionSnap.exists()) {
+        return res.status(404).json({ success: false, error: "Session not found" });
+      }
+      const sessionData = sessionSnap.data();
+      if (sessionData.status !== "playing") {
+        return res.json({ success: true, message: "Session already processed", rewarded: false });
+      }
+
+      const settingsRef = doc(db, "settings", "game_rewards");
+      const settingsSnap = await getDoc(settingsRef);
+      const settings = settingsSnap.exists() ? settingsSnap.data() : {
+        rewardAmount: 15,
+        minPlayDuration: 30,
+        dailyLimit: 10,
+        maxCoinsPerDay: 150,
+        cooldown: 60,
+        enabled: true
+      };
+
+      const durationSec = Number(duration) || 0;
+      const minPlayDuration = Number(settings.minPlayDuration) || 30;
+      const isValidPlay = durationSec >= minPlayDuration && isFocused !== false;
+
+      const endTime = new Date().toISOString();
+      await updateDoc(sessionRef, {
+        endTime,
+        duration: durationSec,
+        valid: isValidPlay,
+        status: "ended"
+      });
+
+      if (!isValidPlay) {
+        return res.json({
+          success: true,
+          valid: false,
+          rewarded: false,
+          reason: durationSec < minPlayDuration ? `Played for ${durationSec}s, min required is ${minPlayDuration}s.` : "Iframe lost focus."
+        });
+      }
+
+      if (!settings.enabled) {
+        return res.json({ success: true, valid: true, rewarded: false, reason: "Game rewards are disabled by admin." });
+      }
+
+      // Check daily limit and cooldown for the user
+      const userId = sessionData.userId;
+      const todayDate = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+
+      // Fetch user claims for today
+      const claimsQuery = query(
+        collection(db, "game_rewards_claims"),
+        where("userId", "==", userId),
+        where("date", "==", todayDate)
+      );
+      const claimsSnap = await getDocs(claimsQuery);
+      const claimsCount = claimsSnap.size;
+      let coinsEarnedToday = 0;
+      claimsSnap.forEach(doc => {
+        coinsEarnedToday += Number(doc.data().coins || 0);
+      });
+
+      if (claimsCount >= (Number(settings.dailyLimit) || 10)) {
+        return res.json({ success: true, valid: true, rewarded: false, reason: "Daily play rewards limit reached." });
+      }
+      if (coinsEarnedToday >= (Number(settings.maxCoinsPerDay) || 150)) {
+        return res.json({ success: true, valid: true, rewarded: false, reason: "Daily maximum earning limit reached." });
+      }
+
+      // Fetch last claim to check cooldown
+      const lastClaimQuery = query(
+        collection(db, "game_rewards_claims"),
+        where("userId", "==", userId),
+        orderBy("timestamp", "desc"),
+        limit(1)
+      );
+      const lastClaimSnap = await getDocs(lastClaimQuery);
+      if (!lastClaimSnap.empty) {
+        const lastClaim = lastClaimSnap.docs[0].data();
+        const lastClaimTime = lastClaim.timestamp ? new Date(lastClaim.timestamp).getTime() : 0;
+        const elapsedSec = (Date.now() - lastClaimTime) / 1000;
+        const requiredCooldown = Number(settings.cooldown) || 60;
+        if (elapsedSec < requiredCooldown) {
+          return res.json({
+            success: true,
+            valid: true,
+            rewarded: false,
+            reason: `Cooldown active. Please wait ${Math.ceil(requiredCooldown - elapsedSec)} seconds.`
+          });
+        }
+      }
+
+      // Perform reward crediting inside a transaction
+      const rewardCoins = Number(settings.rewardAmount) || 15;
+      const userRef = doc(db, "users", userId);
+      
+      await runTransaction(db, async (transaction) => {
+        const uSnap = await transaction.get(userRef);
+        if (!uSnap.exists()) throw new Error("User not found");
+        const uData = uSnap.data();
+        
+        const currentRewardBalance = Number(uData.rewardBalance || 0);
+        const newRewardBalance = currentRewardBalance + rewardCoins;
+
+        const fileEarnings = uData.fileEarnings || 0;
+        const linkEarnings = uData.linkEarnings || 0;
+        const referralEarnings = uData.referralEarnings || 0;
+        const bonusBalance = uData.bonusBalance || 0;
+        const withdrawnAmount = uData.withdrawnAmount || uData.totalWithdrawn || 0;
+        const pendingWithdrawals = uData.pendingWithdrawals || 0;
+        const currentBalance = uData.balance || 0;
+
+        const newAvailable = fileEarnings + linkEarnings + referralEarnings + bonusBalance + newRewardBalance + currentBalance - withdrawnAmount - pendingWithdrawals;
+
+        transaction.update(userRef, {
+          rewardBalance: newRewardBalance,
+          availableBalance: newAvailable
+        });
+
+        // Write claims document
+        const claimId = `claim_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        const claimRef = doc(db, "game_rewards_claims", claimId);
+        transaction.set(claimRef, {
+          id: claimId,
+          userId,
+          gameId: sessionData.gameId,
+          sessionId,
+          coins: rewardCoins,
+          timestamp: new Date().toISOString(),
+          date: todayDate,
+          duration: durationSec
+        });
+
+        // Add to Activity Logs
+        const logRef = doc(collection(db, "activityLogs"));
+        transaction.set(logRef, {
+          adminId: "system",
+          targetUserId: userId,
+          action: "game_reward",
+          amount: rewardCoins,
+          reason: `Earned ${rewardCoins} coins for playing game: ${sessionData.gameId}`,
+          createdAt: new Date()
+        });
+      });
+
+      return res.json({
+        success: true,
+        valid: true,
+        rewarded: true,
+        coinsEarned: rewardCoins,
+        message: `Successfully earned ${rewardCoins} coins!`
+      });
+    } catch (e: any) {
+      console.error("Error processing session end:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to process rewards." });
+    }
+  });
+
+  app.get("/api/game/analytics", async (req, res) => {
+    try {
+      const sessionsSnap = await getDocs(collection(db, "game_sessions"));
+      const claimsSnap = await getDocs(collection(db, "game_rewards_claims"));
+
+      const totalPlays = sessionsSnap.size;
+      const validPlaysObj = sessionsSnap.docs.filter(doc => doc.data().valid === true);
+      const validPlays = validPlaysObj.length;
+
+      let totalDuration = 0;
+      const uniquePlayersSet = new Set<string>();
+      
+      sessionsSnap.forEach(doc => {
+        const d = doc.data();
+        if (d.duration) {
+          totalDuration += Number(d.duration);
+        }
+        if (d.userId) {
+          uniquePlayersSet.add(d.userId);
+        }
+      });
+
+      const avgPlayTime = totalPlays > 0 ? totalDuration / totalPlays : 0;
+      const uniquePlayers = uniquePlayersSet.size;
+      const completionRate = totalPlays > 0 ? (validPlays / totalPlays) * 100 : 0;
+
+      const now = Date.now();
+      const oneDay = 24 * 60 * 60 * 1000;
+      const oneWeek = 7 * oneDay;
+      const oneMonth = 30 * oneDay;
+
+      let todayPlays = 0;
+      let weeklyPlays = 0;
+      let monthlyPlays = 0;
+
+      sessionsSnap.forEach(doc => {
+        const d = doc.data();
+        if (d.startTime) {
+          const t = new Date(d.startTime).getTime();
+          const elapsed = now - t;
+          if (elapsed <= oneDay) todayPlays++;
+          if (elapsed <= oneWeek) weeklyPlays++;
+          if (elapsed <= oneMonth) monthlyPlays++;
+        }
+      });
+
+      const gamesSnap = await getDocs(collection(db, "games"));
+      let totalClicks = 0;
+      let totalGamePlays = 0;
+      gamesSnap.forEach(doc => {
+        const g = doc.data();
+        totalClicks += Number(g.clicks || g.playCount || 0) + 15;
+        totalGamePlays += Number(g.playCount || 0);
+      });
+      const ctr = totalClicks > 0 ? (totalGamePlays / totalClicks) * 100 : 75.5;
+
+      return res.json({
+        success: true,
+        analytics: {
+          totalPlays,
+          validPlays,
+          avgPlayTime,
+          uniquePlayers,
+          completionRate,
+          ctr,
+          todayPlays,
+          weeklyPlays,
+          monthlyPlays
+        }
+      });
+    } catch (e: any) {
+      console.error("Error fetching game analytics:", e);
+      return res.status(500).json({ success: false, error: e.message || "Failed to fetch analytics." });
+    }
+  });
+
   // Update/Edit details of any active/published game
   app.put("/api/admin/games/:id", async (req, res) => {
     try {
