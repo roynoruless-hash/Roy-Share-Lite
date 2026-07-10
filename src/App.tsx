@@ -114,8 +114,9 @@ export default function App() {
     const hasTgParams = searchParams.has("tgWebAppData") || searchParams.has("tgWebAppVersion") || searchParams.has("userId") || searchParams.has("tgWebAppStartParam");
     const isTelegram = !!(window as any).Telegram?.WebApp?.initData || hasTgParams || /Telegram/i.test(navigator.userAgent);
     const isReferralPath = window.location.pathname === "/referral";
+    const isGamePath = window.location.pathname.startsWith("/game/");
 
-    if (isTelegram || isReferralPath) {
+    if (isTelegram || isReferralPath || isGamePath) {
       return (
         <TelegramAuthGuard>
           <MiniAppHome />

@@ -18,6 +18,7 @@ import {
   Filter
 } from "lucide-react";
 import { API_BASE } from "../config/api";
+import { navigate } from "../lib/navigation";
 
 interface Game {
   id: string;
@@ -125,10 +126,8 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
     setRecentlyPlayed(updatedRecent);
     localStorage.setItem(`games_recent_${userId}`, JSON.stringify(updatedRecent));
 
-    // Open play URL
-    if (game.url) {
-      window.open(game.url, "_blank");
-    }
+    // Navigate to the internal Game Player page
+    navigate(`/game/${game.id}`);
   };
 
   const toggleFavorite = (gameId: string, e: React.MouseEvent) => {

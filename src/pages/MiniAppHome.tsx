@@ -44,6 +44,8 @@ import { MyContentPage } from "./MyContentPage";
 import ReferralCenter from "./ReferralCenter";
 import DriveUploadPage from "./DriveUploadPage";
 import { GameCenterPage } from "./GameCenterPage";
+import { GamePlayerPage } from "./GamePlayerPage";
+import { navigate } from "../lib/navigation";
 
 interface PhoneVerificationProps {
   user: any;
@@ -285,6 +287,7 @@ export const MiniAppHome: React.FC = () => {
   const { user, loading, error } = useTelegramAuth();
   const [currentView, setCurrentView] = useState<string>(() => {
     console.log("[MiniAppHome] Initializing view. Pathname:", window.location.pathname, "Search:", window.location.search);
+    if (window.location.pathname.startsWith("/game/")) return "game-player";
     const params = new URLSearchParams(window.location.search);
     const page = params.get("page");
     if (page === "game-earn") return "game-earn";
@@ -355,6 +358,16 @@ export const MiniAppHome: React.FC = () => {
     if (window.location.pathname === "/referral" && currentView !== "referral") {
       console.log("[MiniAppHome] Pathname useEffect MATCHED '/referral'. Calling setCurrentView('referral')");
       setCurrentView("referral");
+    } else if (window.location.pathname.startsWith("/game/")) {
+      setCurrentView("game-player");
+    } else if (window.location.pathname === "/" || window.location.pathname === "") {
+      const searchParams = new URLSearchParams(window.location.search);
+      const viewParam = searchParams.get("view");
+      if (viewParam) {
+        setCurrentView(viewParam);
+      } else if (currentView === "game-player") {
+        setCurrentView("game-center");
+      }
     }
   }, [window.location.pathname]);
 
@@ -479,11 +492,28 @@ export const MiniAppHome: React.FC = () => {
   }
 
   // Render Sub-Views
+  if (currentView === "game-player") {
+    const gameId = window.location.pathname.split("/game/")[1] || "";
+    return (
+      <GamePlayerPage 
+        gameId={gameId}
+        userId={activeUser.id}
+        onBack={() => {
+          navigate("/?view=game-center");
+          setCurrentView("game-center");
+        }}
+      />
+    );
+  }
+
   if (currentView === "game-earn") {
     return (
       <GameCenterPage 
         userId={activeUser.id} 
-        onBack={() => setCurrentView("home")} 
+        onBack={() => {
+          navigate("/");
+          setCurrentView("home");
+        }} 
         initialView="intro"
       />
     );
@@ -493,7 +523,10 @@ export const MiniAppHome: React.FC = () => {
     return (
       <GameCenterPage 
         userId={activeUser.id} 
-        onBack={() => setCurrentView("home")} 
+        onBack={() => {
+          navigate("/");
+          setCurrentView("home");
+        }} 
         initialView="center"
       />
     );

@@ -3478,6 +3478,21 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  app.get("/api/gamepix/game/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const gameDocRef = doc(db, "games", id);
+      const docSnap = await getDoc(gameDocRef);
+      if (!docSnap.exists()) {
+        return res.status(404).json({ success: false, error: "Game not found." });
+      }
+      return res.json({ success: true, game: docSnap.data() });
+    } catch (e: any) {
+      console.error("Error in GET /api/gamepix/game/:id:", e);
+      return res.status(500).json({ success: false, error: "Failed to load game." });
+    }
+  });
+
   app.get("/api/admin/system-settings", async (req, res) => {
     try {
       const docRef = doc(db, "settings", "system");
