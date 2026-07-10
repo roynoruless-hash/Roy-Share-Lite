@@ -4269,8 +4269,200 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
-  // Helper function for URL shorteners
-  async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
+  // Game & Earn System
+  app.get("/api/admin/gamemonetize/sync", async (req, res) => {
+    try {
+      // GameMonetize usually provides a JSON/RSS feed. 
+      // For this implementation, we simulate the sync logic based on their standard format.
+      const FEED_URL = "https://gamemonetize.com/feed.php?format=0&type=json";
+      const response = await fetch(FEED_URL);
+      const data = await response.json();
+
+      if (!data || !Array.isArray(data)) {
+        return res.status(400).json({ success: false, error: "Invalid feed format from GameMonetize" });
+      }
+
+      const catalogCol = collection(db, "gamemonetize_catalog");
+      let syncedCount = 0;
+
+      for (const game of data) {
+        const gameId = String(game.id || game.game_id);
+        const docRef = doc(catalogCol, gameId);
+        
+        await setDoc(docRef, {
+          id: gameId,
+          title: game.title || game.name,
+          description: game.description || "",
+          url: game.url,
+          thumbnailUrl: game.thumb || game.thumbnail,
+          bannerUrl: game.instructions || game.thumb, // Use thumb if no banner
+          category: game.category || "General",
+          provider: "GameMonetize",
+          orientation: "landscape",
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        syncedCount++;
+      }
+
+      return res.json({ success: true, count: syncedCount });
+    } catch (e: any) {
+      console.error("GameMonetize Sync Error:", e);
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Convert Game Coins to Main Wallet
+  app.post("/api/game/convert-coins", async (req, res) => {
+    try {
+      const { userId, amount } = req.body;
+      if (!userId || !amount || amount <= 0) {
+        return res.status(400).json({ error: "Invalid conversion request" });
+      }
+
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
+
+      const userData = userSnap.data();
+      const currentGameCoins = Number(userData.gameCoins || 0);
+
+      if (currentGameCoins < amount) {
+        return res.status(400).json({ error: "Insufficient Game Coins" });
+      }
+
+      // Fetch conversion rate
+      const settingsSnap = await getDoc(doc(db, "settings", "game_rewards"));
+      const settings = settingsSnap.data() || { conversionRate: 0.001 }; // 1000 coins = 1 unit
+      const conversionRate = Number(settings.conversionRate || 0.001);
+      const mainWalletAddition = amount * conversionRate;
+
+      await updateDoc(userRef, {
+        gameCoins: increment(-amount),
+        availableBalance: increment(mainWalletAddition),
+        updatedAt: new Date().toISOString()
+      });
+
+      // Send Telegram Notification
+      const botToken = await getBotToken();
+      if (botToken && userData.telegramId) {
+        const text = `💰 *Coins Converted*\n\n` +
+          `Coins: ${amount}\n` +
+          `Balance Added: ₹${mainWalletAddition.toFixed(2)}\n` +
+          `Current Wallet: ₹${(Number(userData.availableBalance || 0) + mainWalletAddition).toFixed(2)}`;
+        
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: userData.telegramId,
+            text,
+            parse_mode: "Markdown"
+          })
+        });
+      }
+
+      return res.json({ success: true, added: mainWalletAddition });
+    } catch (e: any) {
+      console.error("Conversion Error:", e);
+      return res.status(500).json({ error: "Conversion failed" });
+    }
+  });
+
+  // Enhanced session end with anti-abuse and streak
+  app.post("/api/game/sessions/end-v2", async (req, res) => {
+    try {
+      const { sessionId, userId } = req.body;
+      const sessionRef = doc(db, "game_sessions", sessionId);
+      const sessionSnap = await getDoc(sessionRef);
+
+      if (!sessionSnap.exists()) return res.status(404).json({ error: "Session not found" });
+      const sessionData = sessionSnap.data();
+
+      if (sessionData.status === "completed") {
+        return res.status(400).json({ error: "Reward already claimed for this session." });
+      }
+
+      const startTime = new Date(sessionData.startTime).getTime();
+      const endTime = Date.now();
+      const durationSec = (endTime - startTime) / 1000;
+
+      // Get game requirement
+      const gameRef = doc(db, "games", sessionData.gameId);
+      const gameSnap = await getDoc(gameRef);
+      if (!gameSnap.exists()) return res.status(404).json({ error: "Game not found" });
+      const gameData = gameSnap.data();
+
+      const requiredTimeSec = Number(gameData.requiredTime || 60); // default 1 min
+      const rewardCoins = Number(gameData.rewardCoins || 10);
+
+      if (durationSec < requiredTimeSec) {
+        await updateDoc(sessionRef, { status: "failed", endTime: new Date().toISOString() });
+        return res.json({ success: false, error: "Time requirement not met", required: requiredTimeSec, actual: durationSec });
+      }
+
+      // Success - Add Reward
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.data();
+
+      // Update coins and streak
+      const today = new Date().toISOString().split("T")[0];
+      const lastPlay = userData?.lastGamePlayDate || "";
+      let newStreak = Number(userData?.gameStreak || 0);
+
+      if (lastPlay === today) {
+        // Already played today, streak remains same
+      } else {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split("T")[0];
+        
+        if (lastPlay === yesterdayStr) {
+          newStreak += 1;
+        } else {
+          newStreak = 1;
+        }
+      }
+
+      await updateDoc(userRef, {
+        gameCoins: increment(rewardCoins),
+        gameStreak: newStreak,
+        lastGamePlayDate: today,
+        updatedAt: new Date().toISOString()
+      });
+
+      await updateDoc(sessionRef, { status: "completed", endTime: new Date().toISOString(), earned: rewardCoins });
+
+      // Referral Bonus logic
+      if (userData?.gameReferrer) {
+        const rewardRef = doc(db, "game_referral_rewards", `${userData.gameReferrer}_${userId}_${sessionData.gameId}`);
+        const rewardSnap = await getDoc(rewardRef);
+        
+        if (!rewardSnap.exists()) {
+          const referrerRef = doc(db, "users", userData.gameReferrer);
+          const settingsSnap = await getDoc(doc(db, "settings", "game_rewards"));
+          const referralBonus = Number(settingsSnap.data()?.referralBonus || 5);
+          
+          await updateDoc(referrerRef, { gameCoins: increment(referralBonus) });
+          await setDoc(rewardRef, {
+            referrerId: userData.gameReferrer,
+            friendId: userId,
+            gameId: sessionData.gameId,
+            rewardedAt: new Date().toISOString(),
+            amount: referralBonus
+          });
+        }
+      }
+
+      return res.json({ success: true, earned: rewardCoins, streak: newStreak, newCoins: (userData?.gameCoins || 0) + rewardCoins });
+    } catch (e: any) {
+      console.error("Session End Error:", e);
+      return res.status(500).json({ error: "Failed to process reward" });
+    }
+  });
+
+  // Helper for URL shortening
+  async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string) {
     let endpoint = "";
     let responseText = "";
     
@@ -8107,6 +8299,94 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // ==========================================
+  // ADS.TXT MANAGER
+  // ==========================================
+
+  app.get("/api/admin/ads-txt-providers", async (req, res) => {
+    try {
+      const q = query(collection(db, "ads_txt_providers"));
+      const snap = await getDocs(q);
+      const providers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      res.json({ success: true, providers });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/ads-txt-providers", async (req, res) => {
+    try {
+      const { providerName, providerType, snippet, enabled } = req.body;
+      const data = {
+        providerName,
+        providerType,
+        snippet,
+        enabled: enabled !== undefined ? enabled : true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const docRef = await addDoc(collection(db, "ads_txt_providers"), data);
+      res.json({ success: true, id: docRef.id });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/admin/ads-txt-providers/:id", async (req, res) => {
+    try {
+      const { providerName, providerType, snippet, enabled } = req.body;
+      const data: any = {
+        updatedAt: new Date().toISOString()
+      };
+      if (providerName) data.providerName = providerName;
+      if (providerType) data.providerType = providerType;
+      if (snippet) data.snippet = snippet;
+      if (enabled !== undefined) data.enabled = enabled;
+
+      await updateDoc(doc(db, "ads_txt_providers", req.params.id), data);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/admin/ads-txt-providers/:id", async (req, res) => {
+    try {
+      await deleteDoc(doc(db, "ads_txt_providers", req.params.id));
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/admin/ads-txt-providers/:id/toggle", async (req, res) => {
+    try {
+      const { enabled } = req.body;
+      await updateDoc(doc(db, "ads_txt_providers", req.params.id), { enabled });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Public ads.txt route
+  app.get("/ads.txt", async (req, res) => {
+    try {
+      const q = query(collection(db, "ads_txt_providers"), where("enabled", "==", true));
+      const snap = await getDocs(q);
+      let content = "# RoyShare Ads.txt Manager\n";
+      snap.forEach(doc => {
+        const d = doc.data();
+        content += `\n# --- ${d.providerName} (${d.providerType}) ---\n${d.snippet}\n`;
+      });
+      res.header("Content-Type", "text/plain");
+      res.send(content);
+    } catch (e: any) {
+      res.status(500).send("Error generating ads.txt");
     }
   });
 

@@ -1,21 +1,27 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
-  ArrowLeft, 
-  Search, 
-  Play, 
   Gamepad2, 
-  Sparkles, 
-  ShieldAlert, 
-  AlertTriangle, 
-  RefreshCw,
-  Compass,
-  Star,
-  Clock,
-  Laptop,
-  Smartphone,
-  Trophy,
-  Filter
+  Search, 
+  Filter, 
+  Wallet, 
+  Flame, 
+  Clock, 
+  Play, 
+  Share2, 
+  Trophy, 
+  Coins, 
+  ChevronRight, 
+  TrendingUp,
+  History,
+  Info,
+  ExternalLink,
+  ChevronLeft,
+  SearchX,
+  Sparkles,
+  ArrowLeft,
+  Gamepad,
+  Timer
 } from "lucide-react";
 import { API_BASE } from "../config/api";
 import { navigate } from "../lib/navigation";
@@ -24,11 +30,20 @@ interface Game {
   id: string;
   title: string;
   description: string;
-  url: string;
   thumbnailUrl: string;
   bannerUrl: string;
   category: string;
-  orientation: string;
+  provider: string;
+  rewardCoins: number;
+  requiredTime: number; // in seconds
+  playCount: number;
+}
+
+interface UserData {
+  gameCoins: number;
+  gameStreak: number;
+  lastGamePlayDate: string;
+  availableBalance: number;
 }
 
 interface GameCenterPageProps {
@@ -40,473 +55,423 @@ interface GameCenterPageProps {
 export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, initialView = "intro" }) => {
   const [view, setView] = useState<"intro" | "center">(initialView);
   const [games, setGames] = useState<Game[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [userData, setUserData] = useState<UserData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState("All");
-
-  // Future Ready states (for architecture extension)
-  const [recentlyPlayed, setRecentlyPlayed] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(`games_recent_${userId}`);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(`games_fav_${userId}`);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [categories, setCategories] = useState<string[]>([
-    "All",
-    "Action",
-    "Arcade",
-    "Puzzle",
-    "Sports",
-    "Adventure",
-    "Racing",
-    "Strategy",
-    "Girls",
-    "Boys",
-    "Casual",
-    "Multiplayer"
-  ]);
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [categories, setCategories] = useState<string[]>(["All"]);
+  const [activeTab, setActiveTab] = useState<"games" | "wallet" | "history">("games");
 
   useEffect(() => {
-    const fetchDynamicCategories = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/admin/game-categories`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.categories)) {
-            const fetchedNames = data.categories.map((c: any) => c.name);
-            const merged = Array.from(new Set(["All", ...fetchedNames, ...categories.filter(c => c !== "All")]));
-            setCategories(merged);
-          }
-        }
-      } catch (err) {
-        console.error("Error loading dynamic categories in GameCenterPage:", err);
-      }
-    };
-    fetchDynamicCategories();
-  }, []);
-
-  useEffect(() => {
-    // Check if user has already seen the intro. If so, let them go straight to the center if they prefer.
-    const introSeen = localStorage.getItem(`game_intro_seen_${userId}`);
-    if (introSeen === "true" && initialView === "intro") {
-      setView("center");
+    fetchGames();
+    if (userId) {
+      fetchUserData();
     }
-  }, [userId, initialView]);
-
-  useEffect(() => {
-    if (view === "center") {
-      fetchGames();
-    }
-  }, [view]);
+  }, [userId]);
 
   const fetchGames = async () => {
-    setLoading(true);
-    setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/gamepix/games`);
-      if (!res.ok) {
-        throw new Error(`Server returned status ${res.status}`);
-      }
       const data = await res.json();
-      if (data.success && Array.isArray(data.games)) {
+      if (data.success) {
         setGames(data.games);
-      } else {
-        throw new Error("Invalid response format");
+        const cats = ["All", ...Array.from(new Set(data.games.map((g: any) => g.category))) as string[]];
+        setCategories(cats);
       }
-    } catch (err: any) {
-      console.error("Error fetching games:", err);
-      setError("Failed to load games. Showing offline library.");
+    } catch (err) {
+      console.error("Failed to fetch games:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOpenGameCenter = () => {
-    localStorage.setItem(`game_intro_seen_${userId}`, "true");
-    setView("center");
+  const fetchUserData = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/user/profile/${userId}`);
+      const data = await res.json();
+      if (data.success) {
+        setUserData({
+          gameCoins: data.user.gameCoins || 0,
+          gameStreak: data.user.gameStreak || 0,
+          lastGamePlayDate: data.user.lastGamePlayDate || "",
+          availableBalance: data.user.availableBalance || 0
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch user data:", err);
+    }
   };
 
-  const handlePlayGame = (game: Game) => {
-    // Record into recently played for Future Ready requirement
-    const updatedRecent = [game.id, ...recentlyPlayed.filter(id => id !== game.id)].slice(0, 10);
-    setRecentlyPlayed(updatedRecent);
-    localStorage.setItem(`games_recent_${userId}`, JSON.stringify(updatedRecent));
-
-    // Navigate to the internal Game Player page
-    navigate(`/game/${game.id}`);
-  };
-
-  const toggleFavorite = (gameId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const updated = favorites.includes(gameId) 
-      ? favorites.filter(id => id !== gameId)
-      : [...favorites, gameId];
-    setFavorites(updated);
-    localStorage.setItem(`games_fav_${userId}`, JSON.stringify(updated));
-  };
-
-  // Filters logic
   const filteredGames = games.filter(game => {
-    const matchesSearch = game.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          game.category.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = activeCategory === "All" || 
-                            game.category.toLowerCase() === activeCategory.toLowerCase();
+    const matchesSearch = game.title.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === "All" || game.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
+  const featuredGames = games.slice(0, 4);
+
+  const handleConvertCoins = async (amount: number) => {
+    if (!userId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/game/convert-coins`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, amount })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Successfully converted! ₹${data.added.toFixed(2)} added to main wallet.`);
+        fetchUserData();
+      } else {
+        alert(data.error || "Conversion failed");
+      }
+    } catch (err) {
+      console.error("Conversion error:", err);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6">
+        <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="text-slate-400 font-medium animate-pulse uppercase tracking-widest text-[10px]">Loading Game Universe...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#020617] text-white overflow-x-hidden font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-20 relative overflow-x-hidden">
       <AnimatePresence mode="wait">
         {view === "intro" ? (
-          /* ==========================================
-             PART 2 - INTRODUCTION PAGE
-             ========================================== */
           <motion.div
-            key="intro-screen"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.3 }}
-            className="min-h-screen flex flex-col justify-between p-6 relative overflow-hidden"
+            key="intro"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            className="min-h-screen flex flex-col p-6 relative"
           >
-            {/* Background elements */}
-            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-purple-900/10 via-transparent to-transparent pointer-events-none" />
-            <div className="absolute -top-40 -right-40 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
-
-            {/* Header / Brand */}
-            <div>
-              <header className="flex items-center gap-4 mb-8 pt-4">
-                <button 
-                  onClick={onBack} 
-                  className="p-2 hover:bg-slate-900 border border-slate-800/80 rounded-xl transition-colors active:scale-95"
-                >
-                  <ArrowLeft className="w-6 h-6 text-slate-400" />
-                </button>
-                <div className="flex items-center gap-2">
-                  <Gamepad2 className="w-7 h-7 text-purple-400" />
-                  <h1 className="text-xl font-black tracking-tight bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-300">
-                    Game & Earn
-                  </h1>
-                </div>
-              </header>
-
-              {/* Main Intro content */}
-              <div className="space-y-6 max-w-md mx-auto">
-                <div className="text-center space-y-2 mb-8">
-                  <div className="w-16 h-16 bg-purple-500/10 border border-purple-500/20 rounded-2xl flex items-center justify-center text-purple-400 mx-auto mb-4 shadow-xl shadow-purple-500/5">
-                    <Gamepad2 className="w-8 h-8" />
-                  </div>
-                  <h2 className="text-2xl font-black tracking-tight text-white">
-                    🎮 Game & Earn
-                  </h2>
-                  <p className="text-slate-400 text-sm leading-relaxed">
-                    Play premium HTML5 games and enjoy the RoyShare gaming experience.
-                  </p>
-                </div>
-
-                {/* Co-Branding */}
-                <div className="p-4 bg-slate-900/40 border border-slate-800/80 rounded-2xl flex items-center justify-center gap-3">
-                  <span className="text-xs text-slate-400 font-semibold">🤝 Powered by</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-black text-white tracking-wider">RoyShare</span>
-                    <span className="text-xs text-slate-500">×</span>
-                    <span className="text-sm font-black text-purple-400 tracking-wider">GamePix</span>
-                  </div>
-                </div>
-
-                {/* How It Works */}
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-1">
-                    How It Works
-                  </h3>
-                  <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-5 space-y-4">
-                    {[
-                      { step: "1", title: "Browse Games", desc: "Browse hundreds of premium games." },
-                      { step: "2", title: "Tap Play", desc: "Choose your favorite title and tap Play." },
-                      { step: "3", title: "Enjoy Gameplay", desc: "Enjoy the game on any device instantly." },
-                      { step: "4", title: "Earn Rewards", desc: "Rewards will be available in future updates after gameplay verification." }
-                    ].map((item, idx) => (
-                      <div key={idx} className="flex gap-4 items-start">
-                        <div className="w-6 h-6 rounded-lg bg-purple-500/10 border border-purple-500/25 text-purple-400 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                          {item.step}
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-sm text-slate-200">{item.title}</h4>
-                          <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{item.desc}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Important Notice */}
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-1">
-                    Important Notice
-                  </h3>
-                  <div className="bg-red-500/5 border border-red-500/10 rounded-2xl p-5 space-y-3 text-xs text-slate-400">
-                    <div className="flex items-start gap-2 text-red-400/90 font-bold mb-1">
-                      <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>Fair Play Policy</span>
-                    </div>
-                    <ul className="list-disc pl-4 space-y-1.5 leading-relaxed">
-                      <li>Play fairly.</li>
-                      <li>Do not use bots.</li>
-                      <li>Do not use automation.</li>
-                      <li>Do not refresh repeatedly.</li>
-                      <li>Rewards are verified.</li>
-                      <li>Abuse may result in account restriction.</li>
-                    </ul>
-                    <p className="text-[10px] text-slate-500 pt-2 border-t border-slate-800/40">
-                      * This page is only informational.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom action button */}
-            <div className="pt-8 max-w-md w-full mx-auto">
-              <button
-                onClick={handleOpenGameCenter}
-                className="w-full py-4 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-2xl text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-purple-900/20"
-              >
-                🚀 Open Game Center
+            <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.1),transparent)] pointer-events-none" />
+            
+            <header className="flex items-center gap-4 mb-12">
+              <button onClick={onBack} className="p-2 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-colors">
+                <ArrowLeft className="w-6 h-6 text-slate-400" />
               </button>
-            </div>
-          </motion.div>
-        ) : (
-          /* ==========================================
-             PART 3 - GAME CENTER PAGE
-             ========================================== */
-          <motion.div
-            key="game-center"
-            initial={{ opacity: 0, x: 15 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -15 }}
-            transition={{ duration: 0.3 }}
-            className="min-h-screen pb-12 relative"
-          >
-            {/* Header Navbar */}
-            <header className="p-4 border-b border-slate-850 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => setView("intro")} 
-                  className="p-2 hover:bg-slate-800 rounded-xl transition-colors active:scale-95"
-                >
-                  <ArrowLeft className="w-5 h-5 text-slate-400" />
-                </button>
-                <div>
-                  <h1 className="text-base font-black tracking-tight text-white flex items-center gap-1.5">
-                    🎮 Game Center
-                  </h1>
-                  <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                    Powered by GamePix
-                  </p>
-                </div>
-              </div>
-
-              {/* Co-Branding Partner */}
-              <div className="px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-xl text-[10px] font-bold text-purple-400">
-                RoyShare × GamePix
+              <div>
+                <h1 className="text-xl font-black text-white tracking-tight">RoyShare Arcade</h1>
+                <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">Version 2.0</p>
               </div>
             </header>
 
-            <main className="p-4 space-y-6">
-              {/* Search Bar */}
-              <div className="relative max-w-md mx-auto">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search games by title instantly..."
-                  className="w-full bg-slate-900/60 border border-slate-800 rounded-xl py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 placeholder-slate-500 text-slate-200"
-                />
+            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8 max-w-sm mx-auto">
+              <div className="w-24 h-24 bg-indigo-600 rounded-[2.5rem] flex items-center justify-center shadow-2xl shadow-indigo-500/20 rotate-6 group">
+                <Gamepad2 className="w-12 h-12 text-white animate-bounce" />
               </div>
-
-              {/* Categories horizontally scrollable */}
+              
               <div className="space-y-2">
-                <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 flex items-center gap-1.5">
-                  <Filter className="w-3 h-3" /> Filter by Category
-                </h3>
-                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none -mx-4 px-4">
-                  {categories.map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => setActiveCategory(cat)}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-all active:scale-95 ${
-                        activeCategory === cat 
-                          ? "bg-purple-600 text-white shadow-lg shadow-purple-900/35" 
-                          : "bg-slate-900/50 border border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-750"
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
+                <h2 className="text-3xl font-black text-white">Play Games, <span className="text-indigo-500">Earn Coins</span></h2>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  Join millions of players in the most rewarding gaming arena. Complete daily missions and convert your skills into real cash.
+                </p>
+              </div>
+
+              <div className="w-full grid grid-cols-2 gap-4">
+                <div className="bg-white/5 border border-white/5 rounded-2xl p-4 text-left">
+                  <Flame className="w-6 h-6 text-orange-500 mb-2" />
+                  <p className="text-xs font-bold text-white mb-1">Daily Streak</p>
+                  <p className="text-[10px] text-slate-500">Play every day to earn massive multipliers.</p>
+                </div>
+                <div className="bg-white/5 border border-white/5 rounded-2xl p-4 text-left">
+                  <Coins className="w-6 h-6 text-amber-500 mb-2" />
+                  <p className="text-xs font-bold text-white mb-1">Instant Cash</p>
+                  <p className="text-[10px] text-slate-500">Convert game coins directly to your wallet.</p>
                 </div>
               </div>
 
-              {/* Loader */}
-              {loading && (
-                <div className="flex flex-col items-center justify-center py-20 space-y-3">
-                  <RefreshCw className="w-8 h-8 text-purple-500 animate-spin" />
-                  <p className="text-xs text-slate-400 font-semibold">Loading awesome games...</p>
-                </div>
-              )}
+              <button 
+                onClick={() => setView("center")}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-4 rounded-2xl font-black text-lg transition-all shadow-xl shadow-indigo-900/20 flex items-center justify-center gap-3 active:scale-[0.98]"
+              >
+                Enter the Arena <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
 
-              {/* Error fallback message */}
-              {error && !loading && (
-                <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col items-center text-center max-w-md mx-auto">
-                  <AlertTriangle className="w-10 h-10 text-amber-500 mb-2" />
-                  <h4 className="font-bold text-sm">Offline Mode</h4>
-                  <p className="text-xs text-slate-400 mt-1">{error}</p>
-                  <button 
-                    onClick={fetchGames}
-                    className="mt-3 px-4 py-2 bg-slate-800 hover:bg-slate-750 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"
-                  >
-                    <RefreshCw className="w-3 h-3" /> Retry Connection
+            <div className="mt-auto pt-12 flex flex-col items-center gap-4 opacity-60">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">Powered By</span>
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black text-white">RoyShare</span>
+                  <div className="h-3 w-[1px] bg-white/20" />
+                  <span className="text-[11px] font-bold text-indigo-400">GamePix</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black text-white">RoyShare</span>
+                  <div className="h-3 w-[1px] bg-white/20" />
+                  <span className="text-[11px] font-bold text-amber-400">GameMonetize</span>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col"
+          >
+            {/* Top Navigation */}
+            <div className="bg-slate-900/50 backdrop-blur-xl border-b border-white/5 sticky top-0 z-50 px-4 py-3">
+              <div className="max-w-7xl mx-auto flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setView("intro")} className="p-1.5 hover:bg-white/5 rounded-lg text-slate-500 hover:text-white transition-all">
+                    <ChevronLeft className="w-6 h-6" />
                   </button>
-                </div>
-              )}
-
-              {/* Future Ready Extensions layout placeholders (Recently Played / Favorites / Stats) */}
-              {!loading && !error && games.length > 0 && (
-                <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
-                  <div className="p-3 bg-gradient-to-br from-purple-950/20 to-slate-900 border border-slate-850 rounded-2xl flex flex-col justify-between">
-                    <div>
-                      <Trophy className="w-5 h-5 text-amber-400 mb-1" />
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Play Missions</span>
+                  <div>
+                    <h1 className="text-lg font-bold text-white">Arcade</h1>
+                    <div className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                      <span className="text-[10px] text-emerald-500 font-bold uppercase">Live</span>
                     </div>
-                    <p className="text-xs text-slate-500 font-semibold mt-2">Coming Soon</p>
-                  </div>
-                  <div className="p-3 bg-gradient-to-br from-indigo-950/20 to-slate-900 border border-slate-850 rounded-2xl flex flex-col justify-between">
-                    <div>
-                      <Star className="w-5 h-5 text-indigo-400 mb-1" />
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Saved Favorites</span>
-                    </div>
-                    <p className="text-xs text-slate-200 font-bold mt-2">
-                      {favorites.length} {favorites.length === 1 ? 'Game' : 'Games'}
-                    </p>
                   </div>
                 </div>
-              )}
 
-              {/* Games Cards Grid */}
-              {!loading && (
-                <div className="space-y-4 max-w-md mx-auto">
-                  <div className="flex justify-between items-center px-1">
-                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">
-                      {activeCategory} Games ({filteredGames.length})
-                    </h3>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setActiveTab("wallet")}
+                    className="bg-slate-950 border border-white/5 rounded-2xl px-3 py-1.5 flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95"
+                  >
+                    <Coins className="w-4 h-4 text-amber-500" />
+                    <span className="text-sm font-bold text-amber-500">{userData?.gameCoins?.toLocaleString() || 0}</span>
+                  </button>
+                  <div className="bg-slate-950 border border-white/5 rounded-2xl px-3 py-1.5 flex items-center gap-2">
+                    <Flame className={`w-4 h-4 ${userData?.gameStreak ? "text-orange-500" : "text-slate-600"}`} />
+                    <span className="text-sm font-bold text-white">{userData?.gameStreak || 0}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="max-w-7xl mx-auto px-4 mt-6 w-full">
+              {activeTab === "games" && (
+                <div className="space-y-8 pb-24">
+                  {/* Search & Category */}
+                  <div className="flex flex-col gap-4">
+                    <div className="relative group">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+                      <input 
+                        type="text" 
+                        placeholder="Search games..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-slate-900/50 border border-white/10 rounded-2xl py-3.5 pl-12 pr-4 focus:outline-none focus:border-indigo-500/50 transition-all placeholder:text-slate-600 text-sm"
+                      />
+                    </div>
+                    
+                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                      {categories.map(cat => (
+                        <button
+                          key={cat}
+                          onClick={() => setSelectedCategory(cat)}
+                          className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                            selectedCategory === cat 
+                              ? "bg-indigo-600 text-white shadow-lg" 
+                              : "bg-slate-900 text-slate-400 border border-white/5 hover:border-white/10"
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  {filteredGames.length === 0 ? (
-                    <div className="text-center py-12 text-slate-500 text-xs">
-                      No games found matching your filters.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-4">
-                      {filteredGames.map((game) => {
-                        const isFav = favorites.includes(game.id);
-                        return (
-                          <motion.div
-                            key={game.id}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-slate-900/40 border border-slate-800/80 hover:border-purple-500/30 rounded-2xl overflow-hidden flex flex-col group transition-all"
-                          >
-                            {/* Banner Image Container */}
-                            <div className="h-44 relative overflow-hidden bg-slate-950">
-                              <img
-                                src={game.bannerUrl}
-                                alt={game.title}
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                              />
-                              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/10 to-transparent" />
-                              
-                              {/* Favorite / Love button */}
-                              <button
-                                onClick={(e) => toggleFavorite(game.id, e)}
-                                className="absolute top-3 right-3 p-2 bg-slate-950/60 hover:bg-slate-900 border border-slate-800/40 rounded-xl transition-all active:scale-90"
-                              >
-                                <Star className={`w-4 h-4 ${isFav ? "fill-yellow-400 text-yellow-400" : "text-slate-400"}`} />
-                              </button>
+                  {!searchQuery && selectedCategory === "All" && (
+                    <>
+                      {/* Featured */}
+                      <section className="space-y-4">
+                        <div className="flex items-center justify-between px-1">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-5 h-5 text-indigo-400" />
+                            <h2 className="text-lg font-black text-white uppercase tracking-tighter">Recommended</h2>
+                          </div>
+                          <button className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">See More</button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          {featuredGames.map(game => (
+                            <GameCard key={game.id} game={game} />
+                          ))}
+                        </div>
+                      </section>
 
-                              {/* Category Badge */}
-                              <span className="absolute bottom-3 left-3 px-2.5 py-1 bg-purple-500/20 backdrop-blur-md border border-purple-500/30 text-purple-300 text-[10px] font-black uppercase rounded-lg">
-                                {game.category}
-                              </span>
-
-                              {/* Orientation Badge */}
-                              <span className="absolute bottom-3 right-3 px-2 py-1 bg-slate-900/60 backdrop-blur-md border border-slate-800/50 text-slate-400 text-[10px] font-bold rounded-lg flex items-center gap-1">
-                                {game.orientation === "portrait" ? (
-                                  <>
-                                    <Smartphone className="w-3 h-3" /> Portrait
-                                  </>
-                                ) : (
-                                  <>
-                                    <Laptop className="w-3 h-3" /> Landscape
-                                  </>
-                                )}
-                              </span>
-                            </div>
-
-                            {/* Card Details Panel */}
-                            <div className="p-4 flex gap-4 items-center">
-                              {/* Game Icon */}
-                              <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 shrink-0">
-                                <img
-                                  src={game.thumbnailUrl}
-                                  alt={`${game.title} icon`}
-                                  referrerPolicy="no-referrer"
-                                  className="w-full h-full object-cover"
-                                />
+                      {/* Referral System Promo */}
+                      <section className="bg-gradient-to-br from-indigo-900/40 to-slate-900 border border-indigo-500/20 rounded-[2.5rem] p-8 relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 blur-3xl rounded-full -mr-24 -mt-24 group-hover:bg-indigo-500/20 transition-colors" />
+                        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                          <div className="space-y-4 max-w-md">
+                            <div className="flex items-center gap-2">
+                              <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40">
+                                <Share2 className="w-5 h-5 text-white" />
                               </div>
-
-                              {/* Title & Category Details */}
-                              <div className="flex-1 min-w-0">
-                                <h4 className="font-bold text-sm text-white truncate group-hover:text-purple-400 transition-colors">
-                                  {game.title}
-                                </h4>
-                                <p className="text-slate-400 text-xs mt-0.5 line-clamp-1">
-                                  {game.description || `Enjoy high-quality ${game.category} gaming.`}
-                                </p>
-                              </div>
-
-                              {/* Play Button */}
-                              <button
-                                onClick={() => handlePlayGame(game)}
-                                className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-black rounded-xl flex items-center gap-1.5 shrink-0 transition-colors shadow-lg shadow-purple-900/10"
-                              >
-                                <Play className="w-3.5 h-3.5 fill-current" /> Play
-                              </button>
+                              <h3 className="text-xl font-black text-white uppercase tracking-tighter">Referral Arena</h3>
                             </div>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
+                            <p className="text-sm text-slate-400 leading-relaxed">
+                              Invite your friends to the RoyShare Game & Earn universe. Get <span className="text-white font-bold">100 coins</span> instantly when they play their first game.
+                            </p>
+                          </div>
+                          <button className="px-8 py-3.5 bg-white text-slate-950 rounded-2xl text-xs font-black hover:bg-indigo-400 hover:text-white transition-all shadow-xl shadow-black/20 active:scale-95 whitespace-nowrap">
+                            INVITE SQUAD
+                          </button>
+                        </div>
+                      </section>
+
+                      {/* Streak Card */}
+                      <section className="bg-slate-900 border border-white/5 rounded-[2.5rem] p-8 flex flex-col md:flex-row items-center text-center md:text-left gap-8 relative overflow-hidden group hover:border-white/10 transition-all">
+                        <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-orange-500/5 blur-3xl rounded-full" />
+                        <div className="w-20 h-20 bg-white/5 rounded-3xl flex-shrink-0 flex items-center justify-center border border-white/10 group-hover:scale-110 transition-transform shadow-2xl">
+                          <Flame className="w-10 h-10 text-orange-500 animate-pulse" />
+                        </div>
+                        <div className="flex-1 space-y-4">
+                          <div className="space-y-1">
+                            <h3 className="text-2xl font-black text-white tracking-tight">Daily Missions</h3>
+                            <p className="text-slate-500 text-sm">Keep playing daily to maintain your <span className="text-orange-500 font-bold">{userData?.gameStreak || 0} day</span> streak!</p>
+                          </div>
+                          <div className="flex items-center justify-center md:justify-start gap-2">
+                            {[1, 2, 3, 4, 5, 6, 7].map(d => (
+                              <div key={d} className={`w-3 h-8 rounded-full transition-all duration-500 ${d <= (userData?.gameStreak || 0) % 7 ? "bg-gradient-to-t from-orange-600 to-orange-400 shadow-lg shadow-orange-500/20 h-10" : "bg-slate-800"}`} />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-center md:items-end gap-2">
+                           <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Current Multiplier</p>
+                           <p className="text-3xl font-black text-white">1.2x</p>
+                        </div>
+                      </section>
+                    </>
                   )}
+
+                  {/* All Games Grid */}
+                  <section className="space-y-4">
+                    <div className="flex items-center gap-2 px-1">
+                      <Gamepad className="w-5 h-5 text-emerald-400" />
+                      <h2 className="text-lg font-black text-white">{searchQuery ? "Search Results" : "Game Library"}</h2>
+                    </div>
+                    {filteredGames.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {filteredGames.map(game => (
+                          <GameCard key={game.id} game={game} />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="bg-slate-900/30 border border-white/5 rounded-3xl p-12 flex flex-col items-center justify-center text-center">
+                        <SearchX className="w-12 h-12 text-slate-700 mb-4" />
+                        <h3 className="text-xl font-bold text-white mb-1">Mission Not Found</h3>
+                        <p className="text-slate-500 text-sm">Try searching with a different term.</p>
+                      </div>
+                    )}
+                  </section>
                 </div>
               )}
-            </main>
+
+              {activeTab === "wallet" && (
+                <div className="max-w-lg mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="bg-slate-900 border border-white/10 rounded-[2.5rem] p-8 text-center space-y-6 relative overflow-hidden">
+                    <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/10 blur-3xl rounded-full" />
+                    <div className="w-20 h-20 bg-amber-500 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-amber-900/20 rotate-3">
+                      <Wallet className="w-10 h-10 text-white" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Available Game Coins</p>
+                      <h2 className="text-5xl font-black text-white flex items-center justify-center gap-3">
+                        <Coins className="w-10 h-10 text-amber-500" />
+                        {userData?.gameCoins?.toLocaleString() || 0}
+                      </h2>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 bg-black/20 p-4 rounded-2xl border border-white/5">
+                      <div className="text-left">
+                        <p className="text-[10px] font-bold text-slate-600 uppercase">Est. Value</p>
+                        <p className="text-lg font-black text-emerald-500">₹{((userData?.gameCoins || 0) * 0.001).toFixed(2)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-bold text-slate-600 uppercase">Rate</p>
+                        <p className="text-lg font-black text-white">1000 = ₹1</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleConvertCoins(userData?.gameCoins || 0)}
+                      disabled={!userData?.gameCoins || userData.gameCoins < 100}
+                      className="w-full bg-white hover:bg-indigo-400 hover:text-white text-slate-950 py-4 rounded-2xl font-black text-lg transition-all active:scale-[0.98] disabled:opacity-50"
+                    >
+                      {userData?.gameCoins && userData.gameCoins >= 100 ? "Convert Coins Now" : "Min 100 Coins Required"}
+                    </button>
+                    <div className="flex items-center justify-center gap-2 text-slate-500">
+                      <Info className="w-3 h-3" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Converted balance adds to Main Wallet</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Menu */}
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-sm bg-slate-900/80 backdrop-blur-2xl border border-white/10 rounded-2xl p-1.5 flex gap-1 z-[60] shadow-2xl">
+              <button onClick={() => setActiveTab("games")} className={`flex-1 flex flex-col items-center py-2.5 rounded-xl transition-all ${activeTab === "games" ? "bg-indigo-600 text-white" : "text-slate-500 hover:text-white"}`}>
+                <Gamepad2 className="w-5 h-5 mb-0.5" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Arena</span>
+              </button>
+              <button onClick={() => setActiveTab("wallet")} className={`flex-1 flex flex-col items-center py-2.5 rounded-xl transition-all ${activeTab === "wallet" ? "bg-indigo-600 text-white" : "text-slate-500 hover:text-white"}`}>
+                <Wallet className="w-5 h-5 mb-0.5" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Wallet</span>
+              </button>
+              <button onClick={() => setActiveTab("history")} className={`flex-1 flex flex-col items-center py-2.5 rounded-xl transition-all ${activeTab === "history" ? "bg-indigo-600 text-white" : "text-slate-500 hover:text-white"}`}>
+                <History className="w-5 h-5 mb-0.5" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Pass</span>
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
     </div>
+  );
+};
+
+const GameCard: React.FC<{ game: Game }> = ({ game }) => {
+  return (
+    <motion.div 
+      whileHover={{ y: -8 }}
+      className="bg-slate-900/50 border border-white/5 rounded-3xl overflow-hidden flex flex-col group h-full cursor-pointer relative"
+      onClick={() => navigate(`/game/${game.id}`)}
+    >
+      <div className="absolute top-3 left-3 z-20 px-2 py-1 bg-black/60 backdrop-blur-md rounded-lg border border-white/10">
+        <span className="text-[8px] font-black text-white/80 uppercase tracking-widest">{game.provider}</span>
+      </div>
+      
+      <div className="relative aspect-[16/10] overflow-hidden">
+        <img 
+          src={game.bannerUrl || game.thumbnailUrl} 
+          alt={game.title}
+          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+          referrerPolicy="no-referrer"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent" />
+        <div className="absolute bottom-3 left-3 flex items-center gap-2">
+          <div className="bg-emerald-500/20 backdrop-blur-md border border-emerald-500/20 px-2 py-1 rounded-lg flex items-center gap-1">
+            <Coins className="w-3 h-3 text-emerald-400" />
+            <span className="text-[10px] font-black text-emerald-400">+{game.rewardCoins || 10}</span>
+          </div>
+          <div className="bg-indigo-500/20 backdrop-blur-md border border-indigo-500/20 px-2 py-1 rounded-lg flex items-center gap-1">
+            <Timer className="w-3 h-3 text-indigo-400" />
+            <span className="text-[10px] font-black text-indigo-400">{Math.ceil((game.requiredTime || 60) / 60)}m</span>
+          </div>
+        </div>
+      </div>
+      
+      <div className="p-4 flex flex-col flex-1">
+        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">{game.category}</p>
+        <h3 className="font-bold text-white group-hover:text-indigo-400 transition-colors line-clamp-1">{game.title}</h3>
+        <div className="mt-4 flex items-center justify-between">
+          <button className="flex-1 bg-white hover:bg-indigo-400 hover:text-white text-slate-950 py-2 rounded-xl text-xs font-black transition-all active:scale-95 flex items-center justify-center gap-2">
+            <Play className="w-3 h-3 fill-current" /> Play & Earn
+          </button>
+        </div>
+      </div>
+    </motion.div>
   );
 };
