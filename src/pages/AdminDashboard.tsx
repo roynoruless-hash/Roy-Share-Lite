@@ -51,6 +51,7 @@ import React from 'react';
 import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
 import TelegramLoginSettingsAdmin from "../components/TelegramLoginSettingsAdmin";
+import buildInfo from "../build-info.json";
 interface ErrorBoundaryProps {
   children: React.ReactNode;
 }
@@ -89,6 +90,26 @@ function AdminDashboardContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [copiedBuildInfo, setCopiedBuildInfo] = useState(false);
+
+  const handleCopyBuildInfo = () => {
+    const isProduction = import.meta.env.PROD;
+    const textToCopy = `Build v${buildInfo.buildVersion}
+Commit: ${buildInfo.commitSha}
+Message: ${buildInfo.commitMessage}
+Committed: ${buildInfo.commitDate}
+Built: ${buildInfo.buildDateTime}
+Environment: ${isProduction ? "Production" : "Development"}`;
+
+    navigator.clipboard.writeText(textToCopy)
+      .then(() => {
+        setCopiedBuildInfo(true);
+        setTimeout(() => setCopiedBuildInfo(false), 2000);
+      })
+      .catch((err) => {
+        console.error("Failed to copy build info:", err);
+      });
+  };
   const [aiGenSettings, setAiGenSettings] = useState<any>({});
   const [aiPreviewRewards, setAiPreviewRewards] = useState<any>(null);
   const [usersError, setUsersError] = useState("");
@@ -2582,8 +2603,8 @@ function AdminDashboardContent() {
 
       <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans pt-20">
       {/* Header */}
-      <div className="mb-8 border-b border-slate-800 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
+      <div className="mb-8 border-b border-slate-800 pb-6 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
+        <div className="flex-1">
           <h1 className="text-3xl md:text-4xl font-extrabold text-white flex items-center gap-3">
             📊 RoyShare Admin Dashboard
           </h1>
@@ -2600,13 +2621,66 @@ function AdminDashboardContent() {
             </span>
           </div>
         </div>
-        <button
-          onClick={fetchDashboardData}
-          disabled={loading}
-          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 transition-all disabled:opacity-50"
-        >
-          🔄 Refresh Dashboard
-        </button>
+
+        {/* Build Info & Refresh Actions Panel */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 w-full xl:w-auto">
+          {/* Production Build Information Badge */}
+          <div className="bg-slate-900/90 backdrop-blur border border-slate-800 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full xl:w-[480px] shadow-lg">
+            <div className="text-xs font-mono space-y-1 text-slate-300">
+              <div className="flex items-center gap-2">
+                <span className="text-white font-sans font-semibold text-sm">Build v{buildInfo.buildVersion}</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-sans font-bold uppercase tracking-wide border ${
+                  import.meta.env.PROD 
+                    ? "text-indigo-400 bg-indigo-400/10 border-indigo-500/20" 
+                    : "text-amber-400 bg-amber-400/10 border-amber-500/20"
+                }`}>
+                  {import.meta.env.PROD ? "Production" : "Development"}
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-1.5 text-slate-400">
+                <span className="text-slate-500 font-sans font-medium text-[11px] uppercase tracking-wider min-w-[70px] inline-block">Commit:</span> 
+                <span className="text-slate-300 font-semibold bg-slate-950 px-1.5 py-0.5 rounded text-[11px] border border-slate-800">{buildInfo.commitSha}</span>
+              </div>
+              <div className="flex items-start gap-1.5 text-slate-400 max-w-sm">
+                <span className="text-slate-500 font-sans font-medium text-[11px] uppercase tracking-wider min-w-[70px] inline-block mt-0.5">Message:</span> 
+                <span className="text-slate-300 break-all leading-tight line-clamp-2" title={buildInfo.commitMessage}>{buildInfo.commitMessage}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-slate-400">
+                <span className="text-slate-500 font-sans font-medium text-[11px] uppercase tracking-wider min-w-[70px] inline-block">Committed:</span> 
+                <span className="text-slate-300">{buildInfo.commitDate}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-slate-400">
+                <span className="text-slate-500 font-sans font-medium text-[11px] uppercase tracking-wider min-w-[70px] inline-block">Built:</span> 
+                <span className="text-slate-300">{buildInfo.buildDateTime}</span>
+              </div>
+            </div>
+            <button
+              onClick={handleCopyBuildInfo}
+              className="flex items-center justify-center gap-1.5 self-end sm:self-center px-3 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs text-slate-200 rounded-lg transition-colors border border-slate-700 cursor-pointer select-none"
+            >
+              {copiedBuildInfo ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-400 font-semibold">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Copy Info</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          <button
+            onClick={fetchDashboardData}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 px-5 py-3 xl:py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 transition-all disabled:opacity-50 cursor-pointer h-full"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Refresh Dashboard</span>
+          </button>
+        </div>
       </div>
 
       {loading ? (

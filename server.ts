@@ -3206,7 +3206,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
               data-telegram-login="Roysharearn_bot" 
               data-size="large" 
               data-radius="16" 
-              data-auth-url="https://www.royshare.online/auth/telegram/callback" 
+              data-onauth="onTelegramAuth(user)" 
               data-request-access="write">
             </script>
           </div>
@@ -3234,6 +3234,11 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         <script>
           document.getElementById('origin-val').textContent = window.location.origin;
           document.getElementById('url-val').textContent = window.location.hostname;
+
+          window.onTelegramAuth = function(user) {
+            console.log("Telegram Auth Callback success:", user);
+            alert("Authenticated successfully!\nUser: " + user.first_name + " (" + user.id + ")");
+          };
         </script>
       </body>
       </html>

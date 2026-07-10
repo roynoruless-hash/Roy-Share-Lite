@@ -116,9 +116,9 @@ export default function ReferralLandingPage() {
         script.setAttribute("data-size", "large");
         script.setAttribute("data-radius", "16");
         
-        // Use the secure redirect-based callback URL matching our backend endpoint
-        const callbackUrl = `${window.location.origin}/auth/telegram/callback${inviteToken ? `?r=${encodeURIComponent(inviteToken)}` : ""}`;
-        script.setAttribute("data-auth-url", callbackUrl);
+        // Use the modern callback-based mode (data-onauth) which avoids full-page redirects
+        // and works perfectly in all modern browsers (avoiding oauth.telegram.org redirect deprecations)
+        script.setAttribute("data-onauth", "onTelegramAuth(user)");
         script.setAttribute("data-request-access", "write");
         
         container.appendChild(script);
