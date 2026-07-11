@@ -1073,6 +1073,14 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
   const saveWalkthrough = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Availability requirement
+    if (walkthroughForm.isAvailable === false) {
+      setWalkthroughsError("❌ Invalid or unavailable walkthrough. Please check availability first.");
+      setTimeout(() => setWalkthroughsError(""), 3000);
+      return;
+    }
+
     setWalkthroughsLoading(true);
     try {
       const payload = { 
@@ -1088,6 +1096,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       if (data.success) {
         setWalkthroughForm(null);
         setWalkthroughCodeVerified(null);
+        setWalkthroughVerifyResult(null);
         fetchWalkthroughs();
         setWalkthroughsSuccess("Walkthrough saved successfully!");
         setTimeout(() => setWalkthroughsSuccess(""), 3000);
@@ -1117,30 +1126,91 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   };
 
   const verifyWalkthrough = async (w: any) => {
+    const gameId = w.gameId;
+    if (!gameId) {
+       setWalkthroughsError("Game ID is required for verification");
+       setTimeout(() => setWalkthroughsError(""), 3000);
+       return;
+    }
+    
     setWalkthroughVerifyLoading(w.id || w.gameId);
     setWalkthroughVerifyResult(null);
     try {
-      // 1. Check if Game ID is valid (dummy check, just pinging GameMonetize API script)
-      const res = await fetch("https://api.gamemonetize.com/video.js", { mode: "no-cors" });
+      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs/check/${gameId}`);
+      const data = await res.json();
       
-      // Since it's no-cors, we can't really see content, but we check for network success
-      // A better verification would be to check if the video exists on their platform if possible
-      // For now, we simulate a successful check after a delay
-      await new Promise(r => setTimeout(r, 1500));
-      
-      setWalkthroughVerifyResult({
-        id: w.id || w.gameId,
-        success: true,
-        message: "✅ Walkthrough Verified Successfully"
-      });
+      if (data.success) {
+        setWalkthroughVerifyResult({
+          id: w.id || w.gameId,
+          success: data.isAvailable,
+          message: data.message,
+          timestamp: data.timestamp
+        });
+        
+        // If we are editing/creating in form, update the form state
+        if (walkthroughForm && (walkthroughForm.id === w.id || walkthroughForm.gameId === w.gameId)) {
+          setWalkthroughForm({
+            ...walkthroughForm,
+            isAvailable: data.isAvailable,
+            lastChecked: data.timestamp
+          });
+        }
+
+        // Update in list and Firestore if it has an ID
+        if (w.id) {
+           await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs`, {
+             method: "POST",
+             headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({ ...w, isAvailable: data.isAvailable, lastChecked: data.timestamp })
+           });
+           fetchWalkthroughs();
+        }
+        
+        if (data.isAvailable) {
+           setWalkthroughsSuccess("✅ Walkthrough Available");
+           setTimeout(() => setWalkthroughsSuccess(""), 3000);
+        } else {
+           setWalkthroughsError("❌ No Walkthrough Available For This Game");
+           setTimeout(() => setWalkthroughsError(""), 3000);
+        }
+      }
     } catch (err) {
+      console.error("Verification error:", err);
       setWalkthroughVerifyResult({
         id: w.id || w.gameId,
         success: false,
-        message: "❌ Walkthrough Not Available"
+        message: "❌ Verification failed"
       });
     } finally {
       setWalkthroughVerifyLoading(null);
+    }
+  };
+
+  const handleTestWalkthrough = async (w: any) => {
+    if (w.isAvailable === undefined) {
+      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs/check/${w.gameId}`);
+      const data = await res.json();
+      if (data.success) {
+        const updated = { ...w, isAvailable: data.isAvailable, lastChecked: data.timestamp };
+        if (walkthroughForm && (walkthroughForm.id === w.id || walkthroughForm.gameId === w.gameId)) {
+          setWalkthroughForm(updated);
+        }
+        setWalkthroughPreview(updated);
+        if (data.isAvailable) {
+          setWalkthroughsSuccess("✅ Preview Loaded Successfully");
+        } else {
+          setWalkthroughsError("❌ Walkthrough Failed to Load");
+        }
+        setTimeout(() => { setWalkthroughsSuccess(""); setWalkthroughsError(""); }, 3000);
+      }
+    } else {
+      setWalkthroughPreview(w);
+      if (w.isAvailable) {
+        setWalkthroughsSuccess("✅ Preview Loaded Successfully");
+      } else {
+        setWalkthroughsError("❌ Walkthrough Failed to Load");
+      }
+      setTimeout(() => { setWalkthroughsSuccess(""); setWalkthroughsError(""); }, 3000);
     }
   };
 
@@ -4215,107 +4285,141 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
                     <form onSubmit={saveWalkthrough} className="space-y-8">
                       {(!walkthroughForm.mode || walkthroughForm.mode === 'config') ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                          <div className="space-y-6">
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game Name</label>
-                              <input 
-                                required
-                                type="text"
-                                value={walkthroughForm.gameName || ""}
-                                onChange={(e) => setWalkthroughForm({...walkthroughForm, gameName: e.target.value})}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500 transition-all"
-                                placeholder="Enter game title"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game ID (GameMonetize)</label>
-                              <input 
-                                required
-                                type="text"
-                                value={walkthroughForm.gameId || ""}
-                                onChange={(e) => setWalkthroughForm({...walkthroughForm, gameId: e.target.value})}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono focus:border-blue-500 transition-all"
-                                placeholder="e.g. 12345"
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="space-y-6">
                               <div>
-                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Width</label>
+                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game Name</label>
                                 <input 
+                                  required
                                   type="text"
-                                  value={walkthroughForm.width || walkthroughSettings.defaultWidth}
-                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, width: e.target.value})}
-                                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white"
+                                  value={walkthroughForm.gameName || ""}
+                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, gameName: e.target.value})}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500 transition-all"
+                                  placeholder="Enter game title"
                                 />
                               </div>
                               <div>
-                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Height</label>
-                                <input 
-                                  type="text"
-                                  value={walkthroughForm.height || walkthroughSettings.defaultHeight}
-                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, height: e.target.value})}
-                                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white"
-                                />
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="space-y-6">
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">🎨 Custom Theme Color</label>
-                              <div className="flex items-center gap-3">
-                                <input 
-                                  type="color"
-                                  value={walkthroughForm.themeColor || walkthroughSettings.themeColor}
-                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, themeColor: e.target.value})}
-                                  className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 p-1 cursor-pointer"
-                                />
-                                <input 
-                                  type="text"
-                                  value={walkthroughForm.themeColor || walkthroughSettings.themeColor}
-                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, themeColor: e.target.value})}
-                                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="flex gap-4">
-                              <label className="flex-1 flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl cursor-pointer hover:border-slate-700 transition-all">
-                                <div className="flex items-center gap-3">
-                                  <div className={`p-2 rounded-lg ${walkthroughForm.enabled !== false ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-800 text-slate-500"}`}>
-                                    <CheckCircle size={18} />
-                                  </div>
-                                  <div>
-                                    <p className="text-sm font-bold text-white">Status</p>
-                                    <p className="text-[10px] text-slate-500">{walkthroughForm.enabled !== false ? "Enabled" : "Disabled"}</p>
-                                  </div>
+                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game ID (GameMonetize)</label>
+                                <div className="flex gap-2">
+                                  <input 
+                                    required
+                                    type="text"
+                                    value={walkthroughForm.gameId || ""}
+                                    onChange={(e) => setWalkthroughForm({...walkthroughForm, gameId: e.target.value})}
+                                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono focus:border-blue-500 transition-all"
+                                    placeholder="e.g. 12345"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => verifyWalkthrough(walkthroughForm)}
+                                    disabled={walkthroughVerifyLoading === walkthroughForm.gameId}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black rounded-xl transition-all flex items-center gap-2"
+                                  >
+                                    {walkthroughVerifyLoading === walkthroughForm.gameId ? <RefreshCw className="animate-spin" size={14} /> : <Search size={14} />}
+                                    Check Availability
+                                  </button>
                                 </div>
-                                <input 
-                                  type="checkbox"
-                                  checked={walkthroughForm.enabled !== false}
-                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, enabled: e.target.checked})}
-                                  className="w-5 h-5 rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900"
-                                />
-                              </label>
-
-                              <label className="flex-1 flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl cursor-pointer hover:border-slate-700 transition-all">
-                                <div className="flex items-center gap-3">
-                                  <div className={`p-2 rounded-lg ${walkthroughForm.showAds !== false ? "bg-amber-500/10 text-amber-400" : "bg-slate-800 text-slate-500"}`}>
-                                    <Sparkles size={18} />
+                              </div>
+                              {walkthroughForm.isAvailable !== undefined && (
+                                <div className={`p-4 rounded-xl border flex items-center justify-between ${walkthroughForm.isAvailable ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"}`}>
+                                  <div className="flex items-center gap-3">
+                                    {walkthroughForm.isAvailable ? <CheckCircle size={18} /> : <XCircle size={18} />}
+                                    <div>
+                                      <p className="text-xs font-bold">{walkthroughForm.isAvailable ? "✅ Walkthrough Available" : "❌ No Walkthrough Available For This Game"}</p>
+                                      {walkthroughForm.lastChecked && (
+                                        <p className="text-[10px] opacity-60">Last Checked: {new Date(walkthroughForm.lastChecked).toLocaleString()}</p>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div>
-                                    <p className="text-sm font-bold text-white">Show Ads</p>
-                                    <p className="text-[10px] text-slate-500">{walkthroughForm.showAds !== false ? "ON" : "OFF"}</p>
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTestWalkthrough(walkthroughForm)}
+                                    className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                  >
+                                    <Eye size={14} />
+                                    Test
+                                  </button>
                                 </div>
-                                <input 
-                                  type="checkbox"
-                                  checked={walkthroughForm.showAds !== false}
-                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, showAds: e.target.checked})}
-                                  className="w-5 h-5 rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900"
-                                />
-                              </label>
+                              )}
+                            </div>
+                            
+                            <div className="space-y-6">
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Width</label>
+                                  <input 
+                                    type="text"
+                                    value={walkthroughForm.width || walkthroughSettings.defaultWidth}
+                                    onChange={(e) => setWalkthroughForm({...walkthroughForm, width: e.target.value})}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Height</label>
+                                  <input 
+                                    type="text"
+                                    value={walkthroughForm.height || walkthroughSettings.defaultHeight}
+                                    onChange={(e) => setWalkthroughForm({...walkthroughForm, height: e.target.value})}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white"
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">🎨 Custom Theme Color</label>
+                                <div className="flex items-center gap-3">
+                                  <input 
+                                    type="color"
+                                    value={walkthroughForm.themeColor || walkthroughSettings.themeColor}
+                                    onChange={(e) => setWalkthroughForm({...walkthroughForm, themeColor: e.target.value})}
+                                    className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 p-1 cursor-pointer"
+                                  />
+                                  <input 
+                                    type="text"
+                                    value={walkthroughForm.themeColor || walkthroughSettings.themeColor}
+                                    onChange={(e) => setWalkthroughForm({...walkthroughForm, themeColor: e.target.value})}
+                                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="flex gap-4">
+                                <label className="flex-1 flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl cursor-pointer hover:border-slate-700 transition-all">
+                                  <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-lg ${walkthroughForm.enabled !== false ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-800 text-slate-500"}`}>
+                                      <CheckCircle size={18} />
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-bold text-white">Status</p>
+                                      <p className="text-[10px] text-slate-500">{walkthroughForm.enabled !== false ? "Enabled" : "Disabled"}</p>
+                                    </div>
+                                  </div>
+                                  <input 
+                                    type="checkbox"
+                                    checked={walkthroughForm.enabled !== false}
+                                    onChange={(e) => setWalkthroughForm({...walkthroughForm, enabled: e.target.checked})}
+                                    className="w-5 h-5 rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900"
+                                  />
+                                </label>
+
+                                <label className="flex-1 flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl cursor-pointer hover:border-slate-700 transition-all">
+                                  <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-lg ${walkthroughForm.showAds !== false ? "bg-amber-500/10 text-amber-400" : "bg-slate-800 text-slate-500"}`}>
+                                      <Sparkles size={18} />
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-bold text-white">Show Ads</p>
+                                      <p className="text-[10px] text-slate-500">{walkthroughForm.showAds !== false ? "ON" : "OFF"}</p>
+                                    </div>
+                                  </div>
+                                  <input 
+                                    type="checkbox"
+                                    checked={walkthroughForm.showAds !== false}
+                                    onChange={(e) => setWalkthroughForm({...walkthroughForm, showAds: e.target.checked})}
+                                    className="w-5 h-5 rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900"
+                                  />
+                                </label>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -4362,7 +4466,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setWalkthroughPreview(walkthroughForm)}
+                                  onClick={() => handleTestWalkthrough(walkthroughForm)}
                                   className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
                                 >
                                   <Eye size={14} />
@@ -4450,22 +4554,23 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                 <td className="px-6 py-4 font-mono text-xs text-slate-500">{w.gameId}</td>
                                 <td className="px-6 py-4 text-xs text-slate-400">{w.width || "100%"} x {w.height || "480"}</td>
                                 <td className="px-6 py-4">
+                                  <div className="flex flex-col gap-1">
+                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase inline-block w-fit ${w.isAvailable ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>
+                                      {w.isAvailable ? "🟢 Available" : "🔴 Unavailable"}
+                                    </span>
+                                    {w.lastChecked && (
+                                      <span className="text-[8px] text-slate-600 font-mono">Last Checked: {new Date(w.lastChecked).toLocaleDateString()}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4">
                                   <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${w.enabled !== false ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>
                                     {w.enabled !== false ? "Active" : "Disabled"}
                                   </span>
                                 </td>
-                                <td className="px-6 py-4">
-                                  {walkthroughVerifyResult?.id === (w.id || w.gameId) ? (
-                                    <span className={`text-[10px] font-bold ${walkthroughVerifyResult.success ? "text-emerald-400" : "text-rose-400"}`}>
-                                      {walkthroughVerifyResult.message}
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-slate-500 italic">Not Verified</span>
-                                  )}
-                                </td>
                                 <td className="px-6 py-4 text-right space-x-2">
                                   <button
-                                    onClick={() => setWalkthroughPreview(w)}
+                                    onClick={() => handleTestWalkthrough(w)}
                                     className="p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-all"
                                     title="Preview"
                                   >
@@ -4522,7 +4627,17 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     <div className="p-8 bg-black flex justify-center items-center min-h-[480px]">
                       {/* EMBED GENERATOR */}
                       <div className="w-full flex flex-col items-center">
-                         {walkthroughPreview.mode === 'raw' ? (
+                         {walkthroughPreview.isAvailable === false ? (
+                           <div className="flex flex-col items-center justify-center gap-4 text-center p-12 bg-slate-900/50 rounded-3xl border border-white/5 w-full">
+                              <div className="p-6 bg-rose-500/10 rounded-full text-rose-500">
+                                <Tv size={48} strokeWidth={1} />
+                              </div>
+                              <div>
+                                <h3 className="text-xl font-black text-white mb-2">No Walkthrough Available</h3>
+                                <p className="text-sm text-slate-500 max-w-xs mx-auto">No official walkthrough is available for this game on GameMonetize.</p>
+                              </div>
+                           </div>
+                         ) : walkthroughPreview.mode === 'raw' ? (
                            <div 
                               className="bg-slate-950 rounded-2xl border border-white/5 overflow-hidden shadow-2xl relative group w-full"
                               style={{ 
