@@ -55,6 +55,9 @@ import {
   Save,
   Coins,
   ArrowRight,
+  Code,
+  FlaskConical,
+  Settings,
 } from "lucide-react";
 
 
@@ -313,6 +316,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [walkthroughPreview, setWalkthroughPreview] = useState<any>(null);
   const [walkthroughVerifyLoading, setWalkthroughVerifyLoading] = useState<string | null>(null);
   const [walkthroughVerifyResult, setWalkthroughVerifyResult] = useState<any>(null);
+  const [walkthroughCodeVerified, setWalkthroughCodeVerified] = useState<boolean | null>(null);
   const [walkthroughsSuccess, setWalkthroughsSuccess] = useState("");
   const [walkthroughsError, setWalkthroughsError] = useState("");
 
@@ -1050,18 +1054,40 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const verifyWalkthroughCode = () => {
+    const code = walkthroughForm.rawCode || "";
+    const hasOptions = code.includes("window.VIDEO_OPTIONS");
+    const hasGameId = code.includes("gameid");
+    const hasScript = code.includes("api.gamemonetize.com/video.js");
+
+    if (hasOptions && hasGameId && hasScript) {
+      setWalkthroughCodeVerified(true);
+      setWalkthroughsSuccess("✅ Walkthrough Code Verified Successfully");
+      setTimeout(() => setWalkthroughsSuccess(""), 3000);
+    } else {
+      setWalkthroughCodeVerified(false);
+      setWalkthroughsError("❌ Invalid Walkthrough Code");
+      setTimeout(() => setWalkthroughsError(""), 3000);
+    }
+  };
+
   const saveWalkthrough = async (e: React.FormEvent) => {
     e.preventDefault();
     setWalkthroughsLoading(true);
     try {
+      const payload = { 
+        ...walkthroughForm, 
+        mode: walkthroughForm.mode || "config" 
+      };
       const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(walkthroughForm)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (data.success) {
         setWalkthroughForm(null);
+        setWalkthroughCodeVerified(null);
         fetchWalkthroughs();
         setWalkthroughsSuccess("Walkthrough saved successfully!");
         setTimeout(() => setWalkthroughsSuccess(""), 3000);
@@ -4168,118 +4194,215 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       </button>
                     </div>
 
-                    <form onSubmit={saveWalkthrough} className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      <div className="space-y-6">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game Name</label>
-                          <input 
-                            required
-                            type="text"
-                            value={walkthroughForm.gameName || ""}
-                            onChange={(e) => setWalkthroughForm({...walkthroughForm, gameName: e.target.value})}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500 transition-all"
-                            placeholder="Enter game title"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game ID (GameMonetize)</label>
-                          <input 
-                            required
-                            type="text"
-                            value={walkthroughForm.gameId || ""}
-                            onChange={(e) => setWalkthroughForm({...walkthroughForm, gameId: e.target.value})}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono focus:border-blue-500 transition-all"
-                            placeholder="e.g. 12345"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Width</label>
-                            <input 
-                              type="text"
-                              value={walkthroughForm.width || walkthroughSettings.defaultWidth}
-                              onChange={(e) => setWalkthroughForm({...walkthroughForm, width: e.target.value})}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Height</label>
-                            <input 
-                              type="text"
-                              value={walkthroughForm.height || walkthroughSettings.defaultHeight}
-                              onChange={(e) => setWalkthroughForm({...walkthroughForm, height: e.target.value})}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white"
-                            />
-                          </div>
-                        </div>
-                      </div>
+                    <div className="flex bg-slate-950 p-1.5 rounded-2xl border border-slate-800 self-start">
+                      <button 
+                        type="button"
+                        onClick={() => setWalkthroughForm({...walkthroughForm, mode: 'config'})}
+                        className={`px-6 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${(!walkthroughForm.mode || walkthroughForm.mode === 'config') ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20" : "text-slate-500 hover:text-slate-300"}`}
+                      >
+                        <Settings size={14} />
+                        Configuration Mode
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setWalkthroughForm({...walkthroughForm, mode: 'raw'})}
+                        className={`px-6 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${(walkthroughForm.mode === 'raw') ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20" : "text-slate-500 hover:text-slate-300"}`}
+                      >
+                        <Code size={14} />
+                        Raw Embed Code Mode
+                      </button>
+                    </div>
 
-                      <div className="space-y-6">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">🎨 Custom Theme Color</label>
-                          <div className="flex items-center gap-3">
-                            <input 
-                              type="color"
-                              value={walkthroughForm.themeColor || walkthroughSettings.themeColor}
-                              onChange={(e) => setWalkthroughForm({...walkthroughForm, themeColor: e.target.value})}
-                              className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 p-1 cursor-pointer"
-                            />
-                            <input 
-                              type="text"
-                              value={walkthroughForm.themeColor || walkthroughSettings.themeColor}
-                              onChange={(e) => setWalkthroughForm({...walkthroughForm, themeColor: e.target.value})}
-                              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex gap-4">
-                          <label className="flex-1 flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl cursor-pointer hover:border-slate-700 transition-all">
-                            <div className="flex items-center gap-3">
-                              <div className={`p-2 rounded-lg ${walkthroughForm.enabled !== false ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-800 text-slate-500"}`}>
-                                <CheckCircle size={18} />
+                    <form onSubmit={saveWalkthrough} className="space-y-8">
+                      {(!walkthroughForm.mode || walkthroughForm.mode === 'config') ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div className="space-y-6">
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game Name</label>
+                              <input 
+                                required
+                                type="text"
+                                value={walkthroughForm.gameName || ""}
+                                onChange={(e) => setWalkthroughForm({...walkthroughForm, gameName: e.target.value})}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500 transition-all"
+                                placeholder="Enter game title"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game ID (GameMonetize)</label>
+                              <input 
+                                required
+                                type="text"
+                                value={walkthroughForm.gameId || ""}
+                                onChange={(e) => setWalkthroughForm({...walkthroughForm, gameId: e.target.value})}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono focus:border-blue-500 transition-all"
+                                placeholder="e.g. 12345"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Width</label>
+                                <input 
+                                  type="text"
+                                  value={walkthroughForm.width || walkthroughSettings.defaultWidth}
+                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, width: e.target.value})}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white"
+                                />
                               </div>
                               <div>
-                                <p className="text-sm font-bold text-white">Status</p>
-                                <p className="text-[10px] text-slate-500">{walkthroughForm.enabled !== false ? "Enabled" : "Disabled"}</p>
+                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Height</label>
+                                <input 
+                                  type="text"
+                                  value={walkthroughForm.height || walkthroughSettings.defaultHeight}
+                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, height: e.target.value})}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white"
+                                />
                               </div>
                             </div>
-                            <input 
-                              type="checkbox"
-                              checked={walkthroughForm.enabled !== false}
-                              onChange={(e) => setWalkthroughForm({...walkthroughForm, enabled: e.target.checked})}
-                              className="w-5 h-5 rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900"
-                            />
-                          </label>
+                          </div>
 
-                          <label className="flex-1 flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl cursor-pointer hover:border-slate-700 transition-all">
-                            <div className="flex items-center gap-3">
-                              <div className={`p-2 rounded-lg ${walkthroughForm.showAds !== false ? "bg-amber-500/10 text-amber-400" : "bg-slate-800 text-slate-500"}`}>
-                                <Sparkles size={18} />
-                              </div>
-                              <div>
-                                <p className="text-sm font-bold text-white">Show Ads</p>
-                                <p className="text-[10px] text-slate-500">{walkthroughForm.showAds !== false ? "ON" : "OFF"}</p>
+                          <div className="space-y-6">
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">🎨 Custom Theme Color</label>
+                              <div className="flex items-center gap-3">
+                                <input 
+                                  type="color"
+                                  value={walkthroughForm.themeColor || walkthroughSettings.themeColor}
+                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, themeColor: e.target.value})}
+                                  className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 p-1 cursor-pointer"
+                                />
+                                <input 
+                                  type="text"
+                                  value={walkthroughForm.themeColor || walkthroughSettings.themeColor}
+                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, themeColor: e.target.value})}
+                                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono"
+                                />
                               </div>
                             </div>
-                            <input 
-                              type="checkbox"
-                              checked={walkthroughForm.showAds !== false}
-                              onChange={(e) => setWalkthroughForm({...walkthroughForm, showAds: e.target.checked})}
-                              className="w-5 h-5 rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900"
-                            />
-                          </label>
-                        </div>
 
-                        <div className="pt-6">
-                          <button
-                            type="submit"
-                            disabled={walkthroughsLoading}
-                            className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-blue-900/20 disabled:opacity-50"
-                          >
-                            {walkthroughsLoading ? "Saving..." : walkthroughForm.id ? "Update Walkthrough" : "Create Walkthrough"}
-                          </button>
+                            <div className="flex gap-4">
+                              <label className="flex-1 flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl cursor-pointer hover:border-slate-700 transition-all">
+                                <div className="flex items-center gap-3">
+                                  <div className={`p-2 rounded-lg ${walkthroughForm.enabled !== false ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-800 text-slate-500"}`}>
+                                    <CheckCircle size={18} />
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-bold text-white">Status</p>
+                                    <p className="text-[10px] text-slate-500">{walkthroughForm.enabled !== false ? "Enabled" : "Disabled"}</p>
+                                  </div>
+                                </div>
+                                <input 
+                                  type="checkbox"
+                                  checked={walkthroughForm.enabled !== false}
+                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, enabled: e.target.checked})}
+                                  className="w-5 h-5 rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900"
+                                />
+                              </label>
+
+                              <label className="flex-1 flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl cursor-pointer hover:border-slate-700 transition-all">
+                                <div className="flex items-center gap-3">
+                                  <div className={`p-2 rounded-lg ${walkthroughForm.showAds !== false ? "bg-amber-500/10 text-amber-400" : "bg-slate-800 text-slate-500"}`}>
+                                    <Sparkles size={18} />
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-bold text-white">Show Ads</p>
+                                    <p className="text-[10px] text-slate-500">{walkthroughForm.showAds !== false ? "ON" : "OFF"}</p>
+                                  </div>
+                                </div>
+                                <input 
+                                  type="checkbox"
+                                  checked={walkthroughForm.showAds !== false}
+                                  onChange={(e) => setWalkthroughForm({...walkthroughForm, showAds: e.target.checked})}
+                                  className="w-5 h-5 rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900"
+                                />
+                              </label>
+                            </div>
+                          </div>
                         </div>
+                      ) : (
+                        <div className="space-y-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game Name</label>
+                              <input 
+                                required
+                                type="text"
+                                value={walkthroughForm.gameName || ""}
+                                onChange={(e) => setWalkthroughForm({...walkthroughForm, gameName: e.target.value})}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500 transition-all"
+                                placeholder="Enter game title"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Game ID (Reference)</label>
+                              <input 
+                                required
+                                type="text"
+                                value={walkthroughForm.gameId || ""}
+                                onChange={(e) => setWalkthroughForm({...walkthroughForm, gameId: e.target.value})}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono"
+                                placeholder="e.g. 12345"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-sm font-black text-white flex items-center gap-2">
+                                📜 Walkthrough Embed Code
+                              </h4>
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={verifyWalkthroughCode}
+                                  className="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                >
+                                  <FlaskConical size={14} />
+                                  🧪 Verify Code
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setWalkthroughPreview(walkthroughForm)}
+                                  className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                >
+                                  <Eye size={14} />
+                                  🔍 Test Walkthrough
+                                </button>
+                              </div>
+                            </div>
+                            <textarea 
+                              required
+                              rows={15}
+                              value={walkthroughForm.rawCode || ""}
+                              onChange={(e) => setWalkthroughForm({...walkthroughForm, rawCode: e.target.value})}
+                              className="w-full bg-black border border-slate-800 rounded-2xl p-4 text-xs font-mono text-emerald-400 leading-relaxed focus:border-blue-500 outline-none transition-all resize-none"
+                              placeholder={`<div id="gamemonetize-video"></div>\n<script>\n  window.VIDEO_OPTIONS = { ... };\n</script>\n<script src="https://api.gamemonetize.com/video.js"></script>`}
+                            />
+                            {walkthroughCodeVerified !== null && (
+                              <div className={`p-4 rounded-xl border flex items-center gap-3 ${walkthroughCodeVerified ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"}`}>
+                                {walkthroughCodeVerified ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
+                                <span className="text-xs font-bold">{walkthroughCodeVerified ? "✅ Walkthrough Code Verified Successfully" : "❌ Invalid Walkthrough Code"}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-4 pt-6">
+                        <button
+                          type="submit"
+                          disabled={walkthroughsLoading}
+                          className="flex-1 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-blue-900/20 disabled:opacity-50"
+                        >
+                          {walkthroughsLoading ? "Saving..." : walkthroughForm.id ? "Update Walkthrough" : "Create Walkthrough"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWalkthroughForm(null)}
+                          className="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-2xl transition-all"
+                        >
+                          Cancel
+                        </button>
                       </div>
                     </form>
                   </div>
@@ -4399,28 +4522,63 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     <div className="p-8 bg-black flex justify-center items-center min-h-[480px]">
                       {/* EMBED GENERATOR */}
                       <div className="w-full flex flex-col items-center">
-                         <div className="bg-slate-900 p-4 rounded-xl mb-4 w-full">
-                            <p className="text-[10px] text-slate-500 font-mono mb-2 uppercase tracking-widest">Auto-Generated Embed Script</p>
-                            <code className="text-[10px] text-blue-400 break-all leading-relaxed">
-                               {`window.VIDEO_OPTIONS = { gameid: "${walkthroughPreview.gameId}", width: "${walkthroughPreview.width || walkthroughSettings.defaultWidth}", height: "${walkthroughPreview.height || walkthroughSettings.defaultHeight}", color: "${walkthroughPreview.themeColor || walkthroughSettings.themeColor}", getAds: ${walkthroughPreview.showAds !== false ? "true" : "false"} };`}
-                            </code>
-                         </div>
-                         <div 
-                            className="bg-slate-950 rounded-2xl border border-white/5 overflow-hidden shadow-2xl relative group"
-                            style={{ 
-                                width: walkthroughPreview.width || walkthroughSettings.defaultWidth || "100%", 
-                                height: walkthroughPreview.height || walkthroughSettings.defaultHeight || "480px" 
-                            }}
-                         >
-                            <iframe 
-                                src={`https://api.gamemonetize.com/video.php?id=${walkthroughPreview.gameId}&width=${walkthroughPreview.width || walkthroughSettings.defaultWidth}&height=${walkthroughPreview.height || walkthroughSettings.defaultHeight}&color=${encodeURIComponent(walkthroughPreview.themeColor || walkthroughSettings.themeColor)}&getAds=${walkthroughPreview.showAds !== false ? "true" : "false"}`}
-                                frameBorder="0" 
-                                scrolling="no" 
-                                width="100%" 
-                                height="100%"
-                                className="w-full h-full"
-                            />
-                         </div>
+                         {walkthroughPreview.mode === 'raw' ? (
+                           <div 
+                              className="bg-slate-950 rounded-2xl border border-white/5 overflow-hidden shadow-2xl relative group w-full"
+                              style={{ 
+                                  height: walkthroughPreview.height || walkthroughSettings.defaultHeight || "480px" 
+                              }}
+                           >
+                              <iframe 
+                                  title="Walkthrough Raw Preview"
+                                  srcDoc={`
+                                    <!DOCTYPE html>
+                                    <html>
+                                      <head>
+                                        <style>
+                                          body { margin: 0; padding: 0; background: black; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
+                                          #gamemonetize-video { width: 100% !important; height: 100% !important; }
+                                        </style>
+                                      </head>
+                                      <body>
+                                        ${walkthroughPreview.rawCode}
+                                      </body>
+                                    </html>
+                                  `}
+                                  frameBorder="0" 
+                                  scrolling="no" 
+                                  width="100%" 
+                                  height="100%"
+                                  className="w-full h-full"
+                              />
+                           </div>
+                         ) : (
+                           <>
+                             <div className="bg-slate-900 p-4 rounded-xl mb-4 w-full">
+                                <p className="text-[10px] text-slate-500 font-mono mb-2 uppercase tracking-widest">Auto-Generated Embed Script</p>
+                                <code className="text-[10px] text-blue-400 break-all leading-relaxed">
+                                   {`window.VIDEO_OPTIONS = { gameid: "${walkthroughPreview.gameId}", width: "${walkthroughPreview.width || walkthroughSettings.defaultWidth}", height: "${walkthroughPreview.height || walkthroughSettings.defaultHeight}", color: "${walkthroughPreview.themeColor || walkthroughSettings.themeColor}", getAds: ${walkthroughPreview.showAds !== false ? "true" : "false"} };`}
+                                </code>
+                             </div>
+                             <div 
+                                className="bg-slate-950 rounded-2xl border border-white/5 overflow-hidden shadow-2xl relative group"
+                                style={{ 
+                                    width: walkthroughPreview.width || walkthroughSettings.defaultWidth || "100%", 
+                                    height: walkthroughPreview.height || walkthroughSettings.defaultHeight || "480px" 
+                                }}
+                             >
+                                <iframe 
+                                    title="Walkthrough Config Preview"
+                                    src={`https://api.gamemonetize.com/video.php?id=${walkthroughPreview.gameId}&width=${walkthroughPreview.width || walkthroughSettings.defaultWidth}&height=${walkthroughPreview.height || walkthroughSettings.defaultHeight}&color=${encodeURIComponent(walkthroughPreview.themeColor || walkthroughSettings.themeColor)}&getAds=${walkthroughPreview.showAds !== false ? "true" : "false"}`}
+                                    frameBorder="0" 
+                                    scrolling="no" 
+                                    width="100%" 
+                                    height="100%"
+                                    className="w-full h-full"
+                                />
+                             </div>
+                           </>
+                         )}
                       </div>
                     </div>
                     <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-between items-center">

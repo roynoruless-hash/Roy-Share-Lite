@@ -266,14 +266,40 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
                       minHeight: "200px"
                     }}
                   >
-                    <iframe 
-                      src={`https://api.gamemonetize.com/video.php?id=${walkthroughData.walkthrough.gameId}&width=${walkthroughData.walkthrough.width || walkthroughData.globalSettings.defaultWidth || '100%'}&height=${walkthroughData.walkthrough.height || walkthroughData.globalSettings.defaultHeight || '480'}&color=${encodeURIComponent(walkthroughData.walkthrough.themeColor || walkthroughData.globalSettings.themeColor || '#4f46e5')}&getAds=${walkthroughData.walkthrough.showAds !== false && walkthroughData.globalSettings.showAds !== false ? "true" : "false"}`}
-                      frameBorder="0" 
-                      scrolling="no" 
-                      width="100%" 
-                      height="100%"
-                      className="w-full h-full"
-                    />
+                    {walkthroughData.walkthrough.mode === 'raw' ? (
+                      <iframe 
+                        title="Official Game Walkthrough"
+                        srcDoc={`
+                          <!DOCTYPE html>
+                          <html>
+                            <head>
+                              <style>
+                                body { margin: 0; padding: 0; background: black; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
+                                #gamemonetize-video { width: 100% !important; height: 100% !important; }
+                              </style>
+                            </head>
+                            <body>
+                              ${walkthroughData.walkthrough.rawCode}
+                            </body>
+                          </html>
+                        `}
+                        frameBorder="0" 
+                        scrolling="no" 
+                        width="100%" 
+                        height="100%"
+                        className="w-full h-full"
+                      />
+                    ) : (
+                      <iframe 
+                        title="Official Game Walkthrough"
+                        src={`https://api.gamemonetize.com/video.php?id=${walkthroughData.walkthrough.gameId}&width=${walkthroughData.walkthrough.width || walkthroughData.globalSettings.defaultWidth || '100%'}&height=${walkthroughData.walkthrough.height || walkthroughData.globalSettings.defaultHeight || '480'}&color=${encodeURIComponent(walkthroughData.walkthrough.themeColor || walkthroughData.globalSettings.themeColor || '#4f46e5')}&getAds=${walkthroughData.walkthrough.showAds !== false && walkthroughData.globalSettings.showAds !== false ? "true" : "false"}`}
+                        frameBorder="0" 
+                        scrolling="no" 
+                        width="100%" 
+                        height="100%"
+                        className="w-full h-full"
+                      />
+                    )}
                   </div>
                 </div>
               )}
