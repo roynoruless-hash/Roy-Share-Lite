@@ -7,6 +7,7 @@ import {
   Zap, 
   Clock, 
   ArrowRight, 
+  ArrowLeft, 
   CheckCircle2, 
   AlertCircle, 
   Activity, 
@@ -67,9 +68,19 @@ const MobileComparisonCard = ({ row }: { row: { f: string; n: string; s: string 
   );
 };
 
-const RewardEarningsPage = () => {
+const RewardEarningsPage = ({ onBack }: { onBack?: () => void } = {}) => {
   return (
     <main className="min-h-screen bg-slate-950 text-white overflow-x-hidden">
+      {onBack && (
+        <div className="fixed top-6 left-6 z-50">
+          <button 
+            onClick={onBack}
+            className="p-3 bg-slate-900/50 backdrop-blur-md border border-white/10 rounded-2xl text-slate-400 hover:text-white transition-all"
+          >
+            <ArrowLeft className="w-6 h-6" />
+          </button>
+        </div>
+      )}
       <AnimatedBackground />
       
       {/* Hero Section */}

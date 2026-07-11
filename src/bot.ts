@@ -316,7 +316,7 @@ Type your invite code below and send, or click Skip to continue.`;
         } else if (msg.text === "📊 Dashboard") {
             console.log("User selected Dashboard");
             await processDashboard(botToken, chatId, user);
-        } else if (msg.text === "🎫 Support") {
+        } else if (msg.text === "🎧 Contact Support") {
             console.log("User selected Support");
             await processSupport(botToken, chatId, user);
         } else if (msg.text === "📜 Withdrawal History") {
@@ -2616,7 +2616,7 @@ function getMainMenuKeyboard(userId?: string | number) {
             [{ text: "📢 Announcements" }, { text: "⚙️ Settings" }],
             [{ text: "💰 Balance" }, { text: "👥 Refer & Earn" }],
             [{ text: "💸 Withdraw" }, { text: "📜 Withdrawal History" }],
-            [{ text: "🎫 Support" }]
+            [{ text: "🎧 Contact Support" }]
         ],
         resize_keyboard: true
     };
@@ -3210,15 +3210,25 @@ function getTicketStatusLabel(status: string): string {
 }
 
 async function processSupport(botToken: string, chatId: number, user: any) {
-    const message = `🎫 Support Center
+    const db = getDb();
+    const settingsSnap = await getDoc(doc(db, "settings", "support"));
+    const settings = settingsSnap.exists() ? settingsSnap.data() : {};
 
-How can we help you?`;
+    const message = `🎫 <b>RoyShare Support Center</b>
+
+Welcome to our Help Center. How can we assist you today?
+
+📧 <b>Email:</b> ${settings.supportEmail || "support@royshare.online"}
+🤖 <b>Telegram:</b> ${settings.supportTelegram || "@RoyshareSupport_bot"}
+🤝 <b>Business:</b> ${settings.businessContact || "biz@royshare.online"}
+🐛 <b>Report Bug:</b> ${settings.reportBugUrl || "@Royshare_Dev"}`;
 
     const inlineKeyboard = {
         inline_keyboard: [
-            [{ text: "➕ Create Ticket", callback_data: "support_create" }],
-            [{ text: "📋 My Tickets", callback_data: "support_list" }],
-            [{ text: "📞 Contact Admin", callback_data: "support_admin" }]
+            [{ text: "➕ Create Ticket", callback_data: "support_create" }, { text: "📋 My Tickets", callback_data: "support_list" }],
+            [{ text: "❓ FAQ", web_app: { url: `${getAppUrl()}/app?page=support&view=faq&userId=${user.id}` } }],
+            [{ text: "📞 Contact Support bot", url: settings.supportTelegram?.startsWith("http") ? settings.supportTelegram : `https://t.me/${(settings.supportTelegram || "@RoyshareSupport_bot").replace("@", "")}` }],
+            [{ text: "🌐 Help Center (Mini App)", web_app: { url: `${getAppUrl()}/app?page=support&userId=${user.id}` } }]
         ]
     };
     await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -28,7 +28,13 @@ import {
   Smartphone,
   KeyRound,
   Link as LinkIcon,
-  FolderOpen
+  FolderOpen,
+  ShieldCheck,
+  Send,
+  ExternalLink,
+  AlertCircle,
+  Upload,
+  Bell
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
@@ -42,10 +48,119 @@ import { MyLinksPage } from "./MyLinksPage";
 import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
 import { MyContentPage } from "./MyContentPage";
 import ReferralCenter from "./ReferralCenter";
-import DriveUploadPage from "./DriveUploadPage";
 import { GameCenterPage } from "./GameCenterPage";
 import { GamePlayerPage } from "./GamePlayerPage";
 import { navigate } from "../lib/navigation";
+
+const DriveUploadPage = lazy(() => import("./DriveUploadPage"));
+const CustomerSupportPage = lazy(() => import("./CustomerSupportPage"));
+const AnnouncementsPage = lazy(() => import("./AnnouncementsPage"));
+const SettingsPage = lazy(() => import("./SettingsPage"));
+const ShortenPage = lazy(() => import("./ShortenPage"));
+const RewardEarningsPage = lazy(() => import("./RewardEarningsPage"));
+
+interface MembershipVerificationProps {
+  user: any;
+  onVerified: () => void;
+}
+
+const MembershipVerification: React.FC<MembershipVerificationProps> = ({ user }) => {
+  const [verifying, setVerifying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/user/verify-membership`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.verified) {
+        setError(data.error || "Please join both channels first!");
+      }
+    } catch (err) {
+      setError("Failed to verify membership. Please try again.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#020617] text-white flex flex-col items-center justify-center p-6 font-sans">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-8"
+      >
+        <div className="text-center space-y-3">
+          <div className="w-20 h-20 bg-blue-600/20 border border-blue-500/30 rounded-3xl flex items-center justify-center text-blue-400 mx-auto shadow-xl shadow-blue-900/20">
+            <ShieldCheck className="w-10 h-10" />
+          </div>
+          <h2 className="text-2xl font-black tracking-tight">Channel Verification</h2>
+          <p className="text-slate-400 text-sm leading-relaxed">To access RoyShare Earn and start earning, you must join our official channels.</p>
+        </div>
+
+        <div className="space-y-3">
+          <a 
+            href="https://t.me/RoyShareEarn" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-2xl hover:border-blue-500/50 transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+                <Send className="w-5 h-5" />
+              </div>
+              <span className="font-bold text-sm">Join Official Channel</span>
+            </div>
+            <ExternalLink className="w-4 h-4 text-slate-600" />
+          </a>
+          
+          <a 
+            href="https://t.me/RoyShareCommunity" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-2xl hover:border-indigo-500/50 transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform">
+                <Users className="w-5 h-5" />
+              </div>
+              <span className="font-bold text-sm">Join Community Group</span>
+            </div>
+            <ExternalLink className="w-4 h-4 text-slate-600" />
+          </a>
+        </div>
+
+        {error && (
+          <motion.div 
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-xs font-bold flex items-center gap-2"
+          >
+            <AlertCircle className="w-4 h-4" />
+            {error}
+          </motion.div>
+        )}
+
+        <button
+          onClick={handleVerify}
+          disabled={verifying}
+          className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black rounded-2xl transition-all shadow-lg shadow-blue-900/40 flex items-center justify-center gap-2"
+        >
+          {verifying ? (
+            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <>Verify Membership</>
+          )}
+        </button>
+      </motion.div>
+    </div>
+  );
+};
 
 interface PhoneVerificationProps {
   user: any;
@@ -284,7 +399,7 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
 };
 
 export const MiniAppHome: React.FC = () => {
-  const { user, loading, error } = useTelegramAuth();
+  const { user, loading, error, startParam } = useTelegramAuth();
   const [currentView, setCurrentView] = useState<string>(() => {
     console.log("[MiniAppHome] Initializing view. Pathname:", window.location.pathname, "Search:", window.location.search);
     if (window.location.pathname.startsWith("/game/")) return "game-player";
@@ -370,6 +485,22 @@ export const MiniAppHome: React.FC = () => {
       }
     }
   }, [window.location.pathname]);
+
+  const [hasCheckedDeepLink, setHasCheckedDeepLink] = useState(false);
+
+  // Deep Link Handling
+  useEffect(() => {
+    if (activeUser?.membershipVerified && isPhoneVerified && startParam && !hasCheckedDeepLink) {
+      if (startParam.startsWith("game_")) {
+        const gameId = startParam.replace("game_", "");
+        console.log(`[MiniAppHome] Deep link detected for game: ${gameId}`);
+        setHasCheckedDeepLink(true);
+        setCurrentView("game-player");
+        // Update URL to match game-player expectations
+        window.history.replaceState({}, "", `/game/${gameId}`);
+      }
+    }
+  }, [activeUser?.membershipVerified, isPhoneVerified, startParam, hasCheckedDeepLink]);
 
   const displayName = activeUser ? (activeUser.enteredName || `${activeUser.firstName || ""} ${activeUser.lastName || ""}`.trim() || activeUser.username || "User") : "User";
 
@@ -479,6 +610,17 @@ export const MiniAppHome: React.FC = () => {
           <p className="text-sm mt-2">{error || "Could not identify user. Please restart."}</p>
         </div>
       </div>
+    );
+  }
+
+  if (!activeUser?.membershipVerified) {
+    return (
+      <MembershipVerification 
+        user={activeUser} 
+        onVerified={() => {
+          // Handled by Firebase onSnapshot in TelegramAuthContext
+        }} 
+      />
     );
   }
 
@@ -642,19 +784,15 @@ export const MiniAppHome: React.FC = () => {
   const referralLink = `https://t.me/Roysharearn_bot?start=ref_${activeUser.id}`;
 
   const actionButtons = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
+    { id: "self-earning", label: "Self Earning", icon: Star, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
     { id: "game-earn", label: "Game & Earn", icon: PlayCircle, color: "bg-purple-600", shadow: "shadow-purple-500/20" },
-    { id: "my-links", label: "My Short Links", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
+    { id: "upload-file", label: "Upload File", icon: Upload, color: "bg-emerald-600", shadow: "shadow-emerald-500/20" },
+    { id: "url-shortener", label: "URL Shortener", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
     { id: "my-content", label: "My Content", icon: FolderOpen, color: "bg-sky-500", shadow: "shadow-sky-500/20" },
-    { id: "balance", label: "Balance", icon: Wallet, color: "bg-emerald-500", shadow: "shadow-emerald-500/20" },
-    { id: "refer", label: "Refer & Earn", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
-    { id: "daily-bonus", label: "Daily Bonus", icon: Gift, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
-    { id: "surveys", label: "Survey", icon: ClipboardList, color: "bg-purple-500", shadow: "shadow-purple-500/20" },
-    { id: "earn-rewards", label: "Earn Rewards", icon: Star, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
-    { id: "leaderboard", label: "Leaderboard", icon: Award, color: "bg-amber-600", shadow: "shadow-amber-600/20" },
-    { id: "withdraw", label: "Withdraw", icon: CreditCard, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
-    { id: "history", label: "Withdrawal History", icon: History, color: "bg-slate-500", shadow: "shadow-slate-500/20" },
-    { id: "support", label: "Support", icon: MessageSquare, color: "bg-teal-500", shadow: "shadow-teal-500/20" },
+    { id: "my-links", label: "My Links", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
+    { id: "announcements", label: "Announcements", icon: Bell, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
+    { id: "settings", label: "Settings", icon: Settings, color: "bg-slate-500", shadow: "shadow-slate-500/20" },
+    { id: "support", label: "Contact Support", icon: MessageSquare, color: "bg-teal-500", shadow: "shadow-teal-500/20" },
   ];
 
   const handleAction = (id: string) => {
@@ -662,7 +800,19 @@ export const MiniAppHome: React.FC = () => {
     if (id === "refer") {
       console.log("[MiniAppHome] handleAction MATCHED 'refer'. Setting view to 'referral'.");
       setCurrentView("referral");
-      console.log("[MiniAppHome] Immediately after calling setCurrentView('referral') inside handleAction");
+      return;
+    }
+    if (id === "self-earning") {
+      setCurrentView("earn-rewards");
+      return;
+    }
+    if (id === "url-shortener") {
+      // URL shortener usually opens in a new tab or a specific view
+      setCurrentView("shorten");
+      return;
+    }
+    if (id === "my-links") {
+      setCurrentView("my-links");
       return;
     }
     console.log(`[MiniAppHome] handleAction calling setCurrentView('${id}')`);
@@ -799,6 +949,42 @@ export const MiniAppHome: React.FC = () => {
         {/* 👥 Refer & Earn Dedicated View (Removed - Replaced by /refer) */}
 
         {/* 🏆 Leaderboard Dedicated View */}
+        {currentView === "support" && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <CustomerSupportPage onBack={() => setCurrentView("dashboard")} />
+          </Suspense>
+        )}
+
+        {currentView === "upload-file" && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <DriveUploadPage onBack={() => setCurrentView("dashboard")} />
+          </Suspense>
+        )}
+
+        {currentView === "announcements" && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <AnnouncementsPage onBack={() => setCurrentView("dashboard")} />
+          </Suspense>
+        )}
+
+        {currentView === "settings" && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <SettingsPage onBack={() => setCurrentView("dashboard")} />
+          </Suspense>
+        )}
+
+        {currentView === "shorten" && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <ShortenPage onBack={() => setCurrentView("dashboard")} />
+          </Suspense>
+        )}
+
+        {currentView === "my-links" && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <RewardEarningsPage onBack={() => setCurrentView("dashboard")} />
+          </Suspense>
+        )}
+
         {currentView === "leaderboard" && (
           <motion.div
             key="leaderboard-view"

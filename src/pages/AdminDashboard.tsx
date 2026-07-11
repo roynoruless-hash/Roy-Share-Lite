@@ -626,6 +626,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     supportUsername: "",
     botName: "",
     botUsername: "",
+    announcementChannelId: "",
   });
   const [telegramLoading, setTelegramLoading] = useState(false);
   const [telegramFeedback, setTelegramFeedback] = useState("");
@@ -2301,7 +2302,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       const res = await fetch(`${API_BASE}/api/admin/gamepix/add-to-royshare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameId })
+        body: JSON.stringify({ 
+          gameId,
+          autoAnnounce: supportSettings?.autoAnnounceGames
+        })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -2531,7 +2535,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           displayMode: customGameDisplayMode,
           featured: customGameFeatured,
           enabled: customGameEnabled,
-          walkthrough: customGameWalkthroughEnabled ? customGameWalkthroughData : null
+          walkthrough: customGameWalkthroughEnabled ? customGameWalkthroughData : null,
+          autoAnnounce: supportSettings?.autoAnnounceGames
         })
       });
       const data = await res.json();
@@ -13598,6 +13603,25 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
                           <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">
+                              Announcement Channel ID
+                            </label>
+                            <input
+                              type="text"
+                              value={telegramConfigs.announcementChannelId || ""}
+                              onChange={(e) =>
+                                setTelegramConfigs({
+                                  ...telegramConfigs,
+                                  announcementChannelId: e.target.value,
+                                })
+                              }
+                              placeholder="e.g. -1001234567890"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500"
+                            />
+                            <p className="text-[10px] text-slate-500 mt-1">Channel where game announcements will be posted.</p>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">
                               Bot Username
                             </label>
                             <input
@@ -15166,39 +15190,115 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             📩 Contact Support Configuration
                           </h4>
 
-                          <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-1">
-                              Support Telegram Link / Username
-                            </label>
-                            <input
-                              type="text"
-                              value={supportSettings.supportTelegram || ""}
-                              onChange={(e) =>
-                                setSupportSettings({
-                                  ...supportSettings,
-                                  supportTelegram: e.target.value,
-                                })
-                              }
-                              placeholder="@RoyShareSupport"
-                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none"
-                            />
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-medium text-slate-400 mb-1">
+                                Support Telegram Link / Username
+                              </label>
+                              <input
+                                type="text"
+                                value={supportSettings.supportTelegram || ""}
+                                onChange={(e) =>
+                                  setSupportSettings({
+                                    ...supportSettings,
+                                    supportTelegram: e.target.value,
+                                  })
+                                }
+                                placeholder="@RoyShareSupport"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-medium text-slate-400 mb-1">
+                                Support Email Address
+                              </label>
+                              <input
+                                type="email"
+                                value={supportSettings.supportEmail || ""}
+                                onChange={(e) =>
+                                  setSupportSettings({
+                                    ...supportSettings,
+                                    supportEmail: e.target.value,
+                                  })
+                                }
+                                placeholder="support@royshare.com"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-medium text-slate-400 mb-1">
+                                Report Bug Link / Contact
+                              </label>
+                              <input
+                                type="text"
+                                value={supportSettings.reportBugUrl || ""}
+                                onChange={(e) =>
+                                  setSupportSettings({
+                                    ...supportSettings,
+                                    reportBugUrl: e.target.value,
+                                  })
+                                }
+                                placeholder="@RoyShare_Dev"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-medium text-slate-400 mb-1">
+                                Business Contact
+                              </label>
+                              <input
+                                type="text"
+                                value={supportSettings.businessContact || ""}
+                                onChange={(e) =>
+                                  setSupportSettings({
+                                    ...supportSettings,
+                                    businessContact: e.target.value,
+                                  })
+                                }
+                                placeholder="biz@royshare.online"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 md:col-span-2 mt-2">
+                              <div>
+                                <label className="block text-xs font-bold text-slate-300">
+                                  📢 Auto Game Announcement (Telegram Channel)
+                                </label>
+                                <p className="text-[10px] text-slate-500 font-medium">Whenever you publish a new game, it will be automatically posted to your configured Telegram Channel.</p>
+                              </div>
+                              <button
+                                onClick={() =>
+                                  setSupportSettings({
+                                    ...supportSettings,
+                                    autoAnnounceGames: !supportSettings.autoAnnounceGames,
+                                  })
+                                }
+                                className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${supportSettings.autoAnnounceGames ? "bg-purple-600 text-white shadow-lg shadow-purple-900/30" : "bg-slate-800 text-slate-400"}`}
+                              >
+                                {supportSettings.autoAnnounceGames ? "ENABLED" : "DISABLED"}
+                              </button>
+                            </div>
                           </div>
 
                           <div>
                             <label className="block text-xs font-medium text-slate-400 mb-1">
-                              Support Email Address
+                              FAQ Settings (JSON Array)
                             </label>
-                            <input
-                              type="email"
-                              value={supportSettings.supportEmail || ""}
+                            <textarea
+                              value={supportSettings.faqJson || "[]"}
                               onChange={(e) =>
                                 setSupportSettings({
                                   ...supportSettings,
-                                  supportEmail: e.target.value,
+                                  faqJson: e.target.value,
                                 })
                               }
-                              placeholder="support@royshare.com"
-                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none"
+                              rows={5}
+                              placeholder='[{"q": "How to earn?", "a": "Share links!"}]'
+                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-300 font-mono focus:outline-none"
                             />
                           </div>
                         </div>

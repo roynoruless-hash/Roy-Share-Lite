@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   ArrowLeft, MessageSquare, Bot, AlertCircle, FileText, Send, 
   Upload, CheckCircle, RefreshCw, Trash2, Mail, ExternalLink,
-  ChevronRight, Sparkles, X, AlertTriangle, ShieldCheck, FolderOpen
+  ChevronRight, Sparkles, X, AlertTriangle, ShieldCheck, FolderOpen,
+  HelpCircle, Briefcase
 } from "lucide-react";
 
 interface TicketReply {
@@ -37,19 +38,24 @@ interface SupportSettings {
   supportEmail: string;
 }
 
-export default function CustomerSupportPage() {
+export default function CustomerSupportPage({ onBack }: { onBack?: () => void } = {}) {
   const [userId, setUserId] = useState<string>("123456");
   const [username, setUsername] = useState<string>("guest_user");
   const [firstName, setFirstName] = useState<string>("Guest User");
   const [loading, setLoading] = useState<boolean>(true);
   
   // Settings from admin
-  const [settings, setSettings] = useState<SupportSettings>({
+  const [settings, setSettings] = useState<SupportSettings & { reportBugUrl?: string, businessContact?: string, faqJson?: string }>({
     aiEnabled: true,
     liveChatEnabled: true,
     supportTelegram: "Roysharearn_bot",
-    supportEmail: "support@royshare.in"
+    supportEmail: "support@royshare.in",
+    reportBugUrl: "@Royshare_Dev",
+    businessContact: "biz@royshare.online",
+    faqJson: "[]"
   });
+
+  const [faqs, setFaqs] = useState<{q: string, a: string}[]>([]);
 
   // User tickets list
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -57,7 +63,7 @@ export default function CustomerSupportPage() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   // Active view modals
-  const [activeModal, setActiveModal] = useState<"none" | "live_support" | "ticket_form" | "tickets_list" | "ticket_detail">("none");
+  const [activeModal, setActiveModal] = useState<"none" | "live_support" | "ticket_form" | "tickets_list" | "ticket_detail" | "faq">("none");
 
   // Form states for raising a ticket
   const [subject, setSubject] = useState("");
@@ -110,7 +116,16 @@ export default function CustomerSupportPage() {
       fetch(`${API_BASE}/api/support/settings`).then(res => res.json()),
       fetch(`${API_BASE}/api/support/tickets?userId=${resolvedId}`).then(res => res.json())
     ]).then(([settingsData, ticketsData]) => {
-      if (settingsData) setSettings(settingsData);
+      if (settingsData) {
+        setSettings(settingsData);
+        if (settingsData.faqJson) {
+          try {
+            setFaqs(JSON.parse(settingsData.faqJson));
+          } catch (e) {
+            console.error("Error parsing FAQ JSON:", e);
+          }
+        }
+      }
       if (Array.isArray(ticketsData)) setTickets(ticketsData);
     }).catch(err => {
       console.error("Error loading support data:", err);
@@ -356,7 +371,7 @@ export default function CustomerSupportPage() {
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button 
-              onClick={handleCloseWebApp}
+              onClick={onBack || handleCloseWebApp}
               className="p-2 hover:bg-slate-800 rounded-xl transition text-slate-400 hover:text-white"
             >
               <ArrowLeft className="w-5 h-5" />
@@ -427,7 +442,28 @@ export default function CustomerSupportPage() {
               </div>
             </button>
 
-            {/* 📞 Contact Admin */}
+            {/* ❓ FAQ */}
+            <button
+              onClick={() => {
+                setActiveModal("faq");
+              }}
+              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-emerald-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-3 text-emerald-500/20 group-hover:text-emerald-500/30 transition-all">
+                <HelpCircle className="w-16 h-16" />
+              </div>
+              <div className="p-2.5 bg-emerald-600/10 text-emerald-400 rounded-xl w-fit border border-emerald-500/20">
+                <HelpCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">❓ FAQ</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Frequently Asked Questions.
+                </p>
+              </div>
+            </button>
+
+            {/* 📞 Contact Support */}
             <a
               href={settings.supportTelegram 
                 ? (settings.supportTelegram.startsWith("http") 
@@ -441,17 +477,90 @@ export default function CustomerSupportPage() {
               className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-amber-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
             >
               <div className="absolute top-0 right-0 p-3 text-amber-500/20 group-hover:text-amber-500/30 transition-all">
-                <Mail className="w-16 h-16" />
+                <MessageSquare className="w-16 h-16" />
               </div>
               <div className="p-2.5 bg-amber-600/10 text-amber-400 rounded-xl w-fit border border-amber-500/20">
-                <Mail className="w-6 h-6" />
+                <MessageSquare className="w-6 h-6" />
               </div>
               <div>
                 <h3 className="font-bold text-white flex items-center gap-1 text-base">
-                  📞 Contact Admin <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-amber-400 transition" />
+                  💬 Telegram Support
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  {settings.supportTelegram ? `Telegram: ${settings.supportTelegram}` : `Email: ${settings.supportEmail}`}
+                  Get instant help on Telegram.
+                </p>
+              </div>
+            </a>
+
+            {/* 📧 Email Support */}
+            <a
+              href={`mailto:${settings.supportEmail}?subject=RoyShare%20Support%20Request`}
+              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-indigo-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-3 text-indigo-500/20 group-hover:text-indigo-500/30 transition-all">
+                <Mail className="w-16 h-16" />
+              </div>
+              <div className="p-2.5 bg-indigo-600/10 text-indigo-400 rounded-xl w-fit border border-indigo-500/20">
+                <Mail className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">📧 Email Us</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed text-wrap truncate">
+                  {settings.supportEmail}
+                </p>
+              </div>
+            </a>
+
+            {/* 🐛 Report Bug */}
+            <a
+              href={settings.reportBugUrl 
+                ? (settings.reportBugUrl.startsWith("http") 
+                    ? settings.reportBugUrl 
+                    : (settings.reportBugUrl.startsWith("@") 
+                        ? `https://t.me/${settings.reportBugUrl.replace("@", "")}` 
+                        : `https://t.me/${settings.reportBugUrl}`))
+                : "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-rose-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-3 text-rose-500/20 group-hover:text-rose-500/30 transition-all">
+                <AlertCircle className="w-16 h-16" />
+              </div>
+              <div className="p-2.5 bg-rose-600/10 text-rose-400 rounded-xl w-fit border border-rose-500/20">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">🐛 Report Bug</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Help us improve by reporting bugs.
+                </p>
+              </div>
+            </a>
+
+            {/* 🤝 Business Contact */}
+            <a
+              href={settings.businessContact 
+                ? (settings.businessContact.includes("@") && !settings.businessContact.startsWith("http") && !settings.businessContact.startsWith("@")
+                    ? `mailto:${settings.businessContact}`
+                    : (settings.businessContact.startsWith("@")
+                        ? `https://t.me/${settings.businessContact.replace("@", "")}`
+                        : settings.businessContact))
+                : "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-sky-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-3 text-sky-500/20 group-hover:text-sky-500/30 transition-all">
+                <Briefcase className="w-16 h-16" />
+              </div>
+              <div className="p-2.5 bg-sky-600/10 text-sky-400 rounded-xl w-fit border border-sky-500/20">
+                <Briefcase className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">🤝 Business</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed truncate text-wrap">
+                  {settings.businessContact}
                 </p>
               </div>
             </a>
@@ -1082,6 +1191,62 @@ export default function CustomerSupportPage() {
                   </button>
                 </form>
               )}
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* 5. FAQ MODAL */}
+        {activeModal === "faq" && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col shadow-2xl"
+            >
+              {/* Header */}
+              <div className="p-4 border-b border-slate-800 bg-slate-950/60 flex justify-between items-center">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 bg-emerald-600/10 text-emerald-400 rounded-lg border border-emerald-500/20">
+                    <HelpCircle className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-white text-base">❓ Frequently Asked Questions</h3>
+                </div>
+                <button 
+                  onClick={() => setActiveModal("none")}
+                  className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* FAQ Content */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-950/20">
+                {faqs.length === 0 ? (
+                  <div className="text-center py-10 space-y-3">
+                    <HelpCircle className="w-12 h-12 text-slate-700 mx-auto" />
+                    <p className="text-slate-500 text-sm">No FAQs available at the moment.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {faqs.map((faq, idx) => (
+                      <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2">
+                        <h4 className="font-bold text-white text-sm flex gap-2">
+                          <span className="text-emerald-400">Q.</span> {faq.q}
+                        </h4>
+                        <p className="text-xs text-slate-400 leading-relaxed pl-6">
+                          {faq.a}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </motion.div>
           </motion.div>
         )}

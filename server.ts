@@ -940,6 +940,57 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
     }
   });
 
+  // 👥 User Membership Verification Gate
+  app.post("/api/user/verify-membership", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ error: "User ID is required" });
+
+      const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
+      const telegramSettings = telegramSettingsDoc.exists() ? telegramSettingsDoc.data() : {};
+      const botToken = telegramSettings.botToken;
+      let channelId = telegramSettings.channelId || -1003385031126;
+      let groupId = telegramSettings.groupId || -1003929156200;
+
+      if (!botToken) return res.status(500).json({ error: "Bot token not configured" });
+
+      const checkMember = async (chatId: string | number) => {
+        try {
+          const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${chatId}&user_id=${userId}`);
+          const data: any = await response.json();
+          if (data.ok && data.result) {
+            const status = data.result.status;
+            return ["member", "administrator", "creator"].includes(status);
+          }
+          return false;
+        } catch (e) {
+          return false;
+        }
+      };
+
+      const isChannelJoined = await checkMember(channelId);
+      const isGroupJoined = await checkMember(groupId);
+
+      if (isChannelJoined && isGroupJoined) {
+        await setDoc(doc(db, "users", String(userId)), {
+          membershipVerified: true,
+          lastVerifiedAt: new Date().toISOString()
+        }, { merge: true });
+        return res.json({ verified: true });
+      } else {
+        return res.status(403).json({ 
+          verified: false, 
+          error: "Please join both channels to continue!",
+          channelId,
+          groupId
+        });
+      }
+    } catch (e: any) {
+      console.error("Membership verification error:", e);
+      res.status(500).json({ error: e.message || "Verification failed" });
+    }
+  });
+
   app.post("/api/admin/tickets/:id/reply", async (req, res) => {
     try {
       const { id } = req.params;
@@ -3462,6 +3513,55 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       };
 
       await setDoc(publishDocRef, activeGame, { merge: true });
+
+      // 📢 Automatically send Telegram Channel announcement if enabled
+      const { autoAnnounce } = req.body;
+      if (autoAnnounce) {
+        try {
+          const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
+          if (telegramSettingsDoc.exists()) {
+            const settings = telegramSettingsDoc.data();
+            const botToken = settings.botToken;
+            const channelId = settings.announcementChannelId || settings.channelId || settings.channelUsername;
+            const rawBotUsername = settings.botUsername || "Roysharearn_bot";
+            const botUsername = rawBotUsername.replace("@", "");
+
+            if (botToken && channelId) {
+              const message = `🎮 <b>New Game Available!</b>\n\n` +
+                `🕹️ <b>Game:</b> ${activeGame.title}\n` +
+                `📂 <b>Category:</b> ${activeGame.category || "General"}\n` +
+                `🎁 <b>Reward:</b> ${activeGame.rewardSettings?.coinsPerMin || 10} Coins/Min\n` +
+                `⏱ <b>Required Play:</b> 60s per session\n\n` +
+                `📝 <b>Description:</b>\n${activeGame.description ? activeGame.description.substring(0, 150) + "..." : "No description available."}\n\n` +
+                `🖼️ <a href="${activeGame.thumbnailUrl}">Game Thumbnail</a>`;
+
+              const miniAppLink = `https://t.me/${botUsername}/app?startapp=game_${activeGame.id}`;
+
+              const inlineKeyboard = {
+                inline_keyboard: [
+                  [{ text: "🎮 Play Now", url: miniAppLink }]
+                ]
+              };
+
+              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: channelId,
+                  text: message,
+                  parse_mode: "HTML",
+                  reply_markup: inlineKeyboard
+                })
+              });
+              console.log(`[Announce] Game announcement sent for ${activeGame.title}`);
+            }
+          }
+        } catch (annError) {
+          console.error("Error sending game announcement:", annError);
+          // Don't fail the request if announcement fails
+        }
+      }
+
       return res.json({ success: true, message: "Added game to RoyShare successfully!" });
     } catch (e: any) {
       console.error("Error adding game to active collection:", e);
@@ -3579,6 +3679,53 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       };
 
       await setDoc(publishDocRef, customGame);
+
+      // 📢 Automatically send Telegram Channel announcement if enabled
+      const { autoAnnounce } = req.body;
+      if (autoAnnounce) {
+        try {
+          const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
+          if (telegramSettingsDoc.exists()) {
+            const settings = telegramSettingsDoc.data();
+            const botToken = settings.botToken;
+            const channelId = settings.announcementChannelId || settings.channelId || settings.channelUsername;
+            const rawBotUsername = settings.botUsername || "Roysharearn_bot";
+            const botUsername = rawBotUsername.replace("@", "");
+
+            if (botToken && channelId) {
+              const message = `🎮 <b>New Game Available!</b>\n\n` +
+                `🕹️ <b>Game:</b> ${customGame.title}\n` +
+                `📂 <b>Category:</b> ${customGame.category || "General"}\n` +
+                `🎁 <b>Reward:</b> ${customGame.rewardSettings?.rewardCoins || 100} Coins\n` +
+                `⏱ <b>Required Play:</b> ${Math.ceil((customGame.rewardSettings?.requiredTime || 300) / 60)} Minutes\n\n` +
+                `📝 <b>Description:</b>\n${customGame.description ? customGame.description.substring(0, 150) + "..." : "No description available."}\n\n` +
+                `🖼️ <a href="${customGame.thumbnailUrl}">Game Thumbnail</a>`;
+
+              const miniAppLink = `https://t.me/${botUsername}/app?startapp=game_${customGame.id}`;
+
+              const inlineKeyboard = {
+                inline_keyboard: [
+                  [{ text: "🎮 Play Now", url: miniAppLink }]
+                ]
+              };
+
+              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: channelId,
+                  text: message,
+                  parse_mode: "HTML",
+                  reply_markup: inlineKeyboard
+                })
+              });
+              console.log(`[Announce] Custom game announcement sent for ${customGame.title}`);
+            }
+          }
+        } catch (annError) {
+          console.error("Error sending custom game announcement:", annError);
+        }
+      }
 
       let walkthroughSaved = false;
       if (walkthrough) {

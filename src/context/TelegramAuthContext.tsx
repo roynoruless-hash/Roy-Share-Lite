@@ -9,6 +9,7 @@ interface TelegramAuthContextType {
   loading: boolean;
   error: string | null;
   isAuthenticated: boolean;
+  startParam: string | null;
   verifyAuth: () => Promise<void>;
   completeProfile: (details: Partial<User>) => Promise<void>;
 }
@@ -49,6 +50,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [startParam, setStartParam] = useState<string | null>(null);
   const isVerifyingRef = React.useRef(false);
 
   const verifyAuth = async () => {
@@ -129,7 +131,8 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     try {
       const tg = (window as any).Telegram?.WebApp;
       const urlParams = new URLSearchParams(window.location.search);
-      const startParam = tg?.initDataUnsafe?.start_param || urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start_param") || "";
+      const sp = tg?.initDataUnsafe?.start_param || urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start_param") || "";
+      setStartParam(sp);
 
       if (tg) {
         console.log("[TelegramAuthContext] Calling tg.ready() and tg.expand() inside standard verification block");
@@ -141,7 +144,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       const response = await fetchWithTimeout(verifyUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData, startParam }),
+        body: JSON.stringify({ initData, startParam: sp }),
       });
 
       const data: TelegramAuthResponse = await response.json();
@@ -252,6 +255,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         loading,
         error,
         isAuthenticated: !!user,
+        startParam,
         verifyAuth,
         completeProfile,
       }}

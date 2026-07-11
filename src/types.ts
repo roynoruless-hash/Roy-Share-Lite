@@ -39,6 +39,8 @@ export interface User {
   referralCode: string;
   referredBy: string | null;
   profileCompleted: boolean;
+  membershipVerified?: boolean;
+  registrationStep?: 'phone' | 'profile' | 'completed' | 'name';
   
   // Personal Details (Setup)
   mobileNumber?: string;
