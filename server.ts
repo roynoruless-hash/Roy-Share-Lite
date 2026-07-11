@@ -3487,6 +3487,31 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   });
 
   // Add fully custom manual game directly to games collection
+  app.post("/api/admin/games/validate-url", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url) return res.status(400).json({ success: false, error: "URL is required" });
+      
+      if (!url.startsWith("https://")) {
+        return res.status(400).json({ success: false, error: "Only HTTPS URLs are allowed for security." });
+      }
+
+      try {
+        const response = await fetch(url, { method: "HEAD" });
+        if (!response.ok) {
+           // Fallback to GET if HEAD is blocked
+           const getRes = await fetch(url);
+           if (!getRes.ok) throw new Error("Unreachable");
+        }
+      } catch (e) {
+        return res.status(400).json({ success: false, error: "URL is unreachable or blocking our validation." });
+      }
+
+      return res.json({ success: true, message: "URL is valid and reachable." });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
   app.post("/api/admin/games/custom", async (req, res) => {
     try {
       const {
@@ -3534,7 +3559,17 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         playCount: 0,
         clicks: 0,
         favoritesCount: 0,
-        rewardSettings: { coinsPerMin: 15, enabled: true },
+        rewardSettings: { 
+          coinsPerMin: 15, 
+          enabled: true,
+          requiredTime: Number(req.body.requiredTime) || 300,
+          minActiveTime: Number(req.body.minActiveTime) || 120,
+          chromeOnly: !!req.body.chromeOnly,
+          allowWebView: req.body.allowWebView !== false,
+          requireWalkthrough: !!req.body.requireWalkthrough,
+          externalBrowserMode: !!req.body.externalBrowserMode,
+          rewardCoins: Number(req.body.rewardCoins) || 100
+        },
         dailyMissions: [],
         leaderboard: [],
         coins: 0,
@@ -3742,33 +3777,113 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       if (!userId || !gameId) {
         return res.status(400).json({ success: false, error: "Missing userId or gameId" });
       }
-      const sessionId = `session_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+
+      // 🛡️ Prevent multiple simultaneous game sessions
+      const activeQuery = query(
+        collection(db, "game_sessions"),
+        where("userId", "==", userId),
+        where("status", "==", "playing"),
+        limit(1)
+      );
+      const activeSnap = await getDocs(activeQuery);
+      if (!activeSnap.empty) {
+        const activeSession = activeSnap.docs[0].data();
+        const startTime = new Date(activeSession.startTime).getTime();
+        // If the session is very old (e.g., > 1 hour), consider it stale and allow new one
+        if (Date.now() - startTime < 3600000) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "Active session detected elsewhere. Please finish your current game.",
+            activeSessionId: activeSession.id
+          });
+        }
+      }
+
+      const sessionId = `gs_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
+      const sessionToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      
       const sessionRef = doc(db, "game_sessions", sessionId);
       const sessionData = {
         id: sessionId,
         userId,
         gameId,
+        status: "playing",
+        startTime: new Date().toISOString(),
+        lastActiveTime: new Date().toISOString(),
+        currentActiveSeconds: 0,
+        interactionCount: 0,
+        tokenHash: sessionToken,
         device: device || "mobile",
         country: country || "Unknown",
-        startTime: new Date().toISOString(),
-        status: "playing",
         valid: false
       };
       await setDoc(sessionRef, sessionData);
       
-      // Also increment play count / clicks in game document
+      // Update Game Analytics
       const gameRef = doc(db, "games", gameId);
-      const gameSnap = await getDoc(gameRef);
-      if (gameSnap.exists()) {
-        await updateDoc(gameRef, {
-          playCount: increment(1)
-        });
-      }
+      await updateDoc(gameRef, {
+        playCount: increment(1),
+        "analytics.opens": increment(1)
+      });
 
-      return res.json({ success: true, sessionId });
+      // Log Event
+      await addDoc(collection(db, "game_logs"), {
+        type: "SESSION_STARTED",
+        userId,
+        gameId,
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+
+      return res.json({ success: true, sessionId, sessionToken });
     } catch (e: any) {
       console.error("Error starting game session:", e);
       return res.status(500).json({ success: false, error: e.message || "Failed to start session." });
+    }
+  });
+
+  app.get("/api/game/sessions/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const q = query(
+        collection(db, "game_sessions"),
+        where("userId", "==", userId),
+        orderBy("startTime", "desc"),
+        limit(50)
+      );
+      const snapshot = await getDocs(q);
+      const sessions: any[] = [];
+      snapshot.forEach(docSnap => {
+        sessions.push(docSnap.data());
+      });
+      return res.json({ success: true, sessions });
+    } catch (e: any) {
+      console.error("Error fetching sessions:", e);
+      return res.status(500).json({ success: false, error: "Failed to fetch sessions" });
+    }
+  });
+
+  app.post("/api/game/sessions/heartbeat", async (req, res) => {
+    try {
+      const { sessionId, sessionToken, activeSeconds, interactions } = req.body;
+      if (!sessionId || !sessionToken) return res.status(400).json({ success: false });
+
+      const sessionRef = doc(db, "game_sessions", sessionId);
+      const sessionSnap = await getDoc(sessionRef);
+      
+      if (!sessionSnap.exists() || sessionSnap.data().tokenHash !== sessionToken) {
+        return res.status(401).json({ success: false, error: "Invalid session token" });
+      }
+
+      await updateDoc(sessionRef, {
+        lastActiveTime: new Date().toISOString(),
+        currentActiveSeconds: activeSeconds || 0,
+        interactionCount: interactions || 0
+      });
+
+      return res.json({ success: true });
+    } catch (e) {
+      return res.status(500).json({ success: false });
     }
   });
 
@@ -4396,57 +4511,112 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   // Enhanced session end with anti-abuse and streak
   app.post("/api/game/sessions/end-v2", async (req, res) => {
     try {
-      const { sessionId, userId } = req.body;
+      const { sessionId, sessionToken, userId, duration, isFocused, interactions } = req.body;
+      if (!sessionId || !sessionToken || !userId) {
+        return res.status(400).json({ success: false, error: "Missing sessionId, token, or userId" });
+      }
+
       const sessionRef = doc(db, "game_sessions", sessionId);
       const sessionSnap = await getDoc(sessionRef);
 
-      if (!sessionSnap.exists()) return res.status(404).json({ error: "Session not found" });
-      const sessionData = sessionSnap.data();
-
-      if (sessionData.status === "completed") {
-        return res.status(400).json({ error: "Reward already claimed for this session." });
+      if (!sessionSnap.exists()) {
+        return res.status(404).json({ success: false, error: "Session not found" });
       }
 
-      const startTime = new Date(sessionData.startTime).getTime();
-      const endTime = Date.now();
-      const durationSec = (endTime - startTime) / 1000;
+      const sessionData = sessionSnap.data();
+      if (sessionData.tokenHash !== sessionToken) {
+        return res.status(401).json({ success: false, error: "Security validation failed" });
+      }
 
-      // Get game requirement
+      if (sessionData.status === "completed" || sessionData.valid) {
+        return res.status(400).json({ success: false, error: "Reward already claimed for this session" });
+      }
+
+      if (sessionData.userId !== userId) {
+        return res.status(403).json({ success: false, error: "Unauthorized session access" });
+      }
+
+      // 🛡️ Strict Verification
       const gameRef = doc(db, "games", sessionData.gameId);
       const gameSnap = await getDoc(gameRef);
-      if (!gameSnap.exists()) return res.status(404).json({ error: "Game not found" });
-      const gameData = gameSnap.data();
+      if (!gameSnap.exists()) {
+        return res.status(404).json({ success: false, error: "Game not found" });
+      }
 
+      const gameData = gameSnap.data();
+      const gReward = gameData.rewardSettings || {};
+      
       // Get global settings
       const settingsRef = doc(db, "settings", "game_rewards");
       const settingsSnap = await getDoc(settingsRef);
       const settings = settingsSnap.exists() ? settingsSnap.data() : null;
 
-      const requiredTimeSec = Number(settings?.requiredPlayTime ?? gameData.requiredTime ?? 60);
-      const rewardCoins = Number(settings?.rewardCoins ?? gameData.rewardCoins ?? 10);
+      const requiredTime = Number(gReward.requiredTime ?? settings?.requiredPlayTime ?? gameData.requiredTime ?? 300);
+      const minActiveTime = Number(gReward.minActiveTime ?? settings?.minActiveTime ?? 120);
+      const requireWalkthrough = gReward.requireWalkthrough ?? settings?.requireWalkthrough ?? false;
+      const minInteractions = Number(gReward.minInteractions ?? settings?.minInteractions ?? 5);
+      const rewardCoins = Number(gReward.rewardCoins ?? settings?.rewardCoins ?? gameData.rewardCoins ?? 100);
 
-      // Check if enabled
-      if (settings && settings.enabled === false) {
-        return res.status(403).json({ error: "Game rewards are currently disabled by administrator." });
+      // Verify active elapsed time
+      const startTime = new Date(sessionData.startTime).getTime();
+      const now = Date.now();
+      const elapsedRealSeconds = Math.floor((now - startTime) / 1000);
+      
+      // We use the reported duration (active seconds) but cross-check with heartbeat records
+      const heartbeatDuration = Number(sessionData.currentActiveSeconds || 0);
+      const reportedDuration = Number(duration) || heartbeatDuration;
+      const reportedInteractions = Number(interactions) || Number(sessionData.interactionCount || 0);
+
+      // Security check: Required play time not met
+      if (reportedDuration < requiredTime * 0.95) { // 5% tolerance
+        return res.status(400).json({ 
+          success: false, 
+          error: "Required play time not met", 
+          required: requiredTime, 
+          actual: reportedDuration 
+        });
       }
 
-      if (durationSec < requiredTimeSec) {
-        await updateDoc(sessionRef, { status: "failed", endTime: new Date().toISOString() });
-        return res.json({ success: false, error: "Time requirement not met", required: requiredTimeSec, actual: durationSec });
+      // Check minActiveTime requirement
+      if (reportedDuration < minActiveTime) {
+        return res.status(400).json({
+          success: false,
+          error: "Active play time requirement not met",
+          required: minActiveTime,
+          actual: reportedDuration
+        });
       }
 
-      // Success - Add Reward
+      // Check interactions requirement
+      if (reportedInteractions < minInteractions) {
+        return res.status(400).json({
+          success: false,
+          error: "Inactivity detected. Not enough gameplay interactions.",
+          required: minInteractions,
+          actual: reportedInteractions
+        });
+      }
+
+      // Check walkthrough requirement if enabled
+      if (requireWalkthrough) {
+        const wtRef = doc(db, "gamemonetize_walkthroughs", `wt_${sessionData.gameId}`);
+        const wtSnap = await getDoc(wtRef);
+        if (!wtSnap.exists()) {
+           return res.status(400).json({ success: false, error: "Official walkthrough verification failed" });
+        }
+      }
+
+      if (reportedDuration > elapsedRealSeconds + 60) {
+        return res.status(400).json({ success: false, error: "Invalid session timing detected" });
+      }
+
       const userRef = doc(db, "users", userId);
       const userSnap = await getDoc(userRef);
-      const userData = userSnap.data();
-
-      // Check Cooldown
-      const lastRewardAt = userData?.lastGameRewardAt ? new Date(userData.lastGameRewardAt).getTime() : 0;
-      const cooldownMs = (settings?.cooldownMinutes || 0) * 60 * 1000;
-      if (Date.now() - lastRewardAt < cooldownMs) {
-        const remaining = Math.ceil((cooldownMs - (Date.now() - lastRewardAt)) / 60000);
-        return res.status(429).json({ error: `Please wait ${remaining} minutes before claiming another reward.` });
+      if (!userSnap.exists()) {
+        return res.status(404).json({ success: false, error: "User not found" });
       }
+
+      const userData = userSnap.data();
 
       // Check Daily Limit
       const today = new Date().toISOString().split("T")[0];
@@ -4478,13 +4648,37 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         dailyGameCoins: lastPlay === today ? increment(rewardCoins) : rewardCoins,
         gameStreak: newStreak,
         lastGamePlayDate: today,
-        lastGameRewardAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        lastGameRewardAt: new Date().toISOString()
       };
 
       await updateDoc(userRef, updateData);
 
-      await updateDoc(sessionRef, { status: "completed", endTime: new Date().toISOString(), earned: rewardCoins });
+      await updateDoc(sessionRef, { 
+        status: "completed", 
+        endTime: new Date().toISOString(), 
+        earned: rewardCoins,
+        valid: true,
+        finalDuration: reportedDuration,
+        interactionCount: reportedInteractions,
+        wasFocused: isFocused
+      });
+
+      // Update Game Analytics
+      await updateDoc(doc(db, "games", sessionData.gameId), {
+        "analytics.completions": increment(1),
+        "analytics.claims": increment(1),
+        "analytics.totalPlayTime": increment(reportedDuration)
+      });
+
+      // Log Event
+      await addDoc(collection(db, "game_logs"), {
+        type: "REWARD_CLAIMED",
+        userId,
+        gameId: sessionData.gameId,
+        sessionId,
+        reward: rewardCoins,
+        timestamp: new Date().toISOString()
+      });
 
       // Referral Bonus logic
       if (userData?.gameReferrer) {
@@ -4493,8 +4687,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         
         if (!rewardSnap.exists()) {
           const referrerRef = doc(db, "users", userData.gameReferrer);
-          const settingsSnap = await getDoc(doc(db, "settings", "game_rewards"));
-          const referralBonus = Number(settingsSnap.data()?.referralBonus || 5);
+          const referralBonus = Number(settings?.referralBonus || 5);
           
           await updateDoc(referrerRef, { gameCoins: increment(referralBonus) });
           await setDoc(rewardRef, {
@@ -4507,10 +4700,15 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         }
       }
 
-      return res.json({ success: true, earned: rewardCoins, streak: newStreak, newCoins: (userData?.gameCoins || 0) + rewardCoins });
+      return res.json({ 
+        success: true, 
+        coinsEarned: rewardCoins,
+        newStreak,
+        message: "Reward claimed successfully!" 
+      });
     } catch (e: any) {
-      console.error("Session End Error:", e);
-      return res.status(500).json({ error: "Failed to process reward" });
+      console.error("Error in end-v2:", e);
+      return res.status(500).json({ success: false, error: e.message });
     }
   });
 
@@ -4713,6 +4911,20 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const totalAdClicks = ads.reduce((acc, a) => acc + Number(a.clicks || 0), 0);
       const topPerformingAd = [...ads].sort((a, b) => (Number(b.clicks) || 0) - (Number(a.clicks) || 0))[0] || null;
 
+      // 🎮 Game Analytics
+      const gamesSnap = await getDocs(collection(db, "games"));
+      let totalOpens = 0;
+      let totalCompletions = 0;
+      let totalClaims = 0;
+      let totalPlayTime = 0;
+      gamesSnap.forEach(g => {
+        const gd = g.data();
+        totalOpens += Number(gd.analytics?.opens || 0);
+        totalCompletions += Number(gd.analytics?.completions || 0);
+        totalClaims += Number(gd.analytics?.claims || 0);
+        totalPlayTime += Number(gd.analytics?.totalPlayTime || 0);
+      });
+
       res.json({
         overview: {
           totalUsers,
@@ -4721,10 +4933,16 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
           totalEarnings,
           totalWithdrawals: withdrawals.length,
           totalBonusClaims,
-          totalRewardClaims: 0,
+          totalRewardClaims: totalClaims,
           totalReferrals
         },
         userAnalytics: { totalUsers, activeUsers, newUsersToday, newUsersThisWeek, newUsersThisMonth },
+        gameAnalytics: {
+          totalOpens,
+          totalCompletions,
+          totalClaims,
+          avgPlayTime: totalCompletions > 0 ? totalPlayTime / totalCompletions : 0
+        },
         earningsAnalytics: {
           todayEarnings: totalEarnings * 0.05,
           weeklyEarnings: totalEarnings * 0.2,
@@ -8549,7 +8767,12 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           conversionInr: 1,
           dailyCoinLimit: 5000,
           cooldownMinutes: 5,
-          maxDailyRewards: 50
+          maxDailyRewards: 50,
+          minActiveTime: 120,
+          chromeOnly: false,
+          allowWebView: true,
+          requireWalkthrough: false,
+          externalBrowserMode: false
         };
         res.json({ success: true, settings: defaults });
       }

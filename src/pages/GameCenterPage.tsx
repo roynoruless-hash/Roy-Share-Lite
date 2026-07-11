@@ -86,24 +86,15 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
     try {
       setLoadingSessions(true);
       setSessionsError(null);
-      // We fetch from the server-side proxy or direct firestore if allowed.
-      // The instructions say "Load sessions from Firestore". 
-      // In this app, db is usually imported from ../lib/firebase.
-      const { db } = await import("../lib/firebase");
-      const { collection, query, where, getDocs, orderBy } = await import("firebase/firestore");
       
-      const q = query(
-        collection(db, "game_sessions"),
-        where("userId", "==", userId),
-        orderBy("startTime", "desc")
-      );
+      const res = await fetch(`${API_BASE}/api/game/sessions/${userId}`);
+      const data = await res.json();
       
-      const querySnapshot = await getDocs(q);
-      const fetchedSessions: any[] = [];
-      querySnapshot.forEach((doc) => {
-        fetchedSessions.push({ id: doc.id, ...doc.data() });
-      });
-      setSessions(fetchedSessions);
+      if (data.success) {
+        setSessions(data.sessions);
+      } else {
+        setSessionsError(data.error || "Failed to load game sessions.");
+      }
     } catch (err: any) {
       console.error("Error fetching sessions:", err);
       setSessionsError("Failed to load game sessions. Please try again.");
@@ -545,9 +536,11 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
                                   <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${
                                     isCompleted 
                                       ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
+                                      : s.status === 'playing'
+                                      ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
                                       : "bg-amber-500/10 border-amber-500/20 text-amber-400"
                                   }`}>
-                                    {s.status || (s.valid ? "Valid" : "Pending")}
+                                    {s.status === 'playing' ? "Active" : (s.status || (s.valid ? "Completed" : "Pending"))}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-3 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
@@ -557,7 +550,7 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
                                   </div>
                                   <div className="flex items-center gap-1">
                                     <Timer className="w-3 h-3" />
-                                    {s.duration ? `${Math.floor(s.duration / 60)}m ${s.duration % 60}s` : "0s"}
+                                    {s.currentActiveSeconds ? `${Math.floor(s.currentActiveSeconds / 60)}m ${s.currentActiveSeconds % 60}s` : (s.duration && !isNaN(Number(s.duration)) ? `${Math.floor(Number(s.duration) / 60)}m ${Number(s.duration) % 60}s` : "0s")}
                                   </div>
                                   {s.coinsEarned > 0 && (
                                     <div className="flex items-center gap-1 text-amber-500">

@@ -271,7 +271,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     conversionInr: 1,
     dailyCoinLimit: 5000,
     cooldownMinutes: 5,
-    maxDailyRewards: 50
+    maxDailyRewards: 50,
+    minActiveTime: 120,
+    minInteractions: 5,
+    chromeOnly: false,
+    allowWebView: true,
+    requireWalkthrough: false,
+    externalBrowserMode: false
   });
   const [gameRewardSettingsLoading, setGameRewardSettingsLoading] = useState(false);
   const [gameRewardSettingsSaving, setGameRewardSettingsSaving] = useState(false);
@@ -301,6 +307,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [customGameOrientation, setCustomGameOrientation] = useState("landscape");
   const [customGameWidth, setCustomGameWidth] = useState("");
   const [customGameHeight, setCustomGameHeight] = useState("");
+  const [customGameRequiredTime, setCustomGameRequiredTime] = useState(300); // Seconds internally or Minutes in UI? User says "Minutes" in UI.
+  const [customGameMinActiveTime, setCustomGameMinActiveTime] = useState(120);
+  const [customGameChromeOnly, setCustomGameChromeOnly] = useState(false);
+  const [customGameAllowWebView, setCustomGameAllowWebView] = useState(true);
+  const [customGameRequireWalkthrough, setCustomGameRequireWalkthrough] = useState(false);
+  const [customGameExternalBrowserMode, setCustomGameExternalBrowserMode] = useState(false);
+  const [customGameRewardCoins, setCustomGameRewardCoins] = useState(100);
   const [customGameFeatured, setCustomGameFeatured] = useState(false);
   const [customGameEnabled, setCustomGameEnabled] = useState(true);
   const [customGameWalkthroughEnabled, setCustomGameWalkthroughEnabled] = useState(false);
@@ -2478,6 +2491,19 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setCustomGameError("");
     setCustomGameSuccess("");
     try {
+      // 🛡️ Final URL Validation
+      const valRes = await fetch(`${API_BASE}/api/admin/games/validate-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: customGameUrl })
+      });
+      const valData = await valRes.json();
+      if (!valData.success) {
+        setCustomGameError(`URL Validation Failed: ${valData.error}`);
+        setCustomGameSaving(false);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/admin/games/custom`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2494,6 +2520,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           orientation: customGameOrientation,
           width: customGameWidth,
           height: customGameHeight,
+          requiredTime: customGameRequiredTime,
+          minActiveTime: customGameMinActiveTime,
+          chromeOnly: customGameChromeOnly,
+          allowWebView: customGameAllowWebView,
+          requireWalkthrough: customGameRequireWalkthrough,
+          externalBrowserMode: customGameExternalBrowserMode,
+          rewardCoins: customGameRewardCoins,
           featured: customGameFeatured,
           enabled: customGameEnabled,
           walkthrough: customGameWalkthroughEnabled ? customGameWalkthroughData : null
@@ -2520,6 +2553,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         setCustomGameOrientation("landscape");
         setCustomGameWidth("");
         setCustomGameHeight("");
+        setCustomGameRequiredTime(300);
+        setCustomGameMinActiveTime(120);
+        setCustomGameChromeOnly(false);
+        setCustomGameAllowWebView(true);
+        setCustomGameRequireWalkthrough(false);
+        setCustomGameExternalBrowserMode(false);
+        setCustomGameRewardCoins(100);
         setCustomGameFeatured(false);
         setCustomGameEnabled(true);
         setCustomGameWalkthroughEnabled(false);
@@ -8169,6 +8209,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     📢 Ad Analytics
                   </button>
                   <button
+                    onClick={() => setAnalyticsView("Game Analytics")}
+                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === "Game Analytics" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
+                  >
+                    🎮 Game Analytics
+                  </button>
+                  <button
                     onClick={() =>
                       alert("Export functionality to be implemented")
                     }
@@ -8466,6 +8512,51 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     </h3>
                     <p className="text-2xl font-bold text-yellow-400">
                       {analyticsData.adAnalytics?.ctr}
+                    </p>
+                  </div>
+                </div>
+              ) : analyticsView === "Game Analytics" ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">
+                      Total Game Opens
+                    </h3>
+                    <p className="text-2xl font-bold text-blue-400">
+                      {analyticsData.gameAnalytics?.totalOpens || 0}
+                    </p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">
+                      Total Completions
+                    </h3>
+                    <p className="text-2xl font-bold text-emerald-400">
+                      {analyticsData.gameAnalytics?.totalCompletions || 0}
+                    </p>
+                  </div>
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-amber-500/80 uppercase tracking-wider mb-1">
+                      Total Reward Claims
+                    </h3>
+                    <p className="text-2xl font-bold text-amber-400">
+                      {analyticsData.gameAnalytics?.totalClaims || 0}
+                    </p>
+                  </div>
+                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-purple-500/80 uppercase tracking-wider mb-1">
+                      Avg Play Time (min)
+                    </h3>
+                    <p className="text-2xl font-bold text-purple-400">
+                      {Math.round((analyticsData.gameAnalytics?.avgPlayTime || 0) / 60)}
+                    </p>
+                  </div>
+                  <div className="bg-slate-500/10 border border-slate-500/20 rounded-2xl p-4 col-span-2">
+                    <h3 className="text-xs font-semibold text-slate-500/80 uppercase tracking-wider mb-1">
+                      Completion Rate
+                    </h3>
+                    <p className="text-2xl font-bold text-white">
+                      {analyticsData.gameAnalytics?.totalOpens > 0 
+                        ? Math.round((analyticsData.gameAnalytics?.totalCompletions / analyticsData.gameAnalytics?.totalOpens) * 100)
+                        : 0}%
                     </p>
                   </div>
                 </div>
@@ -11446,6 +11537,88 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                           />
                         </div>
                         <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Reward Coins</label>
+                          <input
+                            type="number"
+                            value={customGameRewardCoins}
+                            onChange={(e) => setCustomGameRewardCoins(Number(e.target.value))}
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-xs text-white font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/30 p-6 rounded-3xl border border-slate-800/40">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Required Play Time (Seconds)</label>
+                          <input
+                            type="number"
+                            value={customGameRequiredTime}
+                            onChange={(e) => setCustomGameRequiredTime(Number(e.target.value))}
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm text-white font-bold"
+                          />
+                          <p className="text-[9px] text-slate-500 ml-1">Total time needed to claim reward.</p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Minimum Active Time (Seconds)</label>
+                          <input
+                            type="number"
+                            value={customGameMinActiveTime}
+                            onChange={(e) => setCustomGameMinActiveTime(Number(e.target.value))}
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm text-white font-bold"
+                          />
+                          <p className="text-[9px] text-slate-500 ml-1">Time user must be active/focused.</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Chrome Only</label>
+                          <button
+                            type="button"
+                            onClick={() => setCustomGameChromeOnly(!customGameChromeOnly)}
+                            className={`w-full p-4 rounded-2xl border transition-all text-[9px] font-black uppercase flex items-center justify-center gap-2 ${customGameChromeOnly ? "bg-blue-500/10 border-blue-500/30 text-blue-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
+                          >
+                            <Chrome size={14} />
+                            {customGameChromeOnly ? "YES" : "NO"}
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Allow WebView</label>
+                          <button
+                            type="button"
+                            onClick={() => setCustomGameAllowWebView(!customGameAllowWebView)}
+                            className={`w-full p-4 rounded-2xl border transition-all text-[9px] font-black uppercase flex items-center justify-center gap-2 ${customGameAllowWebView ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
+                          >
+                            <Smartphone size={14} />
+                            {customGameAllowWebView ? "YES" : "NO"}
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Require WT</label>
+                          <button
+                            type="button"
+                            onClick={() => setCustomGameRequireWalkthrough(!customGameRequireWalkthrough)}
+                            className={`w-full p-4 rounded-2xl border transition-all text-[9px] font-black uppercase flex items-center justify-center gap-2 ${customGameRequireWalkthrough ? "bg-purple-500/10 border-purple-500/30 text-purple-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
+                          >
+                            <Tv size={14} />
+                            {customGameRequireWalkthrough ? "YES" : "NO"}
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Ext Browser</label>
+                          <button
+                            type="button"
+                            onClick={() => setCustomGameExternalBrowserMode(!customGameExternalBrowserMode)}
+                            className={`w-full p-4 rounded-2xl border transition-all text-[9px] font-black uppercase flex items-center justify-center gap-2 ${customGameExternalBrowserMode ? "bg-orange-500/10 border-orange-500/30 text-orange-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
+                          >
+                            <ExternalLink size={14} />
+                            {customGameExternalBrowserMode ? "YES" : "NO"}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="space-y-2">
                           <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Featured</label>
                           <button
                             type="button"
@@ -12979,6 +13152,28 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                         </div>
 
                         <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Minimum Active Time (Seconds)</label>
+                          <input
+                            type="number"
+                            value={Number(gameRewardSettings.minActiveTime || 0)}
+                            onChange={(e) => setGameRewardSettings({...gameRewardSettings, minActiveTime: Number(e.target.value)})}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                          <p className="text-[10px] text-slate-500 italic">User must be active/focused for this long.</p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Required Interactions</label>
+                          <input
+                            type="number"
+                            value={Number(gameRewardSettings.minInteractions || 0)}
+                            onChange={(e) => setGameRewardSettings({...gameRewardSettings, minInteractions: Number(e.target.value)})}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                          <p className="text-[10px] text-slate-500 italic">Minimum number of interactions (clicks/keys) required.</p>
+                        </div>
+
+                        <div className="space-y-2">
                           <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Reward Coins</label>
                           <div className="relative">
                             <input
@@ -12990,6 +13185,57 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             <Coins className="absolute left-3 top-3.5 w-4 h-4 text-amber-500" />
                           </div>
                           <p className="text-[10px] text-slate-500 italic">Amount of coins awarded per successful play session.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Security Configuration */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 space-y-6">
+                      <div className="space-y-1">
+                        <h3 className="text-lg font-black text-white uppercase tracking-tighter">Security & Browser</h3>
+                        <p className="text-xs text-slate-500 font-medium">Global platform restrictions and security logic.</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 pt-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Chrome Only</label>
+                          <button
+                            onClick={() => setGameRewardSettings({...gameRewardSettings, chromeOnly: !gameRewardSettings.chromeOnly})}
+                            className={`w-full p-4 rounded-2xl border transition-all text-xs font-black uppercase flex items-center justify-center gap-2 ${gameRewardSettings.chromeOnly ? "bg-blue-500/10 border-blue-500/30 text-blue-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
+                          >
+                            <Chrome size={14} />
+                            {gameRewardSettings.chromeOnly ? "ON" : "OFF"}
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Allow WebView</label>
+                          <button
+                            onClick={() => setGameRewardSettings({...gameRewardSettings, allowWebView: !gameRewardSettings.allowWebView})}
+                            className={`w-full p-4 rounded-2xl border transition-all text-xs font-black uppercase flex items-center justify-center gap-2 ${gameRewardSettings.allowWebView ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
+                          >
+                            <Smartphone size={14} />
+                            {gameRewardSettings.allowWebView ? "ON" : "OFF"}
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Require WT</label>
+                          <button
+                            onClick={() => setGameRewardSettings({...gameRewardSettings, requireWalkthrough: !gameRewardSettings.requireWalkthrough})}
+                            className={`w-full p-4 rounded-2xl border transition-all text-xs font-black uppercase flex items-center justify-center gap-2 ${gameRewardSettings.requireWalkthrough ? "bg-purple-500/10 border-purple-500/30 text-purple-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
+                          >
+                            <Tv size={14} />
+                            {gameRewardSettings.requireWalkthrough ? "ON" : "OFF"}
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Ext Browser</label>
+                          <button
+                            onClick={() => setGameRewardSettings({...gameRewardSettings, externalBrowserMode: !gameRewardSettings.externalBrowserMode})}
+                            className={`w-full p-4 rounded-2xl border transition-all text-xs font-black uppercase flex items-center justify-center gap-2 ${gameRewardSettings.externalBrowserMode ? "bg-orange-500/10 border-orange-500/30 text-orange-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
+                          >
+                            <ExternalLink size={14} />
+                            {gameRewardSettings.externalBrowserMode ? "ON" : "OFF"}
+                          </button>
                         </div>
                       </div>
                     </div>
