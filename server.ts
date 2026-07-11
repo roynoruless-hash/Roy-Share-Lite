@@ -3493,6 +3493,9 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         title,
         description,
         category,
+        provider,
+        tags,
+        instructions,
         bannerUrl,
         thumbnailUrl,
         url,
@@ -3500,7 +3503,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         width,
         height,
         featured,
-        enabled
+        enabled,
+        walkthrough
       } = req.body;
 
       if (!title || !url) {
@@ -3510,11 +3514,14 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const customId = `custom_${Date.now()}`;
       const publishDocRef = doc(db, "games", customId);
 
-      const customGame = {
+      const customGame: any = {
         id: customId,
         title,
         description: description || "",
         category: category || "Casual",
+        provider: provider || "",
+        tags: tags || "",
+        instructions: instructions || "",
         bannerUrl: bannerUrl || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600",
         thumbnailUrl: thumbnailUrl || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=150",
         url,
@@ -3535,7 +3542,25 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       };
 
       await setDoc(publishDocRef, customGame);
-      return res.json({ success: true, message: "Custom game created successfully!" });
+
+      let walkthroughSaved = false;
+      if (walkthrough) {
+        const walkthroughId = `wt_${customId}`;
+        await setDoc(doc(db, "gamemonetize_walkthroughs", walkthroughId), {
+          ...walkthrough,
+          gameId: customId, // Link to the new game ID
+          gameName: title,
+          id: walkthroughId,
+          addedAt: new Date().toISOString()
+        });
+        walkthroughSaved = true;
+      }
+
+      return res.json({ 
+        success: true, 
+        message: "Game created successfully!",
+        walkthroughSaved
+      });
     } catch (e: any) {
       console.error("Error adding custom game:", e);
       return res.status(500).json({ success: false, error: e.message || "Failed to create custom game." });

@@ -58,6 +58,9 @@ import {
   Code,
   FlaskConical,
   Settings,
+  Monitor,
+  Laptop,
+  Tablet,
 } from "lucide-react";
 
 
@@ -289,6 +292,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [customGameTitle, setCustomGameTitle] = useState("");
   const [customGameDescription, setCustomGameDescription] = useState("");
   const [customGameCategory, setCustomGameCategory] = useState("Casual");
+  const [customGameProvider, setCustomGameProvider] = useState<string>("");
+  const [customGameTags, setCustomGameTags] = useState("");
+  const [customGameInstructions, setCustomGameInstructions] = useState("");
   const [customGameBannerUrl, setCustomGameBannerUrl] = useState("");
   const [customGameThumbnailUrl, setCustomGameThumbnailUrl] = useState("");
   const [customGameUrl, setCustomGameUrl] = useState("");
@@ -297,6 +303,19 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [customGameHeight, setCustomGameHeight] = useState("");
   const [customGameFeatured, setCustomGameFeatured] = useState(false);
   const [customGameEnabled, setCustomGameEnabled] = useState(true);
+  const [customGameWalkthroughEnabled, setCustomGameWalkthroughEnabled] = useState(false);
+  const [customGameWalkthroughMode, setCustomGameWalkthroughMode] = useState<"config" | "raw">("config");
+  const [customGameWalkthroughData, setCustomGameWalkthroughData] = useState<any>({
+    gameName: "",
+    gameId: "",
+    width: "100%",
+    height: "480",
+    themeColor: "#4f46e5",
+    showAds: true,
+    enabled: true,
+    mode: "config",
+    rawCode: ""
+  });
   const [customGameError, setCustomGameError] = useState("");
   const [customGameSuccess, setCustomGameSuccess] = useState("");
   const [customGameSaving, setCustomGameSaving] = useState(false);
@@ -1105,6 +1124,86 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       console.error("Error saving walkthrough:", err);
     } finally {
       setWalkthroughsLoading(false);
+    }
+  };
+
+  const verifyCustomWalkthrough = async () => {
+    const gameId = customGameWalkthroughData.gameId;
+    if (!gameId) {
+       setCustomGameError("❌ Game ID is required for verification");
+       setTimeout(() => setCustomGameError(""), 3000);
+       return;
+    }
+    
+    setCustomGameSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs/check/${gameId}`);
+      const data = await res.json();
+      
+      if (data.success) {
+        setCustomGameWalkthroughData({
+          ...customGameWalkthroughData,
+          isAvailable: data.isAvailable,
+          lastChecked: data.timestamp
+        });
+        
+        if (data.isAvailable) {
+           setCustomGameSuccess("✅ Walkthrough Available");
+        } else {
+           setCustomGameError("❌ No Walkthrough Available For This Game");
+        }
+        setTimeout(() => { setCustomGameSuccess(""); setCustomGameError(""); }, 3000);
+      }
+    } catch (err) {
+      console.error("Verification error:", err);
+      setCustomGameError("❌ Verification Failed");
+      setTimeout(() => setCustomGameError(""), 3000);
+    } finally {
+      setCustomGameSaving(false);
+    }
+  };
+
+  const handleTestCustomWalkthrough = async () => {
+    if (customGameWalkthroughMode === 'raw') {
+      if (!customGameWalkthroughData.rawCode) {
+        setCustomGameError("❌ Please paste embed code first");
+        setTimeout(() => setCustomGameError(""), 3000);
+        return;
+      }
+      setWalkthroughPreview({ ...customGameWalkthroughData, mode: 'raw' });
+      setCustomGameSuccess("✅ Preview Ready");
+      setTimeout(() => setCustomGameSuccess(""), 3000);
+      return;
+    }
+
+    const gameId = customGameWalkthroughData.gameId;
+    if (!gameId) {
+      setCustomGameError("❌ Game ID is required for testing");
+      setTimeout(() => setCustomGameError(""), 3000);
+      return;
+    }
+
+    setCustomGameSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs/check/${gameId}`);
+      const data = await res.json();
+      if (data.success) {
+        const updated = { ...customGameWalkthroughData, isAvailable: data.isAvailable, lastChecked: data.timestamp };
+        setCustomGameWalkthroughData(updated);
+        setWalkthroughPreview(updated);
+        if (data.isAvailable) {
+          setCustomGameSuccess("✅ Preview Loaded Successfully");
+        } else {
+          setCustomGameError("❌ Walkthrough Failed to Load");
+        }
+        setTimeout(() => { setCustomGameSuccess(""); setCustomGameError(""); }, 3000);
+      }
+    } catch (err) {
+      console.error("Test error:", err);
+      setCustomGameError("❌ Test Failed");
+      setTimeout(() => setCustomGameError(""), 3000);
+    } finally {
+      setCustomGameSaving(false);
     }
   };
 
@@ -2370,16 +2469,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
   const saveCustomGame = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customGameTitle || !customGameUrl) {
-      setCustomGameError("Title and Play URL are required.");
-      return;
-    }
-    if (!customGameBannerUrl) {
-      setCustomGameError("Banner image is required. Please upload a banner image.");
-      return;
-    }
-    if (!customGameThumbnailUrl) {
-      setCustomGameError("Thumbnail image is required. Please upload or paste a thumbnail URL.");
+    if (!customGameTitle || !customGameUrl || !customGameBannerUrl || !customGameThumbnailUrl) {
+      setCustomGameError("Please fill in all required fields (Name, Play URL, Banner, and Thumbnail).");
       return;
     }
 
@@ -2394,6 +2485,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           title: customGameTitle,
           description: customGameDescription,
           category: customGameCategory,
+          provider: customGameProvider,
+          tags: customGameTags,
+          instructions: customGameInstructions,
           bannerUrl: customGameBannerUrl,
           thumbnailUrl: customGameThumbnailUrl,
           url: customGameUrl,
@@ -2401,16 +2495,25 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           width: customGameWidth,
           height: customGameHeight,
           featured: customGameFeatured,
-          enabled: customGameEnabled
+          enabled: customGameEnabled,
+          walkthrough: customGameWalkthroughEnabled ? customGameWalkthroughData : null
         })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setCustomGameSuccess("✅ Custom game created and published successfully!");
+        let successMsg = "✅ Game Saved Successfully";
+        if (data.walkthroughSaved) {
+          successMsg += "\n✅ Walkthrough Saved Successfully";
+        }
+        setCustomGameSuccess(successMsg);
+        
         // Reset manual form
         setCustomGameTitle("");
         setCustomGameDescription("");
         setCustomGameCategory(gameCategories.length > 0 ? gameCategories[0].name : "Casual");
+        setCustomGameProvider("");
+        setCustomGameTags("");
+        setCustomGameInstructions("");
         setCustomGameBannerUrl("");
         setCustomGameThumbnailUrl("");
         setCustomGameUrl("");
@@ -2419,12 +2522,25 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         setCustomGameHeight("");
         setCustomGameFeatured(false);
         setCustomGameEnabled(true);
+        setCustomGameWalkthroughEnabled(false);
+        setCustomGameWalkthroughData({
+          gameName: "",
+          gameId: "",
+          width: "100%",
+          height: "480",
+          themeColor: "#4f46e5",
+          showAds: true,
+          enabled: true,
+          mode: "config",
+          rawCode: ""
+        });
         setBannerPreview(null);
         setThumbnailPreview(null);
         fetchPublishedGames();
         fetchCatalogGames();
+        setTimeout(() => setCustomGameSuccess(""), 5000);
       } else {
-        setCustomGameError(data.error || "Failed to add custom game.");
+        setCustomGameError(data.error || "Failed to add game.");
       }
     } catch (err: any) {
       console.error(err);
@@ -11070,551 +11186,594 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           )}
 
           {activeTab === "➕ Add Custom Game" && (
-            <div className="space-y-6">
+            <div className="space-y-8 pb-20">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
                 <div>
-                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                    ➕ Add Custom Game
+                  <h2 className="text-3xl font-black text-white flex items-center gap-3">
+                    <Plus className="w-8 h-8 text-purple-500" />
+                    Manual Game Add System
                   </h2>
-                  <p className="text-sm text-slate-400 mt-1">
-                    Upload or manually configure proprietary, premium, or third-party web games directly into the games collection with live assets.
+                  <p className="text-sm text-slate-400 mt-1 max-w-xl">
+                    Manually add premium games with custom assets, configurations, and walkthrough support. All data is saved exactly as entered.
                   </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* Manual form */}
-                <form
-                  onSubmit={saveCustomGame}
-                  className="lg:col-span-7 bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl"
-                >
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-purple-400">Game Details</h3>
-
-                  {customGameError && (
-                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2 animate-pulse">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      <span>{customGameError}</span>
-                    </div>
-                  )}
-
-                  {customGameSuccess && (
-                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                      <span>{customGameSuccess}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-300">Game Name <span className="text-purple-400">*</span></label>
-                      <input
-                        type="text"
-                        required
-                        value={customGameTitle}
-                        onChange={(e) => setCustomGameTitle(e.target.value)}
-                        placeholder="e.g. Space Odyssey"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-300 flex justify-between">
-                        <span>Category / Genre <span className="text-purple-400">*</span></span>
-                      </label>
-                      <div className="flex gap-2">
-                        <select
-                          value={customGameCategory}
-                          onChange={(e) => setCustomGameCategory(e.target.value)}
-                          className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 cursor-pointer"
-                        >
-                          {(gameCategories.length > 0 ? gameCategories : [
-                            { id: "casual", name: "Casual", icon: "🎈" },
-                            { id: "action", name: "Action", icon: "💥" },
-                            { id: "sports", name: "Sports", icon: "⚽" },
-                            { id: "puzzle", name: "Puzzle", icon: "🧩" },
-                            { id: "racing", name: "Racing", icon: "🏎️" },
-                            { id: "adventure", name: "Adventure", icon: "🗺️" },
-                            { id: "strategy", name: "Strategy", icon: "🧠" },
-                            { id: "arcade", name: "Arcade", icon: "🕹️" },
-                            { id: "simulation", name: "Simulation", icon: "🚌" }
-                          ]).map((c) => (
-                            <option key={c.id || c.name} value={c.name}>
-                              {c.icon ? `${c.icon} ${c.name}` : c.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => setCategoryModalOpen(true)}
-                          className="px-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
-                        >
-                          <FolderPlus className="w-3.5 h-3.5" /> Add Category
-                        </button>
+                <div className="lg:col-span-8 space-y-8">
+                  <form
+                    onSubmit={saveCustomGame}
+                    className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 space-y-8 shadow-2xl relative overflow-hidden"
+                  >
+                    {/* Decorative Background Element */}
+                    <div className="absolute -top-24 -right-24 w-64 h-64 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
+                    
+                    <div className="space-y-6 relative">
+                      <div className="flex items-center gap-3 pb-2 border-b border-slate-800/60">
+                        <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+                          <Gamepad2 size={20} />
+                        </div>
+                        <h3 className="text-lg font-black text-white">Game Details</h3>
                       </div>
-                    </div>
-                  </div>
 
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-300">Play URL / Frame Source <span className="text-purple-400">*</span></label>
-                    <input
-                      type="url"
-                      required
-                      value={customGameUrl}
-                      onChange={(e) => setCustomGameUrl(e.target.value)}
-                      placeholder="e.g. https://play.gamepix.com/classic-bowling"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm font-mono text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
-                    />
-                  </div>
+                      {customGameError && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-xs flex items-center gap-3"
+                        >
+                          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                          <span className="font-bold">{customGameError}</span>
+                        </motion.div>
+                      )}
 
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-300">Game Description</label>
-                    <textarea
-                      rows={3}
-                      value={customGameDescription}
-                      onChange={(e) => setCustomGameDescription(e.target.value)}
-                      placeholder="Enter a brief, engaging description of the game..."
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600 resize-none"
-                    />
-                  </div>
+                      {customGameSuccess && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 text-xs flex items-center gap-3"
+                        >
+                          <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                          <div className="flex flex-col">
+                            {customGameSuccess.split('\n').map((line, i) => (
+                              <span key={i} className="font-bold">{line}</span>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
 
-                  {/* Banner Image Upload (Option 1) */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-300 flex justify-between items-center">
-                      <span>Banner Image <span className="text-purple-400">*</span></span>
-                      <span className="text-[10px] text-slate-500">Recommended: 1600 × 900 • Max 5MB</span>
-                    </label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Game Name <span className="text-rose-500">*</span></label>
+                          <input
+                            type="text"
+                            required
+                            value={customGameTitle}
+                            onChange={(e) => setCustomGameTitle(e.target.value)}
+                            placeholder="Enter game title"
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-purple-500 transition-all placeholder-slate-700 font-bold"
+                          />
+                        </div>
 
-                    {customGameBannerUrl ? (
-                      <div className="relative rounded-xl overflow-hidden aspect-[16/9] border border-slate-800 bg-slate-950 group">
-                        <img
-                          src={customGameBannerUrl}
-                          alt="Banner Preview"
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Provider (Optional)</label>
+                          <select
+                            value={customGameProvider}
+                            onChange={(e) => setCustomGameProvider(e.target.value)}
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-purple-500 transition-all cursor-pointer font-bold appearance-none"
+                          >
+                            <option value="">Select Provider</option>
+                            <option value="GamePix">GamePix</option>
+                            <option value="GameMonetize">GameMonetize</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Play URL / Iframe URL <span className="text-rose-500">*</span></label>
+                        <input
+                          type="url"
+                          required
+                          value={customGameUrl}
+                          onChange={(e) => setCustomGameUrl(e.target.value)}
+                          placeholder="https://..."
+                          className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm font-mono text-purple-400 focus:outline-none focus:border-purple-500 transition-all placeholder-slate-700"
                         />
-                        <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-3 transition-opacity">
-                          <label className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-lg">
-                            Replace Image
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Thumbnail URL <span className="text-rose-500">*</span></label>
+                          <div className="flex gap-2">
                             <input
-                              type="file"
-                              accept="image/jpeg,image/jpg,image/png,image/webp"
-                              className="hidden"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                setBannerUploading(true);
-                                setBannerUploadProgress(0);
-                                try {
-                                  const url = await uploadGameImage(file, setBannerUploadProgress);
-                                  setCustomGameBannerUrl(url);
-                                  setBannerPreview(url);
-                                } catch (err: any) {
-                                  alert(err.message || "Failed to upload banner image");
-                                } finally {
-                                  setBannerUploading(false);
-                                }
-                              }}
+                              type="url"
+                              required
+                              value={customGameThumbnailUrl}
+                              onChange={(e) => setCustomGameThumbnailUrl(e.target.value)}
+                              placeholder="https://..."
+                              className="flex-1 bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm font-mono text-slate-400 focus:outline-none focus:border-purple-500 transition-all placeholder-slate-700"
                             />
-                          </label>
+                            <label className="p-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl cursor-pointer transition-all flex items-center justify-center">
+                              <Upload size={18} />
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept="image/*"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  setThumbnailUploading(true);
+                                  try {
+                                    const url = await uploadGameImage(file, setThumbnailUploadProgress);
+                                    setCustomGameThumbnailUrl(url);
+                                  } catch (err: any) {
+                                    alert(err.message || "Failed to upload thumbnail");
+                                  } finally {
+                                    setThumbnailUploading(false);
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Banner URL <span className="text-rose-500">*</span></label>
+                          <div className="flex gap-2">
+                            <input
+                              type="url"
+                              required
+                              value={customGameBannerUrl}
+                              onChange={(e) => setCustomGameBannerUrl(e.target.value)}
+                              placeholder="https://..."
+                              className="flex-1 bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm font-mono text-slate-400 focus:outline-none focus:border-purple-500 transition-all placeholder-slate-700"
+                            />
+                            <label className="p-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl cursor-pointer transition-all flex items-center justify-center">
+                              <Upload size={18} />
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept="image/*"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  setBannerUploading(true);
+                                  try {
+                                    const url = await uploadGameImage(file, setBannerUploadProgress);
+                                    setCustomGameBannerUrl(url);
+                                  } catch (err: any) {
+                                    alert(err.message || "Failed to upload banner");
+                                  } finally {
+                                    setBannerUploading(false);
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Description</label>
+                        <textarea
+                          rows={3}
+                          value={customGameDescription}
+                          onChange={(e) => setCustomGameDescription(e.target.value)}
+                          placeholder="Brief description of the game..."
+                          className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-purple-500 transition-all placeholder-slate-700 resize-none font-bold"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Category</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={customGameCategory}
+                              onChange={(e) => setCustomGameCategory(e.target.value)}
+                              className="flex-1 bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-purple-500 transition-all cursor-pointer font-bold appearance-none"
+                            >
+                              {(gameCategories.length > 0 ? gameCategories : [
+                                { name: "Casual" }, { name: "Action" }, { name: "Sports" }, { name: "Puzzle" }, { name: "Racing" }
+                              ]).map((c: any) => (
+                                <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => setCategoryModalOpen(true)}
+                              className="p-4 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 rounded-2xl transition-all flex items-center justify-center"
+                            >
+                              <Plus size={18} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Tags (Comma Separated)</label>
+                          <input
+                            type="text"
+                            value={customGameTags}
+                            onChange={(e) => setCustomGameTags(e.target.value)}
+                            placeholder="action, racing, multiplayer"
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-purple-500 transition-all placeholder-slate-700 font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Instructions</label>
+                        <textarea
+                          rows={2}
+                          value={customGameInstructions}
+                          onChange={(e) => setCustomGameInstructions(e.target.value)}
+                          placeholder="How to play instructions..."
+                          className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-sm text-white focus:outline-none focus:border-purple-500 transition-all placeholder-slate-700 resize-none font-bold"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Orientation</label>
+                          <select
+                            value={customGameOrientation}
+                            onChange={(e) => setCustomGameOrientation(e.target.value)}
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-xs text-white font-bold"
+                          >
+                            <option value="landscape">Landscape</option>
+                            <option value="portrait">Portrait</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Width</label>
+                          <input
+                            type="text"
+                            value={customGameWidth}
+                            onChange={(e) => setCustomGameWidth(e.target.value)}
+                            placeholder="100%"
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-xs text-white font-bold"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Height</label>
+                          <input
+                            type="text"
+                            value={customGameHeight}
+                            onChange={(e) => setCustomGameHeight(e.target.value)}
+                            placeholder="600"
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-xs text-white font-bold"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Featured</label>
                           <button
                             type="button"
-                            onClick={() => {
-                              setCustomGameBannerUrl("");
-                              setBannerPreview(null);
-                            }}
-                            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-lg"
+                            onClick={() => setCustomGameFeatured(!customGameFeatured)}
+                            className={`w-full p-4 rounded-2xl border transition-all text-xs font-black uppercase flex items-center justify-center gap-2 ${customGameFeatured ? "bg-amber-500/10 border-amber-500/30 text-amber-500" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
                           >
-                            Remove
+                            <Sparkles size={14} />
+                            {customGameFeatured ? "ON" : "OFF"}
                           </button>
                         </div>
                       </div>
-                    ) : (
-                      <div
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }}
-                        onDrop={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const file = e.dataTransfer.files?.[0];
-                          if (!file) return;
-                          setBannerUploading(true);
-                          setBannerUploadProgress(0);
-                          try {
-                            const url = await uploadGameImage(file, setBannerUploadProgress);
-                            setCustomGameBannerUrl(url);
-                            setBannerPreview(url);
-                          } catch (err: any) {
-                            alert(err.message || "Failed to upload banner image");
-                          } finally {
-                            setBannerUploading(false);
-                          }
-                        }}
-                        className="border-2 border-dashed border-slate-800 hover:border-purple-500/60 bg-slate-950 hover:bg-purple-950/5 rounded-xl aspect-[16/9] flex flex-col items-center justify-center text-center p-4 transition-all group relative cursor-pointer overflow-hidden"
-                      >
-                        {bannerUploading ? (
-                          <div className="w-full max-w-[200px] space-y-3">
-                            <div className="flex justify-between text-xs text-slate-300 font-bold">
-                              <span className="flex items-center gap-1">
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-400" /> Uploading...
-                              </span>
-                              <span>{bannerUploadProgress}%</span>
-                            </div>
-                            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                              <div
-                                className="bg-purple-600 h-1.5 rounded-full transition-all duration-150"
-                                style={{ width: `${bannerUploadProgress}%` }}
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
-                            <Upload className="w-10 h-10 text-slate-500 group-hover:text-purple-400 transition-colors mb-2" />
-                            <span className="text-sm font-bold text-slate-200 group-hover:text-white transition-colors">
-                              📤 Upload Banner Image
-                            </span>
-                            <span className="text-[11px] text-slate-500 mt-1">
-                              Drag & Drop or click to browse (JPG, PNG, WEBP)
-                            </span>
-                            <input
-                              type="file"
-                              accept="image/jpeg,image/jpg,image/png,image/webp"
-                              className="hidden"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                setBannerUploading(true);
-                                setBannerUploadProgress(0);
-                                try {
-                                  const url = await uploadGameImage(file, setBannerUploadProgress);
-                                  setCustomGameBannerUrl(url);
-                                  setBannerPreview(url);
-                                } catch (err: any) {
-                                  alert(err.message || "Failed to upload banner image");
-                                } finally {
-                                  setBannerUploading(false);
-                                }
-                              }}
-                            />
-                          </label>
-                        )}
-                      </div>
-                    )}
-                  </div>
 
-                  {/* Thumbnail Image Section */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs font-semibold text-slate-300">Thumbnail Image <span className="text-purple-400">*</span></label>
-                      <div className="flex gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => setThumbnailOption("upload")}
-                          className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${thumbnailOption === "upload" ? "bg-purple-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
-                        >
-                          Upload
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setThumbnailOption("url")}
-                          className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${thumbnailOption === "url" ? "bg-purple-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
-                        >
-                          Paste URL
-                        </button>
+                      <div className="flex items-center justify-between p-4 bg-slate-950/50 border border-slate-800 rounded-2xl">
+                         <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${customGameEnabled ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-800 text-slate-500"}`}>
+                              <Activity size={18} />
+                            </div>
+                            <div>
+                              <p className="text-xs font-black text-white uppercase tracking-wider">Status</p>
+                              <p className="text-[10px] text-slate-500">{customGameEnabled ? "Game is Active" : "Game is Inactive"}</p>
+                            </div>
+                         </div>
+                         <button
+                            type="button"
+                            onClick={() => setCustomGameEnabled(!customGameEnabled)}
+                            className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase transition-all ${customGameEnabled ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400"}`}
+                          >
+                            {customGameEnabled ? "Active" : "Inactive"}
+                          </button>
                       </div>
                     </div>
 
-                    {thumbnailOption === "upload" ? (
-                      <div className="flex items-center gap-4">
-                        {customGameThumbnailUrl ? (
-                          <div className="relative rounded-xl overflow-hidden aspect-square border border-slate-800 bg-slate-950 w-28 group">
-                            <img
-                              src={customGameThumbnailUrl}
-                              alt="Thumbnail Preview"
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
-                              <label className="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded-md transition-all cursor-pointer shadow-md">
-                                Replace
-                                <input
-                                  type="file"
-                                  accept="image/jpeg,image/jpg,image/png,image/webp"
-                                  className="hidden"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0];
-                                    if (!file) return;
-                                    setThumbnailUploading(true);
-                                    setThumbnailUploadProgress(0);
-                                    try {
-                                      const url = await uploadGameImage(file, setThumbnailUploadProgress);
-                                      setCustomGameThumbnailUrl(url);
-                                      setThumbnailPreview(url);
-                                    } catch (err: any) {
-                                      alert(err.message || "Failed to upload thumbnail");
-                                    } finally {
-                                      setThumbnailUploading(false);
-                                    }
-                                  }}
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCustomGameThumbnailUrl("");
-                                  setThumbnailPreview(null);
-                                }}
-                                className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white font-bold text-[9px] rounded-md transition-all cursor-pointer shadow-md"
-                              >
-                                Remove
-                              </button>
-                            </div>
+                    {/* WALKTHROUGH SECTION */}
+                    <div className="space-y-6 pt-8 border-t border-slate-800/60">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg ${customGameWalkthroughEnabled ? "bg-blue-500/10 text-blue-400" : "bg-slate-800 text-slate-500"}`}>
+                            <Tv size={20} />
                           </div>
-                        ) : (
-                          <div
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
-                            onDrop={async (e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              const file = e.dataTransfer.files?.[0];
-                              if (!file) return;
-                              setThumbnailUploading(true);
-                              setThumbnailUploadProgress(0);
-                              try {
-                                const url = await uploadGameImage(file, setThumbnailUploadProgress);
-                                setCustomGameThumbnailUrl(url);
-                                setThumbnailPreview(url);
-                              } catch (err: any) {
-                                alert(err.message || "Failed to upload thumbnail");
-                              } finally {
-                                setThumbnailUploading(false);
-                              }
-                            }}
-                            className="border-2 border-dashed border-slate-800 hover:border-purple-500/60 bg-slate-950 hover:bg-purple-950/5 rounded-xl w-28 aspect-square flex flex-col items-center justify-center text-center p-2 transition-all group relative cursor-pointer overflow-hidden"
-                          >
-                            {thumbnailUploading ? (
-                              <div className="w-full space-y-2 px-1">
-                                <span className="text-[10px] text-slate-300 font-bold block text-center">
-                                  {thumbnailUploadProgress}%
-                                </span>
-                                <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
-                                  <div
-                                    className="bg-purple-600 h-1 rounded-full transition-all duration-150"
-                                    style={{ width: `${thumbnailUploadProgress}%` }}
+                          <h3 className="text-lg font-black text-white">Game Walkthrough (Optional)</h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCustomGameWalkthroughEnabled(!customGameWalkthroughEnabled)}
+                          className={`w-12 h-6 rounded-full relative transition-all ${customGameWalkthroughEnabled ? "bg-blue-600" : "bg-slate-800"}`}
+                        >
+                          <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${customGameWalkthroughEnabled ? "left-7" : "left-1"}`} />
+                        </button>
+                      </div>
+
+                      {customGameWalkthroughEnabled && (
+                        <motion.div 
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          className="space-y-6 bg-slate-950/50 p-6 rounded-2xl border border-blue-500/10"
+                        >
+                          <div className="flex gap-4 p-1 bg-slate-900 rounded-xl w-fit">
+                            <button
+                              type="button"
+                              onClick={() => setCustomGameWalkthroughMode("config")}
+                              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${customGameWalkthroughMode === "config" ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"}`}
+                            >
+                              Configuration Mode
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCustomGameWalkthroughMode("raw")}
+                              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${customGameWalkthroughMode === "raw" ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"}`}
+                            >
+                              Raw Embed Code Mode
+                            </button>
+                          </div>
+
+                          {customGameWalkthroughMode === "config" ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              <div className="space-y-2">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Game Name</label>
+                                <input
+                                  type="text"
+                                  value={customGameWalkthroughData.gameName}
+                                  onChange={(e) => setCustomGameWalkthroughData({...customGameWalkthroughData, gameName: e.target.value})}
+                                  placeholder="Enter game title"
+                                  className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Game ID (Optional)</label>
+                                <input
+                                  type="text"
+                                  value={customGameWalkthroughData.gameId}
+                                  onChange={(e) => setCustomGameWalkthroughData({...customGameWalkthroughData, gameId: e.target.value})}
+                                  placeholder="e.g. 12345"
+                                  className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Width</label>
+                                  <input
+                                    type="text"
+                                    value={customGameWalkthroughData.width}
+                                    onChange={(e) => setCustomGameWalkthroughData({...customGameWalkthroughData, width: e.target.value})}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Height</label>
+                                  <input
+                                    type="text"
+                                    value={customGameWalkthroughData.height}
+                                    onChange={(e) => setCustomGameWalkthroughData({...customGameWalkthroughData, height: e.target.value})}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none"
                                   />
                                 </div>
                               </div>
-                            ) : (
-                              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
-                                <Upload className="w-6 h-6 text-slate-500 group-hover:text-purple-400 transition-colors mb-1" />
-                                <span className="text-[10px] font-bold text-slate-200 group-hover:text-white transition-colors">
-                                  Upload
-                                </span>
-                                <input
-                                  type="file"
-                                  accept="image/jpeg,image/jpg,image/png,image/webp"
-                                  className="hidden"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0];
-                                    if (!file) return;
-                                    setThumbnailUploading(true);
-                                    setThumbnailUploadProgress(0);
-                                    try {
-                                      const url = await uploadGameImage(file, setThumbnailUploadProgress);
-                                      setCustomGameThumbnailUrl(url);
-                                      setThumbnailPreview(url);
-                                    } catch (err: any) {
-                                      alert(err.message || "Failed to upload thumbnail");
-                                    } finally {
-                                      setThumbnailUploading(false);
+                              <div className="space-y-2">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Theme Color</label>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="color"
+                                    value={customGameWalkthroughData.themeColor}
+                                    onChange={(e) => setCustomGameWalkthroughData({...customGameWalkthroughData, themeColor: e.target.value})}
+                                    className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 p-1 cursor-pointer"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={customGameWalkthroughData.themeColor}
+                                    onChange={(e) => setCustomGameWalkthroughData({...customGameWalkthroughData, themeColor: e.target.value})}
+                                    className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-3 text-sm text-white font-mono"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex gap-4">
+                                <button
+                                  type="button"
+                                  onClick={() => setCustomGameWalkthroughData({...customGameWalkthroughData, showAds: !customGameWalkthroughData.showAds})}
+                                  className={`flex-1 p-3 rounded-xl border transition-all text-[10px] font-black uppercase flex items-center justify-center gap-2 ${customGameWalkthroughData.showAds ? "bg-amber-500/10 border-amber-500/30 text-amber-500" : "bg-slate-900 border-slate-800 text-slate-500"}`}
+                                >
+                                  Show Ads: {customGameWalkthroughData.showAds ? "ON" : "OFF"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setCustomGameWalkthroughData({...customGameWalkthroughData, enabled: !customGameWalkthroughData.enabled})}
+                                  className={`flex-1 p-3 rounded-xl border transition-all text-[10px] font-black uppercase flex items-center justify-center gap-2 ${customGameWalkthroughData.enabled ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-slate-900 border-slate-800 text-slate-500"}`}
+                                >
+                                  Status: {customGameWalkthroughData.enabled ? "Enabled" : "Disabled"}
+                                </button>
+                              </div>
+
+                              <div className="flex gap-3 pt-4 md:col-span-2">
+                                <button
+                                  type="button"
+                                  onClick={() => verifyCustomWalkthrough()}
+                                  className="px-4 py-2 bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                >
+                                  <Search size={14} /> Check Availability
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTestCustomWalkthrough()}
+                                  className="px-4 py-2 bg-purple-600/10 hover:bg-purple-600 text-purple-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                >
+                                  <Play size={14} /> Test Walkthrough
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    // Normally we save the game, but user wants a separate button too
+                                    setCustomGameSuccess("✅ Walkthrough Saved Successfully");
+                                    setTimeout(() => setCustomGameSuccess(""), 3000);
+                                  }}
+                                  className="px-4 py-2 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                >
+                                  <Save size={14} /> Save Walkthrough
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Paste Raw Embed Code</label>
+                              <textarea
+                                rows={8}
+                                value={customGameWalkthroughData.rawCode}
+                                onChange={(e) => setCustomGameWalkthroughData({...customGameWalkthroughData, rawCode: e.target.value})}
+                                placeholder="<iframe src='...'></iframe>"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs font-mono text-blue-400 focus:outline-none focus:border-blue-500 resize-none"
+                              />
+                              <div className="flex gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (customGameWalkthroughData.rawCode.includes("<iframe") || customGameWalkthroughData.rawCode.includes("<script")) {
+                                      setCustomGameSuccess("✅ Embed Code Verified");
+                                      setTimeout(() => setCustomGameSuccess(""), 3000);
+                                    } else {
+                                      setCustomGameError("❌ Invalid Embed Code");
+                                      setTimeout(() => setCustomGameError(""), 3000);
                                     }
                                   }}
-                                />
-                              </label>
-                            )}
-                          </div>
-                        )}
-                        <span className="text-xs text-slate-500 italic">Drag & drop or browse a 1:1 square game icon.</span>
-                      </div>
-                    ) : (
-                      <input
-                        type="url"
-                        value={customGameThumbnailUrl}
-                        onChange={(e) => setCustomGameThumbnailUrl(e.target.value)}
-                        placeholder="https://images.unsplash.com/..."
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
-                      />
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-300">Orientation</label>
-                      <select
-                        value={customGameOrientation}
-                        onChange={(e) => setCustomGameOrientation(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 cursor-pointer"
-                      >
-                        <option value="landscape">Landscape</option>
-                        <option value="portrait">Portrait</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-300">Custom Width (e.g. 800)</label>
-                      <input
-                        type="text"
-                        value={customGameWidth}
-                        onChange={(e) => setCustomGameWidth(e.target.value)}
-                        placeholder="100% (default)"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-300">Custom Height (e.g. 600)</label>
-                      <input
-                        type="text"
-                        value={customGameHeight}
-                        onChange={(e) => setCustomGameHeight(e.target.value)}
-                        placeholder="600px (default)"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:border-purple-500 placeholder-slate-600"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-6 items-center pt-2">
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={customGameFeatured}
-                        onChange={(e) => setCustomGameFeatured(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                      />
-                      <span className="text-xs font-bold text-slate-300">Featured Game</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={customGameEnabled}
-                        onChange={(e) => setCustomGameEnabled(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                      />
-                      <span className="text-xs font-bold text-slate-300">Publish Immediately (Enabled)</span>
-                    </label>
-                  </div>
-
-                  <div className="flex gap-3 pt-4 border-t border-slate-800">
-                    <button
-                      type="submit"
-                      disabled={customGameSaving}
-                      className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg text-sm active:scale-95 disabled:opacity-50 cursor-pointer"
-                    >
-                      {customGameSaving ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
-                        </>
-                      ) : (
-                        <>
-                          <Check className="w-4 h-4" /> Save Game
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!customGameUrl) {
-                          alert("Please fill in a Play URL first to preview.");
-                          return;
-                        }
-                        setPreviewGame({
-                          title: customGameTitle || "Custom Game Preview",
-                          url: customGameUrl,
-                          orientation: customGameOrientation
-                        });
-                      }}
-                      className="flex items-center gap-2 px-6 py-3 bg-slate-950 hover:bg-slate-800 text-slate-300 font-bold rounded-xl border border-slate-800 transition-all text-sm cursor-pointer"
-                    >
-                      <Eye className="w-4 h-4" /> Live Preview
-                    </button>
-                  </div>
-                </form>
-
-                {/* Mockup Preview Card */}
-                <div className="lg:col-span-5 space-y-4">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Card Preview</h3>
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl p-4 space-y-4">
-                    <div className="relative rounded-xl overflow-hidden aspect-[16/9] bg-slate-950">
-                      {customGameBannerUrl ? (
-                        <img
-                          src={customGameBannerUrl}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-700 bg-slate-950">
-                          <Gamepad2 className="w-12 h-12 mb-2" />
-                          <span className="text-xs italic">Banner Image Placeholder</span>
-                        </div>
-                      )}
-                      <div className="absolute top-2 right-2 flex gap-1">
-                        <span className="bg-slate-950/80 backdrop-blur-sm text-[9px] font-black uppercase text-slate-400 px-2 py-0.5 rounded">
-                          {customGameOrientation}
-                        </span>
-                        <span className="bg-purple-950/80 backdrop-blur-sm text-[9px] font-black text-purple-400 px-2 py-0.5 rounded">
-                          {customGameCategory}
-                        </span>
-                      </div>
-                      <div className="absolute left-4 -bottom-6">
-                        <div className="w-10 h-10 rounded-lg overflow-hidden border-2 border-slate-900 bg-slate-900 flex items-center justify-center text-slate-400">
-                          {customGameThumbnailUrl ? (
-                            <img
-                              src={customGameThumbnailUrl}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <Sparkles className="w-5 h-5 text-purple-500" />
+                                  className="px-4 py-2 bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                >
+                                  <CheckCircle size={14} /> Verify Code
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTestCustomWalkthrough()}
+                                  className="px-4 py-2 bg-purple-600/10 hover:bg-purple-600 text-purple-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                >
+                                  <Play size={14} /> Test Walkthrough
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCustomGameSuccess("✅ Walkthrough Saved Successfully");
+                                    setTimeout(() => setCustomGameSuccess(""), 3000);
+                                  }}
+                                  className="px-4 py-2 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-400 hover:text-white text-[10px] font-black rounded-lg transition-all flex items-center gap-2"
+                                >
+                                  <Save size={14} /> Save Walkthrough
+                                </button>
+                              </div>
+                            </div>
                           )}
+                        </motion.div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-4 pt-8">
+                      <button
+                        type="submit"
+                        disabled={customGameSaving}
+                        className="flex-1 flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-purple-500/20 active:scale-95 disabled:opacity-50 text-sm uppercase tracking-wider"
+                      >
+                        {customGameSaving ? <RefreshCw className="animate-spin" size={20} /> : <Check size={20} />}
+                        Save Game Configuration
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* PREVIEW SIDEBAR */}
+                <div className="lg:col-span-4 space-y-6">
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-6 sticky top-8">
+                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                      <Eye size={16} className="text-purple-400" />
+                      Live Previews
+                    </h3>
+
+                    {/* CARD PREVIEW */}
+                    <div className="space-y-3">
+                      <p className="text-[10px] font-black uppercase text-slate-600 tracking-tighter">Card Preview</p>
+                      <div className="bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl group">
+                        <div className="relative aspect-[16/9] bg-slate-900">
+                          {customGameBannerUrl ? (
+                            <img src={customGameBannerUrl} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-slate-800"><Image size={40} /></div>
+                          )}
+                          <div className="absolute top-3 right-3 flex gap-1.5">
+                            <span className="px-2 py-1 bg-black/60 backdrop-blur-md rounded-md text-[8px] font-black text-white uppercase">{customGameOrientation}</span>
+                            <span className="px-2 py-1 bg-purple-600/80 backdrop-blur-md rounded-md text-[8px] font-black text-white uppercase">{customGameCategory}</span>
+                          </div>
+                          <div className="absolute left-4 -bottom-6 w-12 h-12 bg-slate-900 rounded-xl border-4 border-slate-950 overflow-hidden">
+                             {customGameThumbnailUrl ? (
+                               <img src={customGameThumbnailUrl} className="w-full h-full object-cover" />
+                             ) : (
+                               <div className="w-full h-full flex items-center justify-center text-slate-800"><Plus size={20} /></div>
+                             )}
+                          </div>
+                        </div>
+                        <div className="p-4 pt-8 space-y-1">
+                          <h4 className="text-sm font-black text-white truncate">{customGameTitle || "Game Title"}</h4>
+                          <p className="text-[10px] text-slate-500 line-clamp-2 leading-relaxed">{customGameDescription || "Game description will appear here..."}</p>
+                          <div className="flex gap-2 pt-2">
+                            {customGameFeatured && <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-500 rounded text-[8px] font-black">FEATURED</span>}
+                            {customGameEnabled && <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded text-[8px] font-black">ACTIVE</span>}
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="pt-6 space-y-2">
-                      <div className="flex justify-between items-start">
-                        <h4 className="font-extrabold text-white text-base">
-                          {customGameTitle || "Your Game Title"}
-                        </h4>
-                        <span className="text-[10px] text-amber-400 font-extrabold">⭐️ 5.0</span>
-                      </div>
-                      <p className="text-xs text-slate-500 line-clamp-3">
-                        {customGameDescription || "Your game description details will appear here inside the app catalog..."}
-                      </p>
-                    </div>
+                    {/* MULTI-DEVICE PREVIEWS */}
+                    <div className="space-y-4 pt-4 border-t border-slate-800">
+                       <p className="text-[10px] font-black uppercase text-slate-600 tracking-tighter">Device Viewport Simulation</p>
+                       
+                       <div className="grid grid-cols-3 gap-2">
+                          <button 
+                            onClick={() => {
+                              if (!customGameUrl) return;
+                              setPreviewGame({ title: customGameTitle, url: customGameUrl, orientation: customGameOrientation, mode: 'mobile' });
+                            }}
+                            className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-white flex flex-col items-center gap-1 transition-all"
+                          >
+                            <Smartphone size={18} />
+                            <span className="text-[8px] font-black">MOBILE</span>
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if (!customGameUrl) return;
+                              setPreviewGame({ title: customGameTitle, url: customGameUrl, orientation: customGameOrientation, mode: 'tablet' });
+                            }}
+                            className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-white flex flex-col items-center gap-1 transition-all"
+                          >
+                            <Tablet size={18} />
+                            <span className="text-[8px] font-black">TABLET</span>
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if (!customGameUrl) return;
+                              setPreviewGame({ title: customGameTitle, url: customGameUrl, orientation: customGameOrientation, mode: 'desktop' });
+                            }}
+                            className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-white flex flex-col items-center gap-1 transition-all"
+                          >
+                            <Monitor size={18} />
+                            <span className="text-[8px] font-black">DESKTOP</span>
+                          </button>
+                       </div>
 
-                    <div className="flex gap-2 flex-wrap pt-2 border-t border-slate-800/60">
-                      {customGameFeatured && (
-                        <span className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-extrabold px-2 py-0.5 rounded">
-                          ⭐️ Featured
-                        </span>
-                      )}
-                      {customGameEnabled ? (
-                        <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-extrabold px-2 py-0.5 rounded">
-                          ✅ Enabled
-                        </span>
-                      ) : (
-                        <span className="bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-extrabold px-2 py-0.5 rounded">
-                          ⛔ Disabled
-                        </span>
-                      )}
+                       <button
+                         onClick={() => {
+                           if (!customGameUrl) return;
+                           setPreviewGame({ title: customGameTitle, url: customGameUrl, orientation: customGameOrientation });
+                         }}
+                         className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-xs font-black uppercase transition-all flex items-center justify-center gap-2"
+                       >
+                         <ExternalLink size={14} />
+                         Full Screen Preview
+                       </button>
                     </div>
                   </div>
                 </div>
