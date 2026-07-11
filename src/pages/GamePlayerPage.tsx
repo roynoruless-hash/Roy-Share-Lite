@@ -107,72 +107,65 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
   const [showChromeModal, setShowChromeModal] = useState(false);
 
   const handleStartPlay = async () => {
-    if (!game || !userId) return;
-
-    // Android-specific Chrome enforcement
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    const isChrome = /Chrome/i.test(navigator.userAgent) && !/Edge|OPR|SamsungBrowser|UCBrowser/i.test(navigator.userAgent);
-
-    if (isAndroid) {
-      // If we are on Android, we want to ensure Chrome is used.
-      // We'll try to launch using a Chrome Intent to bypass chooser.
-      const urlWithoutProtocol = game.url.replace(/^https?:\/\//, "");
-      const chromeIntent = `intent://${urlWithoutProtocol}#Intent;scheme=https;package=com.android.chrome;end`;
-      
-      const start = Date.now();
-      
-      try {
-        // We attempt to start session first
-        const res = await fetch(`${API_BASE}/api/game/sessions/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, gameId: game.id })
-        });
-        const data = await res.json();
-        
-        if (data.success) {
-          setSession({ sessionId: data.sessionId });
-          setStartTime(Date.now());
-          setPlaying(true);
-          
-          // Try to launch intent
-          window.location.href = chromeIntent;
-          
-          // Detection: If we are still on the page after 1.5s, Chrome might not be installed
-          setTimeout(() => {
-            if (Date.now() - start < 2000) {
-              setShowChromeModal(true);
-            }
-          }, 1500);
-        } else {
-          alert(data.error || "Failed to start session");
-        }
-      } catch (err) {
-        console.error("Session start error:", err);
-        alert("Failed to connect to server");
-      }
+    if (!game || !userId) {
+      console.error("❌ Cannot start play: Missing game or userId context", { game, userId });
       return;
     }
 
-    // Default behavior for other platforms
+    const gameUrl = game.url;
+    console.log("🎮 Play Now Action Triggered");
+    console.log("📦 Loaded Game Object:", game);
+    console.log("🔗 Target Game URL:", gameUrl);
+
+    // 1. Validate URL - Must be HTTPS and valid
+    if (!gameUrl || !gameUrl.startsWith("https://")) {
+      console.error("❌ Invalid or insecure game URL rejected:", gameUrl);
+      alert("Security Error: Only secure (HTTPS) game URLs are allowed.");
+      return;
+    }
+
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    // Strict Chrome detection: excludes other browsers that include "Chrome" in their UA
+    const isChrome = /Chrome/i.test(navigator.userAgent) && 
+                    !/Edge|OPR|SamsungBrowser|UCBrowser|Maniac|MiuiBrowser|VivoBrowser|OppoBrowser/i.test(navigator.userAgent);
+
+    console.log("📱 Device/Environment Check:", { 
+      isAndroid, 
+      isChrome, 
+      userAgent: navigator.userAgent 
+    });
+
+    if (isAndroid && !isChrome) {
+      console.warn("⚠️ Non-Chrome browser detected on Android. Showing requirement modal.");
+      setShowChromeModal(true);
+      return;
+    }
+
     try {
+      console.log("📡 Initializing session on backend...");
       const res = await fetch(`${API_BASE}/api/game/sessions/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, gameId: game.id })
       });
       const data = await res.json();
+      
       if (data.success) {
+        console.log("✅ Session started successfully. ID:", data.sessionId);
         setSession({ sessionId: data.sessionId });
         setStartTime(Date.now());
         setPlaying(true);
-        window.open(game.url, "_blank");
+        
+        console.log("🚀 Opening Game URL:", gameUrl);
+        // Using standard window.open to avoid ERR_UNKNOWN_URL_SCHEME from custom intents
+        window.open(gameUrl, "_blank");
       } else {
+        console.error("❌ Backend rejected session start:", data.error);
         alert(data.error || "Failed to start session");
       }
     } catch (err) {
-      console.error("Session start error:", err);
-      alert("Failed to connect to server");
+      console.error("❌ Session Start Exception:", err);
+      alert("Connection Error: Could not reach gaming server.");
     }
   };
 
@@ -199,12 +192,25 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
     }
   };
 
-  const requiredTime = globalSettings?.requiredPlayTime || game?.requiredTime || 180;
-  const rewardCoins = globalSettings?.rewardCoins || game?.rewardCoins || 100;
+  // Ensure requiredTime and rewardCoins are valid numbers to prevent NaN issues
+  const rawRequiredTime = globalSettings?.requiredPlayTime ?? game?.requiredTime ?? 300;
+  const requiredTime = isNaN(Number(rawRequiredTime)) ? 300 : Number(rawRequiredTime);
+  const rewardCoins = Number(globalSettings?.rewardCoins || game?.rewardCoins) || 100;
 
   const elapsedSeconds = startTime ? Math.floor((currentTime - startTime) / 1000) : 0;
   const progress = Math.min((elapsedSeconds / requiredTime) * 100, 100);
   const canClaim = elapsedSeconds >= requiredTime;
+
+  useEffect(() => {
+    if (game) {
+      console.log("⏱️ Play Time Calculation Trace:", {
+        global: globalSettings?.requiredPlayTime,
+        game: game?.requiredTime,
+        calculated: requiredTime,
+        isNan: isNaN(requiredTime)
+      });
+    }
+  }, [game, globalSettings, requiredTime]);
 
   if (loading) {
     return (
@@ -286,7 +292,7 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
                   </div>
                   <div className="flex gap-4">
                     <div className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-xs font-black shrink-0">2</div>
-                    <p className="text-xs text-slate-400 leading-relaxed">Play for at least <b>{Math.ceil(game.requiredTime / 60)} minutes</b> to qualify for the reward.</p>
+                    <p className="text-xs text-slate-400 leading-relaxed">Play for at least <b>{Math.ceil(requiredTime / 60)} minutes</b> to qualify for the reward.</p>
                   </div>
                   <div className="flex gap-4">
                     <div className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-xs font-black shrink-0">3</div>
@@ -402,7 +408,7 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
                   <div className="flex justify-center items-center gap-2 pt-2">
                     <Clock className="w-3 h-3 text-slate-500" />
                     <span className="text-xs font-bold text-slate-400">
-                      {Math.floor(elapsedSeconds / 60)}m {(elapsedSeconds % 60)}s / {Math.ceil(game.requiredTime / 60)}m
+                      {Math.floor(elapsedSeconds / 60)}m {(elapsedSeconds % 60)}s / {Math.ceil(requiredTime / 60)}m
                     </span>
                   </div>
                 </div>
