@@ -8331,6 +8331,98 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   });
 
   // ==========================================
+  // GAMEMONETIZE WALKTHROUGH MANAGER
+  // ==========================================
+
+  app.get("/api/admin/gamemonetize/walkthroughs/settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "gamemonetize_walkthroughs");
+      const snap = await getDoc(docRef);
+      const defaults = {
+        enabled: true,
+        themeColor: "#4f46e5",
+        defaultWidth: "100%",
+        defaultHeight: "480",
+        showAds: true
+      };
+      res.json({ success: true, settings: snap.exists() ? snap.data() : defaults });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/admin/gamemonetize/walkthroughs/settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "gamemonetize_walkthroughs");
+      await setDoc(docRef, { ...req.body, updatedAt: new Date().toISOString() });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/gamemonetize/walkthroughs", async (req, res) => {
+    try {
+      const snap = await getDocs(collection(db, "gamemonetize_walkthroughs"));
+      const walkthroughs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      res.json({ success: true, walkthroughs });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/gamemonetize/walkthroughs", async (req, res) => {
+    try {
+      const { id, ...data } = req.body;
+      const payload = { ...data, updatedAt: new Date().toISOString() };
+      
+      if (id) {
+        await updateDoc(doc(db, "gamemonetize_walkthroughs", id), payload);
+        res.json({ success: true, id });
+      } else {
+        payload.createdAt = new Date().toISOString();
+        const docRef = await addDoc(collection(db, "gamemonetize_walkthroughs"), payload);
+        res.json({ success: true, id: docRef.id });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/admin/gamemonetize/walkthroughs/:id", async (req, res) => {
+    try {
+      await deleteDoc(doc(db, "gamemonetize_walkthroughs", req.params.id));
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Public endpoint for Game ID lookup
+  app.get("/api/gamemonetize/walkthrough/:gameId", async (req, res) => {
+    try {
+      const q = query(collection(db, "gamemonetize_walkthroughs"), where("gameId", "==", req.params.gameId), where("enabled", "==", true));
+      const snap = await getDocs(q);
+      
+      if (snap.empty) {
+        return res.json({ success: false, error: "No walkthrough found" });
+      }
+
+      const walkthrough = snap.docs[0].data();
+      const settingsSnap = await getDoc(doc(db, "settings", "gamemonetize_walkthroughs"));
+      const settings = settingsSnap.exists() ? settingsSnap.data() : { enabled: true };
+
+      if (!settings.enabled) {
+        return res.json({ success: false, error: "Walkthroughs disabled" });
+      }
+
+      res.json({ success: true, walkthrough, globalSettings: settings });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ==========================================
   // GAME REWARD SETTINGS
   // ==========================================
 

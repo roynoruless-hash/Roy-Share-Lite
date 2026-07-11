@@ -13,7 +13,8 @@ import {
   Play,
   ArrowRight,
   ChevronRight,
-  Info
+  Info,
+  Tv
 } from "lucide-react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
@@ -46,11 +47,25 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
   const [error, setError] = useState<string | null>(null);
   const [rewardClaimed, setRewardClaimed] = useState(false);
   const [claimData, setClaimData] = useState<any>(null);
+  const [walkthroughData, setWalkthroughData] = useState<any>(null);
 
   useEffect(() => {
     fetchGame();
     fetchGlobalSettings();
+    fetchWalkthrough();
   }, [gameId]);
+
+  const fetchWalkthrough = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/gamemonetize/walkthrough/${gameId}`);
+      const data = await res.json();
+      if (data.success) {
+        setWalkthroughData(data);
+      }
+    } catch (err) {
+      console.error("Error fetching walkthrough:", err);
+    }
+  };
 
   useEffect(() => {
     if (playing) {
@@ -232,6 +247,36 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
                   </div>
                 </div>
               </div>
+
+              {/* GAME WALKTHROUGH SECTION */}
+              {walkthroughData?.success && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 text-blue-400">
+                    <div className="bg-blue-500/10 p-2 rounded-xl">
+                      <Tv size={18} />
+                    </div>
+                    <h3 className="font-black text-sm uppercase tracking-widest">🎥 Official Game Walkthrough</h3>
+                  </div>
+                  
+                  <div 
+                    className="bg-slate-900 rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl relative group aspect-video"
+                    style={{ 
+                      width: "100%",
+                      height: "auto",
+                      minHeight: "200px"
+                    }}
+                  >
+                    <iframe 
+                      src={`https://api.gamemonetize.com/video.php?id=${walkthroughData.walkthrough.gameId}&width=${walkthroughData.walkthrough.width || walkthroughData.globalSettings.defaultWidth || '100%'}&height=${walkthroughData.walkthrough.height || walkthroughData.globalSettings.defaultHeight || '480'}&color=${encodeURIComponent(walkthroughData.walkthrough.themeColor || walkthroughData.globalSettings.themeColor || '#4f46e5')}&getAds=${walkthroughData.walkthrough.showAds !== false && walkthroughData.globalSettings.showAds !== false ? "true" : "false"}`}
+                      frameBorder="0" 
+                      scrolling="no" 
+                      width="100%" 
+                      height="100%"
+                      className="w-full h-full"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-4 flex gap-4">
                 <ShieldCheck className="w-6 h-6 text-amber-500 shrink-0" />
