@@ -4444,6 +4444,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                     <style>
                                       body { margin: 0; padding: 0; background: black; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
                                       #gamemonetize-video { width: 100% !important; height: 100% !important; }
+                                      iframe { width: 100% !important; height: 100% !important; border: none; }
                                     </style>
                                   </head>
                                   <body>

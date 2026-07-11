@@ -551,38 +551,6 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
                     </div>
                   </div>
 
-                  {walkthroughData?.success && (
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3 text-blue-400">
-                        <div className="bg-blue-500/10 p-2 rounded-xl">
-                          <Tv size={18} />
-                        </div>
-                        <h3 className="font-black text-sm uppercase tracking-widest">🎥 Official Game Walkthrough</h3>
-                      </div>
-                      
-                      <div className="bg-slate-900 rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl relative group aspect-video">
-                        <iframe 
-                          title="Official Game Walkthrough"
-                          srcDoc={`
-                            <!DOCTYPE html>
-                            <html>
-                              <head>
-                                <style>
-                                  body { margin: 0; padding: 0; background: black; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
-                                  #gamemonetize-video { width: 100% !important; height: 100% !important; }
-                                </style>
-                              </head>
-                              <body>
-                                ${walkthroughData.walkthrough.rawCode || `<iframe src="https://api.gamemonetize.com/video.php?id=${walkthroughData.walkthrough.gameId}&width=100%&height=100%&color=${encodeURIComponent('#4f46e5')}" frameBorder="0" scrolling="no" width="100%" height="100%"></iframe>`}
-                              </body>
-                            </html>
-                          `}
-                          frameBorder="0" scrolling="no" width="100%" height="100%" className="w-full h-full"
-                        />
-                      </div>
-                    </div>
-                  )}
-
                   <button 
                     onClick={handleStartPlay}
                     className="w-full bg-white text-slate-950 hover:bg-indigo-500 hover:text-white py-5 rounded-3xl font-black text-lg shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95"
@@ -632,9 +600,9 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
           </main>
         </>
       ) : (
-        <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+        <div className="fixed inset-0 z-[60] bg-slate-950 flex flex-col overflow-y-auto overflow-x-hidden">
           {/* SESSION HEADER */}
-          <header className="h-14 bg-slate-900/90 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 shrink-0">
+          <header className="h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 shrink-0 sticky top-0 z-50">
             <div className="flex items-center gap-3 min-w-0">
               <button onClick={handleBack} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
                 <ArrowLeft className="w-5 h-5 text-slate-300" />
@@ -688,8 +656,10 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
           {/* GAME VIEWPORT */}
           <div 
             ref={containerRef}
-            className="flex-1 relative bg-black overflow-hidden flex flex-col"
+            className="w-full relative bg-black overflow-hidden flex flex-col shrink-0"
             style={{ 
+              height: isFullscreen ? '100vh' : 'calc(100vh - 56px)',
+              maxHeight: isFullscreen ? '100vh' : '80vh',
               paddingTop: 'env(safe-area-inset-top)',
               paddingBottom: 'env(safe-area-inset-bottom)',
               paddingLeft: 'env(safe-area-inset-left)',
@@ -775,8 +745,62 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
               referrerPolicy="no-referrer"
             />
           </div>
+
+          {/* WALKTHROUGH SECTION */}
+          {walkthroughData?.success && walkthroughData?.walkthrough?.enabled !== false && walkthroughData?.walkthrough?.rawCode && (
+            <div className="w-full bg-slate-950 border-t border-white/5 p-8 pb-24 space-y-12">
+              <div className="max-w-4xl mx-auto text-center space-y-4">
+                <div className="space-y-2">
+                  <h3 className="text-3xl font-black text-white tracking-tighter uppercase">Need Help?</h3>
+                  <p className="text-slate-500 font-bold animate-bounce text-xl">↓</p>
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-xl font-black text-indigo-400 tracking-widest uppercase">Official Game Walkthrough</h4>
+                  <p className="text-slate-500 font-bold text-xl">↓</p>
+                </div>
+                <div className="pt-2">
+                  <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.3em]">GameMonetize Video Player</p>
+                </div>
+              </div>
+
+              <div className="max-w-4xl mx-auto">
+                <div className="bg-black rounded-[2.5rem] border border-white/10 overflow-hidden shadow-2xl relative aspect-video group">
+                  <iframe 
+                    title="Official Game Walkthrough"
+                    srcDoc={`
+                      <!DOCTYPE html>
+                      <html>
+                        <head>
+                          <style>
+                            body { margin: 0; padding: 0; background: black; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
+                            #gamemonetize-video { width: 100% !important; height: 100% !important; }
+                            iframe { width: 100% !important; height: 100% !important; border: none; }
+                          </style>
+                        </head>
+                        <body>
+                          ${walkthroughData.walkthrough.rawCode}
+                        </body>
+                      </html>
+                    `}
+                    frameBorder="0" 
+                    scrolling="no" 
+                    width="100%" 
+                    height="100%" 
+                    className="w-full h-full"
+                  />
+                </div>
+              </div>
+              
+              <div className="max-w-xl mx-auto text-center border-t border-white/5 pt-12">
+                <p className="text-[10px] font-black text-slate-700 uppercase tracking-[0.5em] leading-loose">
+                  Official Gameplay Guide Provided by GameMonetize Media Group
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
 
       {/* BACK WARNING MODAL */}
       <AnimatePresence>
