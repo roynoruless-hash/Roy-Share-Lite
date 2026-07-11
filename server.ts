@@ -8790,28 +8790,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.get("/api/admin/gamemonetize/walkthroughs/check/:gameId", async (req, res) => {
-    try {
-      const gameId = req.params.gameId;
-      // We ping the GameMonetize video URL
-      const response = await fetch(`https://api.gamemonetize.com/video.php?id=${gameId}`);
-      const text = await response.text();
-      
-      // GameMonetize usually shows a blank black page or "Video not found" if missing
-      // We'll check for "window.VIDEO_OPTIONS" which is present in valid walkthroughs
-      const isAvailable = text.includes("window.VIDEO_OPTIONS") && !text.includes("Video not found");
 
-      res.json({ 
-        success: true, 
-        isAvailable, 
-        gameId,
-        timestamp: new Date().toISOString(),
-        message: isAvailable ? "Walkthrough Available" : "No Walkthrough Available For This Game"
-      });
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message });
-    }
-  });
 
   // Public endpoint for Game ID lookup
   app.get("/api/gamemonetize/walkthrough/:gameId", async (req, res) => {
@@ -8826,22 +8805,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       const walkthrough = snap.docs[0].data() as any;
       
-      // Perform real-time check to be absolutely sure
-      const checkResponse = await fetch(`https://api.gamemonetize.com/video.php?id=${gameId}`);
-      const checkText = await checkResponse.text();
-      const isActuallyAvailable = checkText.includes("window.VIDEO_OPTIONS") && !checkText.includes("Video not found");
-
-      if (!isActuallyAvailable) {
-         // Update DB status if it was marked as available before
-         if (walkthrough.isAvailable !== false) {
-           await updateDoc(doc(db, "gamemonetize_walkthroughs", snap.docs[0].id), { 
-             isAvailable: false, 
-             lastChecked: new Date().toISOString() 
-           });
-         }
-         return res.json({ success: false, error: "Walkthrough no longer available" });
-      }
-
       const settingsSnap = await getDoc(doc(db, "settings", "gamemonetize_walkthroughs"));
       const settings = settingsSnap.exists() ? settingsSnap.data() : { enabled: true };
 

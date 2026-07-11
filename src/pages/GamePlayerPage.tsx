@@ -563,10 +563,20 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
                       <div className="bg-slate-900 rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl relative group aspect-video">
                         <iframe 
                           title="Official Game Walkthrough"
-                          src={walkthroughData.walkthrough.mode === 'raw' ? undefined : `https://api.gamemonetize.com/video.php?id=${walkthroughData.walkthrough.gameId}&width=100%&height=100%&color=${encodeURIComponent('#4f46e5')}`}
-                          srcDoc={walkthroughData.walkthrough.mode === 'raw' ? `
-                            <!DOCTYPE html><html><body style="margin:0;background:black;display:flex;align-items:center;justify-center;height:100vh;">
-                            ${walkthroughData.walkthrough.rawCode}</body></html>` : undefined}
+                          srcDoc={`
+                            <!DOCTYPE html>
+                            <html>
+                              <head>
+                                <style>
+                                  body { margin: 0; padding: 0; background: black; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
+                                  #gamemonetize-video { width: 100% !important; height: 100% !important; }
+                                </style>
+                              </head>
+                              <body>
+                                ${walkthroughData.walkthrough.rawCode || `<iframe src="https://api.gamemonetize.com/video.php?id=${walkthroughData.walkthrough.gameId}&width=100%&height=100%&color=${encodeURIComponent('#4f46e5')}" frameBorder="0" scrolling="no" width="100%" height="100%"></iframe>`}
+                              </body>
+                            </html>
+                          `}
                           frameBorder="0" scrolling="no" width="100%" height="100%" className="w-full h-full"
                         />
                       </div>
