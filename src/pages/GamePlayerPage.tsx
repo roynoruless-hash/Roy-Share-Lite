@@ -36,6 +36,7 @@ interface Game {
   width?: string;
   height?: string;
   displayMode?: string;
+  rewardSettings?: any;
 }
 
 interface GamePlayerPageProps {
@@ -64,7 +65,6 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [interactionCount, setInteractionCount] = useState(0);
   const [viewportDim, setViewportDim] = useState({ width: 0, height: 0 });
-  const [detectedOrientation, setDetectedOrientation] = useState<'landscape' | 'portrait' | 'square'>('landscape');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -169,20 +169,6 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
       for (let entry of entries) {
         const { width, height } = entry.contentRect;
         setViewportDim({ width, height });
-        
-        // Auto detect orientation if not forced
-        const dMode = game?.displayMode || 'smart';
-        if (dMode === 'smart') {
-          const gW = Number(game?.width) || 16;
-          const gH = Number(game?.height) || 9;
-          if (gH > gW) setDetectedOrientation('portrait');
-          else if (gH === gW) setDetectedOrientation('square');
-          else setDetectedOrientation('landscape');
-        } else if (dMode === 'landscape') {
-          setDetectedOrientation('landscape');
-        } else if (dMode === 'portrait') {
-          setDetectedOrientation('portrait');
-        }
       }
     });
 
@@ -198,11 +184,6 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
         console.error(`Error attempting to enable fullscreen: ${err.message}`);
       });
       setIsFullscreen(true);
-      
-      // Attempt orientation lock for landscape games
-      if (detectedOrientation === 'landscape' && screen.orientation && screen.orientation.lock) {
-        screen.orientation.lock('landscape').catch(() => {});
-      }
     } else {
       document.exitFullscreen();
       setIsFullscreen(false);
@@ -218,12 +199,12 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
   }, []);
 
   const getIframeStyle = () => {
-    if (!viewportDim.width || !viewportDim.height) return {};
+    if (!viewportDim.width || !viewportDim.height || !game) return {};
 
-    const dMode = game?.displayMode || 'smart';
-    // Use metadata if available, otherwise default to common ratios
-    const gW = Number(game?.width) || (detectedOrientation === 'portrait' ? 1080 : 1920);
-    const gH = Number(game?.height) || (detectedOrientation === 'portrait' ? 1920 : 1080);
+    const dMode = game.displayMode || 'smart';
+    // Use metadata if available, otherwise default to 16:9
+    const gW = Number(game.width) || 1920;
+    const gH = Number(game.height) || 1080;
     const gameAspect = gW / gH;
     const viewAspect = viewportDim.width / viewportDim.height;
 
@@ -232,8 +213,6 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
       left: '50%',
       top: '50%',
       transform: 'translate(-50%, -50%)',
-      width: '100%',
-      height: '100%',
       border: 'none',
       transition: 'opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
       opacity: iframeLoaded ? 1 : 0
@@ -242,7 +221,7 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
     if (dMode === 'stretch') {
       style.width = '100%';
       style.height = '100%';
-    } else if (dMode === 'cover' || (dMode === 'smart' && detectedOrientation === 'portrait')) {
+    } else if (dMode === 'cover') {
       if (viewAspect > gameAspect) {
         style.width = '100%';
         style.height = `${(viewAspect / gameAspect) * 100}%`;
@@ -251,7 +230,7 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
         style.height = '100%';
       }
     } else {
-      // Contain mode (Smart Auto for Landscape/Square uses Contain)
+      // Contain mode (Default for Smart/Contain)
       if (viewAspect > gameAspect) {
         style.width = `${(gameAspect / viewAspect) * 100}%`;
         style.height = '100%';

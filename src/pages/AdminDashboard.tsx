@@ -11558,8 +11558,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             <option value="contain">Contain (Letterbox)</option>
                             <option value="cover">Cover (Fill Screen)</option>
                             <option value="stretch">Stretch (Force Fill)</option>
-                            <option value="landscape">Force Landscape</option>
-                            <option value="portrait">Force Portrait</option>
                           </select>
                         </div>
                       </div>
@@ -11595,7 +11593,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             onClick={() => setCustomGameChromeOnly(!customGameChromeOnly)}
                             className={`w-full p-4 rounded-2xl border transition-all text-[9px] font-black uppercase flex items-center justify-center gap-2 ${customGameChromeOnly ? "bg-blue-500/10 border-blue-500/30 text-blue-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
                           >
-                            <Chrome size={14} />
+                            <Globe size={14} />
                             {customGameChromeOnly ? "YES" : "NO"}
                           </button>
                         </div>
@@ -13220,7 +13218,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             onClick={() => setGameRewardSettings({...gameRewardSettings, chromeOnly: !gameRewardSettings.chromeOnly})}
                             className={`w-full p-4 rounded-2xl border transition-all text-xs font-black uppercase flex items-center justify-center gap-2 ${gameRewardSettings.chromeOnly ? "bg-blue-500/10 border-blue-500/30 text-blue-400" : "bg-slate-950/50 border-slate-800 text-slate-500"}`}
                           >
-                            <Chrome size={14} />
+                            <Globe size={14} />
                             {gameRewardSettings.chromeOnly ? "ON" : "OFF"}
                           </button>
                         </div>
