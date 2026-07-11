@@ -21,7 +21,9 @@ import {
   Sparkles,
   ArrowLeft,
   Gamepad,
-  Timer
+  Timer,
+  RefreshCw,
+  AlertTriangle
 } from "lucide-react";
 import { API_BASE } from "../config/api";
 import { navigate } from "../lib/navigation";
@@ -62,6 +64,9 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [categories, setCategories] = useState<string[]>(["All"]);
   const [activeTab, setActiveTab] = useState<"games" | "wallet" | "history">("games");
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchGames();
@@ -70,6 +75,42 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
       fetchUserData();
     }
   }, [userId]);
+
+  useEffect(() => {
+    if (activeTab === "history" && userId) {
+      fetchSessions();
+    }
+  }, [activeTab, userId]);
+
+  const fetchSessions = async () => {
+    try {
+      setLoadingSessions(true);
+      setSessionsError(null);
+      // We fetch from the server-side proxy or direct firestore if allowed.
+      // The instructions say "Load sessions from Firestore". 
+      // In this app, db is usually imported from ../lib/firebase.
+      const { db } = await import("../lib/firebase");
+      const { collection, query, where, getDocs, orderBy } = await import("firebase/firestore");
+      
+      const q = query(
+        collection(db, "game_sessions"),
+        where("userId", "==", userId),
+        orderBy("startTime", "desc")
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const fetchedSessions: any[] = [];
+      querySnapshot.forEach((doc) => {
+        fetchedSessions.push({ id: doc.id, ...doc.data() });
+      });
+      setSessions(fetchedSessions);
+    } catch (err: any) {
+      console.error("Error fetching sessions:", err);
+      setSessionsError("Failed to load game sessions. Please try again.");
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
 
   const fetchGlobalSettings = async () => {
     try {
@@ -424,6 +465,114 @@ export const GameCenterPage: React.FC<GameCenterPageProps> = ({ userId, onBack, 
                       <span className="text-[10px] font-bold uppercase tracking-wider">Converted balance adds to Main Wallet</span>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {activeTab === "history" && (
+                <div className="max-w-2xl mx-auto pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="flex items-center justify-between mb-6 px-1">
+                    <div className="flex items-center gap-2">
+                      <History className="w-5 h-5 text-indigo-400" />
+                      <h2 className="text-xl font-black text-white uppercase tracking-tighter">Roy Pass</h2>
+                    </div>
+                    <button 
+                      onClick={fetchSessions}
+                      className="p-2 hover:bg-white/5 rounded-xl transition-colors text-slate-500 hover:text-indigo-400"
+                    >
+                      <RefreshCw className={`w-5 h-5 ${loadingSessions ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+
+                  {loadingSessions ? (
+                    <div className="py-20 flex flex-col items-center justify-center space-y-4">
+                      <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                      <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Scanning History...</p>
+                    </div>
+                  ) : sessionsError ? (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-3xl p-12 text-center">
+                      <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+                      <h3 className="text-lg font-bold text-white mb-2">Error Loading Pass</h3>
+                      <p className="text-slate-400 text-sm mb-6">{sessionsError}</p>
+                      <button 
+                        onClick={fetchSessions}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-2xl font-bold text-sm transition-all"
+                      >
+                        Try Again
+                      </button>
+                    </div>
+                  ) : sessions.length === 0 ? (
+                    <div className="bg-slate-900/30 border border-white/5 border-dashed rounded-[2.5rem] p-16 flex flex-col items-center justify-center text-center space-y-4">
+                      <div className="w-20 h-20 bg-slate-900 rounded-3xl flex items-center justify-center text-slate-700 shadow-inner">
+                        <Gamepad className="w-10 h-10" />
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-xl font-black text-white tracking-tight">🎮 No Active Game Session</h3>
+                        <p className="text-slate-500 text-sm max-w-[200px] mx-auto font-medium">
+                          Start playing a game to track your progress.
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setActiveTab("games")}
+                        className="bg-white text-slate-950 px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-500 hover:text-white transition-all shadow-xl shadow-black/20"
+                      >
+                        Browse Games
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {sessions.map((s) => {
+                        const gameInfo = games.find(g => g.id === s.gameId);
+                        const isCompleted = s.status === 'completed' || s.valid === true;
+                        return (
+                          <div 
+                            key={s.id} 
+                            className="bg-slate-900/50 border border-white/5 rounded-3xl p-5 hover:border-white/10 transition-all group"
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className="w-16 h-16 rounded-2xl overflow-hidden border border-white/10 shrink-0">
+                                <img 
+                                  src={gameInfo?.thumbnailUrl || "https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=200&h=200&auto=format&fit=crop"} 
+                                  alt={gameInfo?.title || "Game"} 
+                                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <h4 className="font-bold text-white truncate text-sm">
+                                    {gameInfo?.title || "Unknown Game"}
+                                  </h4>
+                                  <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${
+                                    isCompleted 
+                                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
+                                      : "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                                  }`}>
+                                    {s.status || (s.valid ? "Valid" : "Pending")}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    {s.startTime ? new Date(s.startTime).toLocaleDateString() : "N/A"}
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <Timer className="w-3 h-3" />
+                                    {s.duration ? `${Math.floor(s.duration / 60)}m ${s.duration % 60}s` : "0s"}
+                                  </div>
+                                  {s.coinsEarned > 0 && (
+                                    <div className="flex items-center gap-1 text-amber-500">
+                                      <Coins className="w-3 h-3" />
+                                      {s.coinsEarned}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

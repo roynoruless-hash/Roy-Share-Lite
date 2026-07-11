@@ -104,9 +104,57 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
     }
   };
 
+  const [showChromeModal, setShowChromeModal] = useState(false);
+
   const handleStartPlay = async () => {
     if (!game || !userId) return;
 
+    // Android-specific Chrome enforcement
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const isChrome = /Chrome/i.test(navigator.userAgent) && !/Edge|OPR|SamsungBrowser|UCBrowser/i.test(navigator.userAgent);
+
+    if (isAndroid) {
+      // If we are on Android, we want to ensure Chrome is used.
+      // We'll try to launch using a Chrome Intent to bypass chooser.
+      const urlWithoutProtocol = game.url.replace(/^https?:\/\//, "");
+      const chromeIntent = `intent://${urlWithoutProtocol}#Intent;scheme=https;package=com.android.chrome;end`;
+      
+      const start = Date.now();
+      
+      try {
+        // We attempt to start session first
+        const res = await fetch(`${API_BASE}/api/game/sessions/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, gameId: game.id })
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+          setSession({ sessionId: data.sessionId });
+          setStartTime(Date.now());
+          setPlaying(true);
+          
+          // Try to launch intent
+          window.location.href = chromeIntent;
+          
+          // Detection: If we are still on the page after 1.5s, Chrome might not be installed
+          setTimeout(() => {
+            if (Date.now() - start < 2000) {
+              setShowChromeModal(true);
+            }
+          }, 1500);
+        } else {
+          alert(data.error || "Failed to start session");
+        }
+      } catch (err) {
+        console.error("Session start error:", err);
+        alert("Failed to connect to server");
+      }
+      return;
+    }
+
+    // Default behavior for other platforms
     try {
       const res = await fetch(`${API_BASE}/api/game/sessions/start`, {
         method: "POST",
@@ -118,7 +166,6 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
         setSession({ sessionId: data.sessionId });
         setStartTime(Date.now());
         setPlaying(true);
-        // Open game in external browser
         window.open(game.url, "_blank");
       } else {
         alert(data.error || "Failed to start session");
@@ -434,6 +481,56 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
           )}
         </AnimatePresence>
       </main>
+      
+      {/* Chrome Required Modal */}
+      <AnimatePresence>
+        {showChromeModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowChromeModal(false)}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-sm bg-slate-900 border border-white/10 rounded-[2.5rem] p-8 shadow-2xl space-y-6 text-center"
+            >
+              <div className="w-20 h-20 bg-indigo-600/10 rounded-3xl flex items-center justify-center mx-auto border border-indigo-500/20">
+                <ShieldCheck className="w-10 h-10 text-indigo-500" />
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-xl font-black text-white tracking-tight">Google Chrome Required</h3>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  Google Chrome is required to play games and track your rewards correctly on Android.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={() => {
+                    window.location.href = "https://play.google.com/store/apps/details?id=com.android.chrome";
+                    setShowChromeModal(false);
+                  }}
+                  className="w-full bg-white text-slate-950 py-4 rounded-2xl font-black text-sm hover:bg-indigo-500 hover:text-white transition-all"
+                >
+                  Install Chrome
+                </button>
+                <button 
+                  onClick={() => setShowChromeModal(false)}
+                  className="w-full bg-white/5 border border-white/10 text-slate-400 py-4 rounded-2xl font-black text-sm hover:bg-white/10 transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
