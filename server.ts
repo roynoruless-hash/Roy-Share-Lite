@@ -3527,6 +3527,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         orientation,
         width,
         height,
+        displayMode,
         featured,
         enabled,
         walkthrough
@@ -3553,6 +3554,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         orientation: orientation || "landscape",
         width: width || "",
         height: height || "",
+        displayMode: displayMode || "smart",
         featured: !!featured,
         enabled: enabled !== false,
         quality: "5.0",

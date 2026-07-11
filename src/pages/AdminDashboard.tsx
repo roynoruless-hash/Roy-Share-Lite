@@ -314,6 +314,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [customGameRequireWalkthrough, setCustomGameRequireWalkthrough] = useState(false);
   const [customGameExternalBrowserMode, setCustomGameExternalBrowserMode] = useState(false);
   const [customGameRewardCoins, setCustomGameRewardCoins] = useState(100);
+  const [customGameDisplayMode, setCustomGameDisplayMode] = useState("smart");
   const [customGameFeatured, setCustomGameFeatured] = useState(false);
   const [customGameEnabled, setCustomGameEnabled] = useState(true);
   const [customGameWalkthroughEnabled, setCustomGameWalkthroughEnabled] = useState(false);
@@ -2527,6 +2528,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           requireWalkthrough: customGameRequireWalkthrough,
           externalBrowserMode: customGameExternalBrowserMode,
           rewardCoins: customGameRewardCoins,
+          displayMode: customGameDisplayMode,
           featured: customGameFeatured,
           enabled: customGameEnabled,
           walkthrough: customGameWalkthroughEnabled ? customGameWalkthroughData : null
@@ -11544,6 +11546,21 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             onChange={(e) => setCustomGameRewardCoins(Number(e.target.value))}
                             className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-xs text-white font-bold"
                           />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Display Mode</label>
+                          <select
+                            value={customGameDisplayMode}
+                            onChange={(e) => setCustomGameDisplayMode(e.target.value)}
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-xs text-white font-bold outline-none appearance-none"
+                          >
+                            <option value="smart">Smart Auto (Recommended)</option>
+                            <option value="contain">Contain (Letterbox)</option>
+                            <option value="cover">Cover (Fill Screen)</option>
+                            <option value="stretch">Stretch (Force Fill)</option>
+                            <option value="landscape">Force Landscape</option>
+                            <option value="portrait">Force Portrait</option>
+                          </select>
                         </div>
                       </div>
 

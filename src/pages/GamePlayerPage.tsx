@@ -17,7 +17,9 @@ import {
   Tv,
   X,
   Timer as TimerIcon,
-  Maximize2
+  Maximize2,
+  Maximize,
+  Minimize
 } from "lucide-react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
@@ -31,6 +33,9 @@ interface Game {
   category: string;
   rewardCoins: number;
   requiredTime: number; // in seconds
+  width?: string;
+  height?: string;
+  displayMode?: string;
 }
 
 interface GamePlayerPageProps {
@@ -58,7 +63,11 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
   const [isPaused, setIsPaused] = useState(false);
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [interactionCount, setInteractionCount] = useState(0);
+  const [viewportDim, setViewportDim] = useState({ width: 0, height: 0 });
+  const [detectedOrientation, setDetectedOrientation] = useState<'landscape' | 'portrait' | 'square'>('landscape');
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Restore session from localStorage on mount
   useEffect(() => {
@@ -151,6 +160,109 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
       window.removeEventListener("wheel", handleActivity);
     };
   }, [isPaused]);
+
+  // Orientation Detection & Responsive Logic
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        setViewportDim({ width, height });
+        
+        // Auto detect orientation if not forced
+        const dMode = game?.displayMode || 'smart';
+        if (dMode === 'smart') {
+          const gW = Number(game?.width) || 16;
+          const gH = Number(game?.height) || 9;
+          if (gH > gW) setDetectedOrientation('portrait');
+          else if (gH === gW) setDetectedOrientation('square');
+          else setDetectedOrientation('landscape');
+        } else if (dMode === 'landscape') {
+          setDetectedOrientation('landscape');
+        } else if (dMode === 'portrait') {
+          setDetectedOrientation('portrait');
+        }
+      }
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [game]);
+
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+      setIsFullscreen(true);
+      
+      // Attempt orientation lock for landscape games
+      if (detectedOrientation === 'landscape' && screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').catch(() => {});
+      }
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const getIframeStyle = () => {
+    if (!viewportDim.width || !viewportDim.height) return {};
+
+    const dMode = game?.displayMode || 'smart';
+    // Use metadata if available, otherwise default to common ratios
+    const gW = Number(game?.width) || (detectedOrientation === 'portrait' ? 1080 : 1920);
+    const gH = Number(game?.height) || (detectedOrientation === 'portrait' ? 1920 : 1080);
+    const gameAspect = gW / gH;
+    const viewAspect = viewportDim.width / viewportDim.height;
+
+    let style: React.CSSProperties = {
+      position: 'absolute',
+      left: '50%',
+      top: '50%',
+      transform: 'translate(-50%, -50%)',
+      width: '100%',
+      height: '100%',
+      border: 'none',
+      transition: 'opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+      opacity: iframeLoaded ? 1 : 0
+    };
+
+    if (dMode === 'stretch') {
+      style.width = '100%';
+      style.height = '100%';
+    } else if (dMode === 'cover' || (dMode === 'smart' && detectedOrientation === 'portrait')) {
+      if (viewAspect > gameAspect) {
+        style.width = '100%';
+        style.height = `${(viewAspect / gameAspect) * 100}%`;
+      } else {
+        style.width = `${(gameAspect / viewAspect) * 100}%`;
+        style.height = '100%';
+      }
+    } else {
+      // Contain mode (Smart Auto for Landscape/Square uses Contain)
+      if (viewAspect > gameAspect) {
+        style.width = `${(gameAspect / viewAspect) * 100}%`;
+        style.height = '100%';
+      } else {
+        style.width = '100%';
+        style.height = `${(viewAspect / gameAspect) * 100}%`;
+      }
+    }
+
+    return style;
+  };
 
   // Main Timer and Heartbeat
   useEffect(() => {
@@ -574,20 +686,45 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
                   Claim
                 </button>
               )}
+              
+              <button 
+                onClick={toggleFullscreen}
+                className="p-2 hover:bg-white/10 rounded-xl transition-colors text-slate-400 hover:text-white flex items-center justify-center shrink-0"
+              >
+                {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+              </button>
             </div>
           </header>
 
           {/* GAME VIEWPORT */}
-          <div className="flex-1 relative bg-black overflow-hidden flex flex-col">
+          <div 
+            ref={containerRef}
+            className="flex-1 relative bg-black overflow-hidden flex flex-col"
+            style={{ 
+              paddingTop: 'env(safe-area-inset-top)',
+              paddingBottom: 'env(safe-area-inset-bottom)',
+              paddingLeft: 'env(safe-area-inset-left)',
+              paddingRight: 'env(safe-area-inset-right)'
+            }}
+          >
             {!iframeLoaded && !iframeError && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center space-y-4 z-10 bg-slate-950">
-                <div className="relative">
-                  <RefreshCw className="w-12 h-12 text-indigo-500 animate-spin" />
-                  <Gamepad2 className="absolute inset-0 m-auto w-5 h-5 text-white animate-pulse" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center space-y-6 z-10 bg-slate-950">
+                <div className="w-full max-w-xs space-y-4 animate-pulse mb-4">
+                  <div className="h-40 bg-slate-900 rounded-[2.5rem] w-full" />
+                  <div className="space-y-2">
+                    <div className="h-4 bg-slate-900 rounded-full w-3/4 mx-auto" />
+                    <div className="h-3 bg-slate-900 rounded-full w-1/2 mx-auto" />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-xs font-black text-white uppercase tracking-widest">Loading Game World</p>
-                  <p className="text-[10px] text-slate-500 font-medium">Preparing secure reward channel...</p>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="relative">
+                    <RefreshCw className="w-12 h-12 text-indigo-500 animate-spin" />
+                    <Gamepad2 className="absolute inset-0 m-auto w-5 h-5 text-white animate-pulse" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-black text-white uppercase tracking-widest">Loading Game World</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Preparing Responsive Viewport...</p>
+                  </div>
                 </div>
               </div>
             )}
@@ -620,7 +757,7 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
             <iframe
               ref={iframeRef}
               src={game.url}
-              className={`w-full h-full flex-1 border-none transition-opacity duration-1000 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
+              style={getIframeStyle()}
               onLoad={() => {
                 console.log("🎮 Game iframe loaded successfully");
                 setIframeLoaded(true);
