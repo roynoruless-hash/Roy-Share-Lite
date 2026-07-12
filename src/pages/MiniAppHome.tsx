@@ -58,6 +58,7 @@ const AnnouncementsPage = lazy(() => import("./AnnouncementsPage"));
 const SettingsPage = lazy(() => import("./SettingsPage"));
 const ShortenPage = lazy(() => import("./ShortenPage"));
 const RewardEarningsPage = lazy(() => import("./RewardEarningsPage"));
+const PublicGiftPage = lazy(() => import("./PublicGiftPage"));
 
 interface MembershipVerificationProps {
   user: any;
@@ -510,14 +511,19 @@ export const MiniAppHome: React.FC = () => {
 
   // Deep Link Handling
   useEffect(() => {
-    if (activeUser?.membershipVerified && isPhoneVerified && startParam && !hasCheckedDeepLink) {
-      if (startParam.startsWith("game_")) {
+    if (activeUser?.membershipVerified && startParam && !hasCheckedDeepLink) {
+      if (startParam.startsWith("game_") && isPhoneVerified) {
         const gameId = startParam.replace("game_", "");
         console.log(`[MiniAppHome] Deep link detected for game: ${gameId}`);
         setHasCheckedDeepLink(true);
         setCurrentView("game-player");
         // Update URL to match game-player expectations
         window.history.replaceState({}, "", `/game/${gameId}`);
+      } else if (startParam.startsWith("gift_")) {
+        const giftId = startParam.replace("gift_", "");
+        console.log(`[MiniAppHome] Deep link detected for gift: ${giftId}`);
+        setHasCheckedDeepLink(true);
+        setCurrentView(`gift-${giftId}`);
       }
     }
   }, [activeUser?.membershipVerified, isPhoneVerified, startParam, hasCheckedDeepLink]);
@@ -996,6 +1002,12 @@ export const MiniAppHome: React.FC = () => {
         {currentView === "shorten" && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
             <ShortenPage onBack={() => setCurrentView("dashboard")} />
+          </Suspense>
+        )}
+
+        {currentView.startsWith("gift-") && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <PublicGiftPage giftId={currentView.replace("gift-", "")} onBack={() => setCurrentView("home")} />
           </Suspense>
         )}
 

@@ -1471,7 +1471,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       });
       await batch.commit();
 
-      const newLink = `${window.location.origin}/gift/${giftId}`;
+      const newLink = `https://t.me/Roysharearn_bot?startapp=gift_${giftId}`;
       setGeneratedLink(newLink);
       alert("Gift Link generated successfully!");
       setGiftForm({ name: "", codesText: "" });
@@ -13004,7 +13004,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     ) : (
                       <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1">
                         {gifts.map((gift) => {
-                          const link = `${window.location.origin}/gift/${gift.id}`;
+                          const link = `https://t.me/Roysharearn_bot?startapp=gift_${gift.id}`;
                           return (
                             <div
                               key={gift.id}

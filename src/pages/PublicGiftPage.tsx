@@ -2,12 +2,13 @@ import React, { useState, useEffect } from "react";
 import { db } from "../lib/firebase";
 import { doc, getDoc, getDocs, collection, query, where, limit, updateDoc, setDoc } from "firebase/firestore";
 import { motion, AnimatePresence } from "motion/react";
-import { Gift, CheckCircle2, ArrowRight, ExternalLink, RefreshCw, Copy, ShieldAlert, KeyRound, AlertTriangle, UserCheck } from "lucide-react";
+import { Gift, CheckCircle2, ArrowRight, ExternalLink, RefreshCw, Copy, ShieldAlert, KeyRound, AlertTriangle, UserCheck, ArrowLeft } from "lucide-react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { API_BASE } from "../config/api";
 
 interface PublicGiftPageProps {
   giftId: string;
+  onBack?: () => void;
 }
 
 interface GiftDetails {
@@ -25,7 +26,7 @@ interface TelegramSettings {
   groupUsername?: string;
 }
 
-export default function PublicGiftPage({ giftId }: PublicGiftPageProps) {
+export default function PublicGiftPage({ giftId, onBack }: PublicGiftPageProps) {
   const { user: tgUser, loading: authLoading } = useTelegramAuth();
 
   // State
@@ -112,6 +113,13 @@ export default function PublicGiftPage({ giftId }: PublicGiftPageProps) {
       setIsManualLoggedIn(true);
     }
   }, []);
+
+  // Check if active user already claimed on load/change
+  useEffect(() => {
+    if (activeUser?.membershipVerified) {
+      setIsVerified(true);
+    }
+  }, [activeUser?.membershipVerified]);
 
   // Check if active user already claimed on load/change
   useEffect(() => {
@@ -342,6 +350,15 @@ export default function PublicGiftPage({ giftId }: PublicGiftPageProps) {
       <div className="absolute w-[300px] h-[300px] rounded-full bg-emerald-600/5 blur-[100px] bottom-1/6 right-1/3" />
 
       <div className="max-w-md w-full space-y-6 z-10">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors bg-slate-900/60 hover:bg-slate-800/80 border border-slate-850 px-3.5 py-2 rounded-xl"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
+          </button>
+        )}
+
         {/* Brand Header */}
         <div className="text-center space-y-2">
           <h2 className="text-xs font-black tracking-widest text-blue-500 uppercase">RoyShare Rewards</h2>
