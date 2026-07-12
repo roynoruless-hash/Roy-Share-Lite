@@ -186,6 +186,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [tasks, setTasks] = useState<any[]>([]);
   const [tasksError, setTasksError] = useState("");
   const [tasksLoading, setTasksLoading] = useState(false);
+  const [gpTasks, setGpTasks] = useState<any[]>([]);
+  const [gpTasksLoading, setGpTasksLoading] = useState(false);
+  const [gpTasksError, setGpTasksError] = useState("");
+  const [gpTaskForm, setGpTaskForm] = useState<any>(null);
+  const [gpTaskFormMode, setGpTaskFormMode] = useState<"create" | "edit">("create");
+  const [showGPTaskForm, setShowGPTaskForm] = useState(false);
+  const [gpTaskSubmitting, setGpTaskSubmitting] = useState(false);
   const [taskView, setTaskView] = useState("");
   const [tickets, setTickets] = useState<any[]>([]);
   const [ticketSearch, setTicketSearch] = useState("");
@@ -1351,6 +1358,84 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       setTasksError(err.message);
     } finally {
       setTasksLoading(false);
+    }
+  };
+
+  const fetchGpTasks = async () => {
+    setGpTasksLoading(true);
+    setGpTasksError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gplinks-tasks`);
+      if (!res.ok) throw new Error("Failed to fetch GP links tasks");
+      const json = await res.json();
+      setGpTasks(json);
+    } catch (err: any) {
+      setGpTasksError(err.message);
+    } finally {
+      setGpTasksLoading(false);
+    }
+  };
+
+  const handleSaveGpTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const shortenerUrl = gpTaskForm.shortenerUrl || gpTaskForm.gpLinksUrl || "";
+    if (!gpTaskForm.title?.trim() || !shortenerUrl.trim() || !gpTaskForm.cpmAmount || !gpTaskForm.provider?.trim()) {
+      alert("Provider, Title, Shortener URL, and CPM amount are required.");
+      return;
+    }
+
+    setGpTaskSubmitting(true);
+    try {
+      const url = gpTaskFormMode === "create" 
+        ? `${API_BASE}/api/admin/gplinks-tasks`
+        : `${API_BASE}/api/admin/gplinks-tasks/${gpTaskForm.id}`;
+      const method = gpTaskFormMode === "create" ? "POST" : "PUT";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(gpTaskForm)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to save GP links task");
+      }
+
+      setShowGPTaskForm(false);
+      fetchGpTasks();
+    } catch (err: any) {
+      alert(err.message || "Error saving task");
+    } finally {
+      setGpTaskSubmitting(false);
+    }
+  };
+
+  const handleDeleteGpTask = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this GP links task?")) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/gplinks-tasks/${id}`, {
+        method: "DELETE"
+      });
+      if (!res.ok) throw new Error("Failed to delete GP links task");
+      fetchGpTasks();
+    } catch (err: any) {
+      alert(err.message || "Error deleting task");
+    }
+  };
+
+  const handleToggleGpTaskStatus = async (task: any) => {
+    try {
+      const newStatus = task.status === "Active" ? "Paused" : "Active";
+      const res = await fetch(`${API_BASE}/api/admin/gplinks-tasks/${task.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...task, status: newStatus })
+      });
+      if (!res.ok) throw new Error("Failed to toggle status");
+      fetchGpTasks();
+    } catch (err: any) {
+      alert(err.message || "Error toggling status");
     }
   };
 
@@ -4296,6 +4381,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🎫 Support",
               "📢 Announcements",
               "💰 Rewards",
+              "🔗 Shortener Tasks",
               "🎁 Daily Bonus",
               "🔗 Smart URL Shortener",
               "📥 Google Drive Accounts",
@@ -4325,6 +4411,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 onClick={() => {
                   setActiveTab(btn);
                   if (btn === "💰 Verified Tasks") fetchVerifiedTasks();
+                  if (btn === "🔗 Shortener Tasks") fetchGpTasks();
                   if (btn === "🎮 Game Rewards") fetchGameRewardSettings();
                   if (btn === "🎥 GameMonetize Walkthroughs") {
                     fetchWalkthroughSettings();
@@ -5920,6 +6007,423 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               )}
             </div>
           )}
+
+          {activeTab === "🔗 Shortener Tasks" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <div>
+                  <h2 className="text-2xl font-black text-white flex items-center gap-2">
+                    🔗 Universal Shortener Task Manager
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Deploy shortened link tasks with automatic CPM reward calculations, provider choices, and dynamic targeting.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setGpTaskForm({
+                      provider: "GPLinks",
+                      title: "",
+                      shortenerUrl: "",
+                      gpLinksUrl: "",
+                      cpmAmount: 350,
+                      totalViewsLimit: 1000,
+                      timerDuration: 15,
+                      countryTarget: "",
+                      deviceTarget: "",
+                      expiryDate: "",
+                      status: "Active"
+                    });
+                    setGpTaskFormMode("create");
+                    setShowGPTaskForm(true);
+                  }}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition-all shadow-lg shadow-indigo-900/30 text-sm"
+                >
+                  ➕ Create Shortener Task
+                </button>
+              </div>
+
+              {/* Statistics Panel */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-5">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">
+                    🔗 Active Campaigns
+                  </h3>
+                  <p className="text-3xl font-black text-white">
+                    {gpTasks.filter(t => t.status === "Active").length}
+                  </p>
+                </div>
+                <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-5">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">
+                    👥 Total Views Allowed
+                  </h3>
+                  <p className="text-3xl font-black text-slate-200">
+                    {gpTasks.reduce((acc, t) => acc + (Number(t.totalViewsLimit) || 0), 0)}
+                  </p>
+                </div>
+                <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-5">
+                  <h3 className="text-xs font-bold text-emerald-500/70 uppercase tracking-widest mb-1">
+                    ✅ Completed Views
+                  </h3>
+                  <p className="text-3xl font-black text-emerald-400">
+                    {gpTasks.reduce((acc, t) => acc + (Number(t.completedViews) || 0), 0)}
+                  </p>
+                </div>
+                <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-5">
+                  <h3 className="text-xs font-bold text-amber-500/70 uppercase tracking-widest mb-1">
+                    💰 Budget Committed
+                  </h3>
+                  <p className="text-3xl font-black text-amber-400">
+                    ₹{gpTasks.reduce((acc, t) => acc + ((Number(t.cpmAmount) || 0) / 1000 * (Number(t.totalViewsLimit) || 0)), 0).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              {/* GP Link Tasks list */}
+              {gpTasksLoading ? (
+                <div className="flex justify-center items-center py-16">
+                  <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : gpTasksError ? (
+                <div className="text-red-400 p-5 bg-red-500/10 rounded-xl border border-red-500/20 font-medium">
+                  ⚠️ {gpTasksError}
+                </div>
+              ) : gpTasks.length === 0 ? (
+                <div className="text-center p-12 bg-slate-900/50 rounded-2xl border border-slate-800 text-slate-400">
+                  No shortener tasks found. Click "Create Shortener Task" above to deploy your first campaign.
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/60 border-b border-slate-800">
+                        <tr>
+                          <th className="px-5 py-4">Campaign Title</th>
+                          <th className="px-5 py-4">Shortened URL</th>
+                          <th className="px-5 py-4 text-center">CPM / View Reward</th>
+                          <th className="px-5 py-4 text-center">Timer</th>
+                          <th className="px-5 py-4 text-center">Views Progress</th>
+                          <th className="px-5 py-4 text-center">Targeting</th>
+                          <th className="px-5 py-4 text-center">Status</th>
+                          <th className="px-5 py-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gpTasks.map((t: any) => {
+                          const rewardPerView = (t.cpmAmount || 0) / 1000;
+                          const url = t.shortenerUrl || t.gpLinksUrl || "";
+                          return (
+                            <tr key={t.id} className="border-b border-slate-800/60 hover:bg-slate-800/10 transition-colors">
+                              <td className="px-5 py-4">
+                                <div className="flex flex-col gap-1 text-left">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded text-[10px] font-bold">
+                                      {t.provider || "GPLinks"}
+                                    </span>
+                                    <p className="font-extrabold text-white text-sm">{t.title}</p>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">ID: {t.id}</p>
+                                </div>
+                              </td>
+                              <td className="px-5 py-4 max-w-[180px] truncate font-mono text-xs text-blue-400">
+                                <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                  {url}
+                                </a>
+                              </td>
+                              <td className="px-5 py-4 text-center">
+                                <p className="font-bold text-white">CPM: ₹{t.cpmAmount}</p>
+                                <p className="text-[11px] text-emerald-400 font-semibold mt-0.5">Reward: ₹{rewardPerView.toFixed(4)}</p>
+                              </td>
+                              <td className="px-5 py-4 text-center font-bold text-slate-300">
+                                {t.timerDuration}s
+                              </td>
+                              <td className="px-5 py-4 text-center">
+                                <div className="w-24 mx-auto bg-slate-850 h-2 rounded-full overflow-hidden border border-slate-850 mb-1">
+                                  <div 
+                                    className="bg-indigo-500 h-full rounded-full"
+                                    style={{ width: `${Math.min(100, ((t.completedViews || 0) / (t.totalViewsLimit || 1)) * 100)}%` }}
+                                  />
+                                </div>
+                                <p className="text-xs text-slate-400 font-bold">
+                                  {t.completedViews || 0} / {t.totalViewsLimit || 0}
+                                </p>
+                              </td>
+                              <td className="px-5 py-4 text-center text-xs space-y-0.5">
+                                <p className="text-slate-400 font-medium">🌍 {t.countryTarget || "All Countries"}</p>
+                                <p className="text-slate-500 font-medium">📱 {t.deviceTarget || "All Devices"}</p>
+                              </td>
+                              <td className="px-5 py-4 text-center">
+                                <button
+                                  onClick={() => handleToggleGpTaskStatus(t)}
+                                  className={`px-3 py-1 rounded-full text-[11px] font-black uppercase transition-all border ${
+                                    t.status === "Active"
+                                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                                      : "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
+                                  }`}
+                                >
+                                  {t.status}
+                                </button>
+                              </td>
+                              <td className="px-5 py-4 text-right">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setGpTaskForm({ ...t });
+                                      setGpTaskFormMode("edit");
+                                      setShowGPTaskForm(true);
+                                    }}
+                                    className="px-3 py-1.5 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-400 rounded-lg text-xs font-bold transition-all"
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteGpTask(t.id)}
+                                    className="px-3 py-1.5 bg-red-600/15 hover:bg-red-600/25 text-red-400 rounded-lg text-xs font-bold transition-all"
+                                  >
+                                    🗑️ Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* GP Task Form Modal overlay */}
+              {showGPTaskForm && gpTaskForm && (
+                <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="max-w-xl w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-6"
+                  >
+                    <div className="flex justify-between items-center pb-4 border-b border-slate-800">
+                      <h3 className="text-xl font-extrabold text-white">
+                        {gpTaskFormMode === "create" ? "➕ Create Shortener Campaign" : "✏️ Edit Shortener Campaign"}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowGPTaskForm(false)}
+                        className="text-slate-400 hover:text-white font-bold text-lg p-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveGpTask} className="space-y-4 text-left">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        
+                        <div className="space-y-1.5 md:col-span-2">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Shortener Provider</label>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <select
+                              value={["GPLinks", "ShrinkMe", "DropLink", "ShrinkEarn", "Ouo.io", "Shorte.st", "AdFly"].includes(gpTaskForm.provider || "") ? (gpTaskForm.provider || "GPLinks") : "Other"}
+                              onChange={e => {
+                                const val = e.target.value;
+                                if (val === "Other") {
+                                  setGpTaskForm({ ...gpTaskForm, provider: "" });
+                                } else {
+                                  setGpTaskForm({ ...gpTaskForm, provider: val });
+                                }
+                              }}
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                            >
+                              <option value="GPLinks">GPLinks</option>
+                              <option value="ShrinkMe">ShrinkMe</option>
+                              <option value="DropLink">DropLink</option>
+                              <option value="ShrinkEarn">ShrinkEarn</option>
+                              <option value="Ouo.io">Ouo.io</option>
+                              <option value="Shorte.st">Shorte.st</option>
+                              <option value="AdFly">AdFly</option>
+                              <option value="Other">Other / Custom</option>
+                            </select>
+
+                            {(!["GPLinks", "ShrinkMe", "DropLink", "ShrinkEarn", "Ouo.io", "Shorte.st", "AdFly"].includes(gpTaskForm.provider || "") || gpTaskForm.provider === "") && (
+                              <input
+                                type="text"
+                                required
+                                placeholder="Enter custom provider name"
+                                value={gpTaskForm.provider || ""}
+                                onChange={e => setGpTaskForm({ ...gpTaskForm, provider: e.target.value })}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                              />
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 md:col-span-2">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Task Title</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g., Earn Coins with Fast Link"
+                            value={gpTaskForm.title || ""}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, title: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5 md:col-span-2">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Shortened URL</label>
+                          <input
+                            type="url"
+                            required
+                            placeholder="e.g., https://gplinks.co/..."
+                            value={gpTaskForm.shortenerUrl || gpTaskForm.gpLinksUrl || ""}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, shortenerUrl: e.target.value, gpLinksUrl: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                          />
+                          <p className="text-[10px] text-indigo-405 text-indigo-400 font-semibold leading-normal">
+                            💡 Setup Tip: Generate your short link on your chosen shortener's dashboard, setting destination to:<br />
+                            <span className="text-white select-all bg-slate-950 px-1 rounded border border-slate-800">
+                              {window.location.origin}/gp-verify?userId={"{"}userId{"}"}&taskId={"{"}taskId{"}"}
+                            </span>
+                          </p>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">CPM Amount (₹ per 1000 Views)</label>
+                          <input
+                            type="number"
+                            required
+                            min="10"
+                            max="5000"
+                            placeholder="e.g., 380"
+                            value={gpTaskForm.cpmAmount || ""}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, cpmAmount: Number(e.target.value) || 0 })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Views Limit</label>
+                          <input
+                            type="number"
+                            required
+                            min="1"
+                            max="1000000"
+                            placeholder="e.g., 1000"
+                            value={gpTaskForm.totalViewsLimit || ""}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, totalViewsLimit: Number(e.target.value) || 0 })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Minimum Timer (Seconds)</label>
+                          <input
+                            type="number"
+                            required
+                            min="5"
+                            max="60"
+                            placeholder="e.g., 15"
+                            value={gpTaskForm.timerDuration || ""}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, timerDuration: Number(e.target.value) || 0 })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Campaign Status</label>
+                          <select
+                            value={gpTaskForm.status || "Active"}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, status: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                          >
+                            <option value="Active">🟢 Active</option>
+                            <option value="Paused">⏸️ Paused</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Country Target (Optional)</label>
+                          <input
+                            type="text"
+                            placeholder="e.g., IN, US"
+                            value={gpTaskForm.countryTarget || ""}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, countryTarget: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Device Target (Optional)</label>
+                          <input
+                            type="text"
+                            placeholder="e.g., mobile, desktop"
+                            value={gpTaskForm.deviceTarget || ""}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, deviceTarget: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5 md:col-span-2">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Expiry Date (Optional)</label>
+                          <input
+                            type="date"
+                            value={gpTaskForm.expiryDate || ""}
+                            onChange={e => setGpTaskForm({ ...gpTaskForm, expiryDate: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Real-time automatic rewards output */}
+                      <div className="bg-slate-950 border border-indigo-900/30 rounded-2xl p-4 mt-2 space-y-2">
+                        <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                          💰 Automatic Reward Preview
+                        </h4>
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-1 text-center">
+                          <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5">
+                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">CPM</p>
+                            <p className="text-sm font-black text-white">₹{gpTaskForm.cpmAmount || 0}</p>
+                          </div>
+                          <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5">
+                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Reward/View</p>
+                            <p className="text-sm font-black text-emerald-400">₹{((gpTaskForm.cpmAmount || 0) / 1000).toFixed(4)}</p>
+                          </div>
+                          <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5">
+                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Views</p>
+                            <p className="text-sm font-black text-white">{gpTaskForm.totalViewsLimit || 0}</p>
+                          </div>
+                          <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5">
+                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Remaining</p>
+                            <p className="text-sm font-black text-indigo-400">{(gpTaskForm.totalViewsLimit || 0) - (gpTaskForm.completedViews || 0)}</p>
+                          </div>
+                          <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 col-span-2 md:col-span-1">
+                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Cost</p>
+                            <p className="text-sm font-black text-amber-400">₹{(((gpTaskForm.cpmAmount || 0) / 1000) * (gpTaskForm.totalViewsLimit || 0)).toFixed(2)}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 justify-end pt-4">
+                        <button
+                          type="button"
+                          onClick={() => setShowGPTaskForm(false)}
+                          className="px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition-all text-xs"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={gpTaskSubmitting}
+                          className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold transition-all text-xs shadow-lg shadow-indigo-950/20"
+                        >
+                          {gpTaskSubmitting ? "Saving..." : "Save Campaign"}
+                        </button>
+                      </div>
+                    </form>
+                  </motion.div>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === "🎁 Daily Bonus" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">

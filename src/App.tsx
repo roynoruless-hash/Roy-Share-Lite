@@ -22,6 +22,7 @@ const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const DailyBonusPage = lazy(() => import("./pages/DailyBonusPage"));
 const EarnRewardsPage = lazy(() => import("./pages/EarnRewardsPage"));
 const RewardTasksPage = lazy(() => import("./pages/RewardTasksPage"));
+const GPVerifyPage = lazy(() => import("./pages/GPVerifyPage"));
 const VerifyWithdrawalPage = lazy(() => import("./pages/VerifyWithdrawalPage"));
 const CustomerSupportPage = lazy(() => import("./pages/CustomerSupportPage"));
 const DriveUploadPage = lazy(() => import("./pages/DriveUploadPage"));
@@ -225,6 +226,10 @@ export default function App() {
 
     if (window.location.pathname === "/reward-tasks") {
       return <RewardTasksPage />;
+    }
+
+    if (window.location.pathname === "/gp-verify") {
+      return <GPVerifyPage />;
     }
 
     const verifyMatch = window.location.pathname.match(/^\/verify-withdrawal\/([a-zA-Z0-9_-]+)/);

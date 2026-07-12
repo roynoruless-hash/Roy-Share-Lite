@@ -156,12 +156,57 @@
         "paidAt": { "type": "string" }
       },
       "required": ["giveawayId", "telegramId", "entryTime", "status"]
+    },
+    "gplinks_task": {
+      "title": "Shortener Task",
+      "description": "Universal Shortener Task campaign created by admin",
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string" },
+        "title": { "type": "string" },
+        "shortenerUrl": { "type": "string" },
+        "gpLinksUrl": { "type": "string" },
+        "cpmAmount": { "type": "number" },
+        "rewardPerView": { "type": "number" },
+        "totalViewsLimit": { "type": "number" },
+        "remainingViews": { "type": "number" },
+        "completedViews": { "type": "number" },
+        "timerDuration": { "type": "number" },
+        "countryTarget": { "type": "string" },
+        "deviceTarget": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["provider", "title", "shortenerUrl", "cpmAmount", "rewardPerView", "totalViewsLimit", "remainingViews", "completedViews", "timerDuration", "status", "createdAt"]
+    },
+    "gplinks_task_completion": {
+      "title": "GP Links Task Completion",
+      "description": "GP Links task start/completion record for user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "status": { "type": "string" },
+        "startedAt": { "type": "string" },
+        "completedAt": { "type": "string" },
+        "rewardAmount": { "type": "number" }
+      },
+      "required": ["userId", "taskId", "status", "startedAt"]
     }
   },
   "firestore": {
     "/admins/{adminId}": {
       "schema": "admin",
       "description": "Admins collection"
+    },
+    "/gplinks_tasks/{taskId}": {
+      "schema": "gplinks_task",
+      "description": "Collection of universal shortener tasks"
+    },
+    "/gplinks_task_completions/{completionId}": {
+      "schema": "gplinks_task_completion",
+      "description": "Collection of shortener task completions"
     },
     "/transactions/{transactionId}": {
       "schema": "transaction",

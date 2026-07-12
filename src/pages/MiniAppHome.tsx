@@ -14,6 +14,7 @@ import {
   ClipboardList, 
   Users, 
   Star, 
+  Zap, 
   ArrowLeft, 
   MessageSquare, 
   Copy, 
@@ -34,7 +35,8 @@ import {
   ExternalLink,
   AlertCircle,
   Upload,
-  Bell
+  Bell,
+  Cloud
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
@@ -441,6 +443,12 @@ export const MiniAppHome: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     return params.get("linkId");
   });
+  const [uploadType, setUploadType] = useState<"select" | "large">("select");
+
+  useEffect(() => {
+    setUploadType("select");
+  }, [currentView]);
+
   const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const queryUserId = searchParams?.get("userId");
@@ -563,6 +571,10 @@ export const MiniAppHome: React.FC = () => {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [gpTasks, setGpTasks] = useState<any[]>([]);
+  const [loadingGpTasks, setLoadingGpTasks] = useState(false);
+  const [completedGpTaskIds, setCompletedGpTaskIds] = useState<string[]>([]);
+  const [userRewardTab, setUserRewardTab] = useState<"standard" | "gp">("standard");
 
   // Copy Feedback State
   const [copiedCode, setCopiedCode] = useState(false);
@@ -623,8 +635,29 @@ export const MiniAppHome: React.FC = () => {
         })
         .catch((err) => console.error("Error loading tasks:", err))
         .finally(() => setLoadingTasks(false));
+
+      // Fetch GP Links Tasks and user completions
+      setLoadingGpTasks(true);
+      fetch(`${API_BASE}/api/gplinks-tasks`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data)) {
+            setGpTasks(data);
+          }
+        })
+        .catch((err) => console.error("Error loading GP links tasks:", err))
+        .finally(() => setLoadingGpTasks(false));
+
+      if (activeUser?.id) {
+        getDocs(query(collection(db, "gplinks_task_completions"), where("userId", "==", activeUser.id)))
+          .then((snap) => {
+            const completedIds = snap.docs.map((doc) => doc.data().taskId);
+            setCompletedGpTaskIds(completedIds);
+          })
+          .catch((err) => console.error("Error loading GP completions:", err));
+      }
     }
-  }, [currentView]);
+  }, [currentView, activeUser]);
 
   if (loading && isMiniApp) {
     return (
@@ -834,17 +867,7 @@ export const MiniAppHome: React.FC = () => {
   const handleAction = (id: string) => {
     console.log("[MiniAppHome] handleAction called with id:", id, "currentView before change:", currentView);
     if (id === "upload-file") {
-      if (activeUser?.id) {
-        fetch("/api/bot/trigger-upload-prompt", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: activeUser.id })
-        }).catch(err => console.error("Failed to trigger upload prompt:", err));
-      }
-      const tg = (window as any).Telegram?.WebApp;
-      if (tg) {
-        tg.close();
-      }
+      setCurrentView("upload-file");
       return;
     }
     if (id === "refer") {
@@ -1007,7 +1030,92 @@ export const MiniAppHome: React.FC = () => {
 
         {currentView === "upload-file" && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-            <DriveUploadPage onBack={() => setCurrentView("dashboard")} />
+            {uploadType === "large" ? (
+              <DriveUploadPage onBack={() => setUploadType("select")} />
+            ) : (
+              <motion.div
+                key="upload-select-view"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="min-h-screen bg-[#020617] text-white pb-12"
+              >
+                <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+                  <button onClick={() => setCurrentView("dashboard")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
+                    <ArrowLeft className="w-6 h-6 text-slate-400" />
+                  </button>
+                  <h2 className="text-xl font-bold text-white">Upload File</h2>
+                </header>
+
+                <main className="p-6 space-y-8 max-w-md mx-auto">
+                  <div className="text-center space-y-3">
+                    <div className="w-16 h-16 mx-auto bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/5">
+                      <Upload className="w-8 h-8" />
+                    </div>
+                    <h3 className="text-xl font-extrabold tracking-tight">Choose Upload Option</h3>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Select your file size or storage type below. High speed, secure and auto-credited earnings.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Small File Upload */}
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        if (activeUser?.id) {
+                          fetch("/api/bot/trigger-upload-prompt", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ userId: activeUser.id })
+                          }).catch(err => console.error("Failed to trigger upload prompt:", err));
+                        }
+                        const tgApp = (window as any).Telegram?.WebApp;
+                        if (tgApp) {
+                          tgApp.close();
+                        } else {
+                          alert("Please use the Telegram Bot to send small files.");
+                        }
+                      }}
+                      className="w-full text-left p-5 rounded-2xl bg-slate-900/40 border border-slate-800/80 hover:border-emerald-500/50 hover:bg-slate-900/70 transition-all flex items-start gap-4 group"
+                    >
+                      <div className="w-12 h-12 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <Upload className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                          Small File Upload
+                          <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/10 font-bold uppercase tracking-wider">Bot</span>
+                        </h4>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          Files up to 20 MB. Upload directly inside the Telegram Bot chat. Ideal for PDFs, APKs, Images & small files.
+                        </p>
+                      </div>
+                    </motion.button>
+
+                    {/* Large File Upload */}
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setUploadType("large")}
+                      className="w-full text-left p-5 rounded-2xl bg-slate-900/40 border border-slate-800/80 hover:border-indigo-500/50 hover:bg-slate-900/70 transition-all flex items-start gap-4 group"
+                    >
+                      <div className="w-12 h-12 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <Cloud className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                          Large File Upload
+                          <span className="text-[10px] bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-500/10 font-bold uppercase tracking-wider">Cloud</span>
+                        </h4>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          Files up to 10 GB. Upload securely using connected Google Drive. Supported on all modern browsers and speeds.
+                        </p>
+                      </div>
+                    </motion.button>
+                  </div>
+                </main>
+              </motion.div>
+            )}
           </Suspense>
         )}
 
@@ -1138,40 +1246,129 @@ export const MiniAppHome: React.FC = () => {
                 </div>
               </div>
 
-              {loadingTasks ? (
-                <div className="flex justify-center py-12">
-                  <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                </div>
-              ) : tasks.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-sm">
-                  No active tasks available. Check back soon!
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {tasks.map((task) => (
-                    <div 
-                      key={task.id} 
-                      className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-3 hover:border-slate-700 transition-colors"
-                    >
-                      <div className="flex justify-between items-start gap-4">
-                        <div>
-                          <h4 className="font-bold text-sm text-white">{task.name}</h4>
-                          <p className="text-xs text-slate-400 mt-1">{task.description}</p>
-                        </div>
-                        <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 px-3 py-1 rounded-xl text-right shrink-0">
-                          <p className="text-[9px] uppercase tracking-wider font-bold">REWARD</p>
-                          <p className="font-bold text-sm">₹{task.amount}</p>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => setActiveTaskId(task.id)}
-                        className="w-full py-3 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
-                      >
-                        <PlayCircle className="w-4 h-4" /> Start Task
-                      </button>
+              {/* Tab Selector */}
+              <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <button
+                  onClick={() => setUserRewardTab("standard")}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all ${userRewardTab === "standard" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+                >
+                  📋 Standard Tasks ({tasks.length})
+                </button>
+                <button
+                  onClick={() => setUserRewardTab("gp")}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all ${userRewardTab === "gp" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+                >
+                  🔗 Shortener Tasks ({gpTasks.length})
+                </button>
+              </div>
+
+              {userRewardTab === "standard" ? (
+                <>
+                  {loadingTasks ? (
+                    <div className="flex justify-center py-12">
+                      <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                     </div>
-                  ))}
-                </div>
+                  ) : tasks.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-sm">
+                      No active tasks available. Check back soon!
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {tasks.map((task) => (
+                        <div 
+                          key={task.id} 
+                          className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-3 hover:border-slate-700 transition-colors"
+                        >
+                          <div className="flex justify-between items-start gap-4">
+                            <div>
+                              <h4 className="font-bold text-sm text-white">{task.name}</h4>
+                              <p className="text-xs text-slate-400 mt-1">{task.description}</p>
+                            </div>
+                            <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 px-3 py-1 rounded-xl text-right shrink-0">
+                              <p className="text-[9px] uppercase tracking-wider font-bold">REWARD</p>
+                              <p className="font-bold text-sm">₹{task.amount}</p>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => setActiveTaskId(task.id)}
+                            className="w-full py-3 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
+                          >
+                            <PlayCircle className="w-4 h-4" /> Start Task
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {loadingGpTasks ? (
+                    <div className="flex justify-center py-12">
+                      <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : gpTasks.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-sm">
+                      No shortener tasks available. Check back soon!
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {gpTasks.map((task) => {
+                        const isCompleted = completedGpTaskIds.includes(task.id);
+                        const rewardPerView = (task.cpmAmount || 0) / 1000;
+                        const url = task.shortenerUrl || task.gpLinksUrl || "";
+                        const startUrl = `${url}${url.includes('?') ? '&' : '?'}userId=${activeUser.id}&taskId=${task.id}`;
+                        
+                        return (
+                          <div 
+                            key={task.id} 
+                            className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-3 hover:border-slate-700 transition-colors"
+                          >
+                            <div className="flex justify-between items-start gap-4">
+                              <div className="text-left">
+                                <h4 className="font-bold text-sm text-white flex items-center gap-1.5 flex-wrap">
+                                  <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded text-[9px] font-black uppercase">
+                                    {task.provider || "GPLinks"}
+                                  </span>
+                                  {task.title}
+                                  {isCompleted && (
+                                    <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 rounded-full text-[10px] font-semibold">
+                                      ✓ Claimed
+                                    </span>
+                                  )}
+                                </h4>
+                                <p className="text-[10px] text-indigo-400 font-semibold mt-1 flex items-center gap-1">
+                                  ⏱️ Wait duration: {task.timerDuration || 5} seconds
+                                </p>
+                              </div>
+                              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-3 py-1 rounded-xl text-right shrink-0">
+                                <p className="text-[9px] uppercase tracking-wider font-bold">REWARD</p>
+                                <p className="font-black text-sm">₹{rewardPerView.toFixed(4)}</p>
+                              </div>
+                            </div>
+                            
+                            {isCompleted ? (
+                              <button 
+                                disabled
+                                className="w-full py-3 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-not-allowed"
+                              >
+                                <CheckCircle2 className="w-4 h-4" /> Reward Claimed Successfully
+                              </button>
+                            ) : (
+                              <a
+                                href={startUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors text-center"
+                              >
+                                <Zap className="w-4 h-4" /> Start {task.provider || "Shortener"} Task
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </main>
           </motion.div>

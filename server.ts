@@ -1882,6 +1882,222 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // Admin GP Links Tasks Routes
+  app.get("/api/admin/gplinks-tasks", async (req, res) => {
+    try {
+      const q = query(collection(db, "gplinks_tasks"));
+      const snapshot = await getDocs(q);
+      const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(tasks);
+    } catch (e: any) {
+      console.error("Admin gplinks tasks fetch error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/admin/gplinks-tasks", async (req, res) => {
+    try {
+      const payload = req.body;
+      const cpmAmount = Number(payload.cpmAmount) || 0;
+      const rewardPerView = cpmAmount / 1000;
+      const url = payload.shortenerUrl || payload.gpLinksUrl || "";
+
+      const docRef = await addDoc(collection(db, "gplinks_tasks"), {
+        provider: payload.provider || "GPLinks",
+        title: payload.title || "",
+        shortenerUrl: url,
+        gpLinksUrl: url,
+        cpmAmount,
+        rewardPerView,
+        totalViewsLimit: Number(payload.totalViewsLimit) || 0,
+        remainingViews: Number(payload.totalViewsLimit) || 0,
+        completedViews: 0,
+        timerDuration: Number(payload.timerDuration) || 15,
+        countryTarget: payload.countryTarget || "",
+        deviceTarget: payload.deviceTarget || "",
+        expiryDate: payload.expiryDate || "",
+        status: payload.status || "Active",
+        createdAt: new Date().toISOString()
+      });
+      res.json({ success: true, id: docRef.id });
+    } catch (e: any) {
+      console.error("Admin gplinks task create error:", e);
+      res.status(500).json({ error: "Server error: " + e.message });
+    }
+  });
+
+  app.put("/api/admin/gplinks-tasks/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const payload = req.body;
+      const cpmAmount = Number(payload.cpmAmount) || 0;
+      const rewardPerView = cpmAmount / 1000;
+      const url = payload.shortenerUrl || payload.gpLinksUrl || "";
+
+      const cleanPayload = {
+        provider: payload.provider || "GPLinks",
+        title: payload.title || "",
+        shortenerUrl: url,
+        gpLinksUrl: url,
+        cpmAmount,
+        rewardPerView,
+        totalViewsLimit: Number(payload.totalViewsLimit) || 0,
+        remainingViews: Number(payload.totalViewsLimit) || 0,
+        completedViews: Number(payload.completedViews) || 0,
+        timerDuration: Number(payload.timerDuration) || 15,
+        countryTarget: payload.countryTarget || "",
+        deviceTarget: payload.deviceTarget || "",
+        expiryDate: payload.expiryDate || "",
+        status: payload.status || "Active",
+        updatedAt: new Date().toISOString()
+      };
+
+      await setDoc(doc(db, "gplinks_tasks", id), cleanPayload, { merge: true });
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Admin gplinks task update error:", e);
+      res.status(500).json({ error: "Server error: " + e.message });
+    }
+  });
+
+  app.delete("/api/admin/gplinks-tasks/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await deleteDoc(doc(db, "gplinks_tasks", id));
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Admin gplinks task delete error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // User GP Links Tasks list (Only active and non-expired tasks)
+  app.get("/api/gplinks-tasks", async (req, res) => {
+    try {
+      const q = query(collection(db, "gplinks_tasks"));
+      const snapshot = await getDocs(q);
+      const allTasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      const now = new Date();
+      const activeTasks = allTasks.filter((t: any) => {
+        if (t.status !== "Active") return false;
+        if (t.totalViewsLimit && (t.completedViews || 0) >= t.totalViewsLimit) return false;
+        if (t.expiryDate && new Date(t.expiryDate) < now) return false;
+        return true;
+      });
+      
+      res.json(activeTasks);
+    } catch (e: any) {
+      console.error("User gplinks tasks fetch error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Verification of GP Link task completion
+  app.post("/api/gplinks-tasks/verify", async (req, res) => {
+    try {
+      const { userId, taskId } = req.body;
+      if (!userId || !taskId) {
+        return res.status(400).json({ error: "userId and taskId are required" });
+      }
+
+      // 1. Fetch task
+      const taskRef = doc(db, "gplinks_tasks", taskId);
+      const taskSnap = await getDoc(taskRef);
+      if (!taskSnap.exists()) {
+        return res.status(404).json({ error: "This task campaign does not exist." });
+      }
+
+      const tData = taskSnap.data();
+      if (tData.status !== "Active") {
+        return res.status(400).json({ error: "This campaign is not active." });
+      }
+
+      const completedViews = Number(tData.completedViews) || 0;
+      const totalViewsLimit = Number(tData.totalViewsLimit) || 0;
+      if (totalViewsLimit > 0 && completedViews >= totalViewsLimit) {
+        // Automatically pause campaign when view limit is reached
+        await setDoc(taskRef, { status: "Paused" }, { merge: true });
+        return res.status(400).json({ error: "This task has already reached its views limit." });
+      }
+
+      if (tData.expiryDate && new Date(tData.expiryDate) < new Date()) {
+        await setDoc(taskRef, { status: "Paused" }, { merge: true });
+        return res.status(400).json({ error: "This task campaign has expired." });
+      }
+
+      // 2. Check if user already completed this task
+      const checkQuery = query(
+        collection(db, "gplinks_task_completions"),
+        where("userId", "==", userId),
+        where("taskId", "==", taskId)
+      );
+      const checkSnap = await getDocs(checkQuery);
+      if (!checkSnap.empty) {
+        return res.status(400).json({ error: "You have already completed this reward task. Duplicate rewards are not permitted." });
+      }
+
+      // 3. Retrieve user doc
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        return res.status(404).json({ error: "User profile not found profile." });
+      }
+
+      // 4. Calculate reward per view
+      const cpmAmount = Number(tData.cpmAmount) || 0;
+      const rewardAmount = cpmAmount / 1000;
+
+      // 5. Update task, user balance, and insert completion log
+      const uData = userSnap.data();
+      const fileEarnings = uData?.fileEarnings || 0;
+      const linkEarnings = uData?.linkEarnings || 0;
+      const referralEarnings = uData?.referralEarnings || 0;
+      const bonusBalance = uData?.bonusBalance || 0;
+      const rewardBalance = (uData?.rewardBalance || 0) + rewardAmount;
+      const withdrawnAmount = uData?.withdrawnAmount || 0;
+      const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+
+      // Compute new availableBalance
+      const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance - withdrawnAmount - pendingWithdrawals;
+      const earnings = (uData?.earnings || 0) + rewardAmount;
+
+      // Atomic Update User Balance
+      await setDoc(userRef, {
+        rewardBalance,
+        availableBalance,
+        earnings
+      }, { merge: true });
+
+      // Increment campaign completions
+      const newCompletedViews = completedViews + 1;
+      const updateObj: any = { completedViews: newCompletedViews };
+      if (totalViewsLimit > 0 && newCompletedViews >= totalViewsLimit) {
+        updateObj.status = "Paused"; // Auto stop
+      }
+      await setDoc(taskRef, updateObj, { merge: true });
+
+      // Create GP Links task completion document
+      await addDoc(collection(db, "gplinks_task_completions"), {
+        userId,
+        taskId,
+        taskTitle: tData.title,
+        rewardAmount,
+        completedAt: new Date().toISOString(),
+        status: "completed"
+      });
+
+      res.json({
+        success: true,
+        rewardAmount,
+        newBalance: availableBalance
+      });
+    } catch (e: any) {
+      console.error("GP Links verification error:", e);
+      res.status(500).json({ error: "Server error: " + e.message });
+    }
+  });
+
   // Admin Task Completions logs
   app.get("/api/admin/task-logs", async (req, res) => {
     try {
