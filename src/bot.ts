@@ -303,7 +303,28 @@ Type your invite code below and send, or click Skip to continue.`;
             await processAccount(botToken, chatId, user);
         } else if (msg.text === "📤 Upload File") {
             console.log("User selected Upload File");
-            await showUploadMenu(botToken, chatId, String(user.id));
+            const db = getDb();
+            await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: true }, { merge: true });
+            const messageText = `📤 *Send the file you want to upload.*
+
+Supported Files:
+
+📄 PDF
+📦 APK
+🎬 Video
+🎵 Audio
+🖼 Image
+📁 ZIP/RAR
+📃 Documents
+
+Maximum File Size:
+20 MB`;
+            const inlineKeyboard = {
+                inline_keyboard: [
+                    [{ text: "❌ Cancel", callback_data: "upload_back" }]
+                ]
+            };
+            await sendTelegramMessage(botToken, chatId, messageText, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
         } else if (msg.text === "📁 My Content") {
             console.log("User selected My Content");
             await processMyContent(botToken, chatId, user);
@@ -1392,7 +1413,7 @@ ${generatedLink}`;
         inline_keyboard: [
             [{ text: "📋 Copy Link", callback_data: `mycontent_copy_${uniqueFileId}` }],
             [{ text: "📁 My Content", web_app: { url: getMiniAppUrl(`/app?page=content&userId=${chatId}`) } }],
-            [{ text: "📤 Upload Another File", web_app: { url: getMiniAppUrl(`/app?page=upload&userId=${chatId}`) } }]
+            [{ text: "📤 Upload Another File", callback_data: "upload_type_small" }]
         ]
     };
     
@@ -2607,7 +2628,7 @@ function getMainMenuKeyboard(userId?: string | number) {
             [{ text: "🚀 Self Earning", web_app: { url: userId ? `${appUrl}/?userId=${userId}` : appUrl } }],
             [{ text: "🎮 Game & Earn", web_app: { url: userId ? `${appUrl}/app?page=game-earn&userId=${userId}` : `${appUrl}/app?page=game-earn` } }],
             [
-                { text: "📤 Upload File", web_app: { url: userId ? `${appUrl}/app?page=upload&userId=${userId}` : `${appUrl}/app?page=upload` } },
+                { text: "📤 Upload File" },
                 { text: "🔗 URL Shortener" }
             ],
             [
@@ -5896,6 +5917,8 @@ Maximum File Size:
                     body: JSON.stringify({ callback_query_id: callbackQuery.id })
                 });
             } catch (e) {}
+            const db = getDb();
+            await setDoc(doc(db, "users", String(userId)), { uploadTestMode: false }, { merge: true });
             if (callbackQuery.message?.message_id) {
                 try {
                     await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {

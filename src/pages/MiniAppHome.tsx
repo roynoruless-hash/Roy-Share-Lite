@@ -822,6 +822,10 @@ export const MiniAppHome: React.FC = () => {
     { id: "url-shortener", label: "URL Shortener", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
     { id: "my-content", label: "My Content", icon: FolderOpen, color: "bg-sky-500", shadow: "shadow-sky-500/20" },
     { id: "my-links", label: "My Links", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
+    { id: "withdraw", label: "Withdraw", icon: CreditCard, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
+    { id: "refer", label: "Refer & Earn", icon: Users, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
+    { id: "daily-bonus", label: "Daily Bonus", icon: Gift, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
+    { id: "earn-rewards", label: "Reward Tasks", icon: ClipboardList, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
     { id: "announcements", label: "Announcements", icon: Bell, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
     { id: "settings", label: "Settings", icon: Settings, color: "bg-slate-500", shadow: "shadow-slate-500/20" },
     { id: "support", label: "Contact Support", icon: MessageSquare, color: "bg-teal-500", shadow: "shadow-teal-500/20" },
@@ -829,6 +833,20 @@ export const MiniAppHome: React.FC = () => {
 
   const handleAction = (id: string) => {
     console.log("[MiniAppHome] handleAction called with id:", id, "currentView before change:", currentView);
+    if (id === "upload-file") {
+      if (activeUser?.id) {
+        fetch("/api/bot/trigger-upload-prompt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: activeUser.id })
+        }).catch(err => console.error("Failed to trigger upload prompt:", err));
+      }
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg) {
+        tg.close();
+      }
+      return;
+    }
     if (id === "refer") {
       console.log("[MiniAppHome] handleAction MATCHED 'refer'. Setting view to 'referral'.");
       setCurrentView("referral");

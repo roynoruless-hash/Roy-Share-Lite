@@ -241,6 +241,63 @@ async function startServer() {
     });
   });
 
+  app.post("/api/bot/trigger-upload-prompt", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+
+      // 1. Get botToken from settings/telegram
+      const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+      const botToken = settingsDoc.data()?.botToken;
+      if (!botToken) {
+        return res.status(500).json({ error: "Bot token not configured" });
+      }
+
+      // 2. Set uploadTestMode = true
+      await setDoc(doc(db, "users", String(userId)), { uploadTestMode: true }, { merge: true });
+
+      // 3. Send upload prompt message to user's chatId (which is the userId)
+      const messageText = `📤 *Send the file you want to upload.*
+
+Supported Files:
+
+📄 PDF
+📦 APK
+🎬 Video
+🎵 Audio
+🖼 Image
+📁 ZIP/RAR
+📃 Documents
+
+Maximum File Size:
+20 MB`;
+
+      const inlineKeyboard = {
+          inline_keyboard: [
+              [{ text: "❌ Cancel", callback_data: "upload_back" }]
+          ]
+      };
+
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: Number(userId),
+          text: messageText,
+          parse_mode: "Markdown",
+          reply_markup: inlineKeyboard
+        })
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error triggering upload prompt:", error);
+      res.status(500).json({ error: error.message || "Internal server error" });
+    }
+  });
+
   app.get("/api/test-db", async (req, res) => {
     try {
       if (!adminDb) {
