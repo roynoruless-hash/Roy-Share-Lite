@@ -11213,156 +11213,186 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
 
     const { fileId } = req.params;
-    console.log(`\n=== [DEBUG DOWNLOAD ROUTE] TRACING STEPS FOR FILE ID: ${fileId} ===`);
+    console.log(`\n=== [DEBUG DOWNLOAD ROUTE] STARTING TRACE FOR ID: ${fileId} ===`);
 
     try {
-      // Step 1: Read Firestore document
-      console.log(`[DEBUG DOWNLOAD ROUTE] Step 1: Reading Firestore document uploads/${fileId}`);
+      // Step 1: Firestore Lookup
+      console.log(`[DEBUG DOWNLOAD ROUTE] [1/4] Firestore lookup for uploads/${fileId}...`);
       const docRef = doc(db, "uploads", fileId);
       const docSnap = await getDoc(docRef);
       
       if (!docSnap.exists()) {
-        const errorMsg = `Document uploads/${fileId} does not exist in Firestore database.`;
-        console.error(`[DEBUG DOWNLOAD ROUTE] Error: ${errorMsg}`);
+        console.error(`[DEBUG DOWNLOAD ROUTE] [1/4] FAILED: Document uploads/${fileId} not found.`);
         return res.status(404).send(`
-          <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;">
-            <h1 style="color:#ef4444;">404 Not Found</h1>
-            <p>${errorMsg}</p>
+          <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;text-align:center;background:#0f172a;color:white;border-radius:20px;margin-top:50px;">
+            <h1 style="color:#ef4444;font-size:3rem;margin-bottom:1rem;">404</h1>
+            <h2 style="margin-bottom:1rem;">File Not Found</h2>
+            <p style="color:#94a3b8;line-height:1.6;">The file you are looking for does not exist or has been deleted from our servers.</p>
+            <a href="/" style="display:inline-block;margin-top:2rem;padding:0.75rem 1.5rem;background:#3b82f6;color:white;text-decoration:none;border-radius:10px;font-weight:bold;">Return Home</a>
           </div>
         `);
       }
       
       const itemData = docSnap.data();
-      console.log(`[DEBUG DOWNLOAD ROUTE] Firestore document data retrieved:`, JSON.stringify(itemData, null, 2));
+      console.log(`[DEBUG DOWNLOAD ROUTE] [1/4] SUCCESS: Metadata retrieved for "${itemData.fileName}"`);
 
+      // Validation of required fields
+      if (!itemData.fileName || (!itemData.driveFileId && !itemData.telegramFileId && !itemData.filePath)) {
+        console.error(`[DEBUG DOWNLOAD ROUTE] [VALIDATION] FAILED: Incomplete metadata.`, JSON.stringify(itemData));
+        return res.status(400).send(`
+          <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;text-align:center;background:#0f172a;color:white;border-radius:20px;margin-top:50px;">
+            <h1 style="color:#f59e0b;font-size:3rem;margin-bottom:1rem;">400</h1>
+            <h2 style="margin-bottom:1rem;">Invalid File Metadata</h2>
+            <p style="color:#94a3b8;line-height:1.6;">The file metadata is incomplete or corrupted. This might be an old or failed upload.</p>
+            <a href="/" style="display:inline-block;margin-top:2rem;padding:0.75rem 1.5rem;background:#3b82f6;color:white;text-decoration:none;border-radius:10px;font-weight:bold;">Return Home</a>
+          </div>
+        `);
+      }
+
+      // Step 2: Storage Type Routing
+      console.log(`[DEBUG DOWNLOAD ROUTE] [2/4] Storage provider identified as: ${itemData.storage || "firebase"}`);
+
+      // Handle Google Drive Storage
       if (itemData.storage === "google_drive") {
-        console.log(`[DEBUG DOWNLOAD ROUTE] File is stored on Google Drive. Serving securely...`);
+        console.log(`[DEBUG DOWNLOAD ROUTE] Processing Google Drive download...`);
         try {
-          const { accessToken } = await getActiveGoogleToken(itemData.telegramId);
+          const { accessToken } = await getActiveGoogleToken(itemData.telegramId || itemData.userId);
           const driveFileId = itemData.driveFileId;
 
           // Increment download count
-          try {
-            await setDoc(docRef, { downloads: (itemData.downloads || 0) + 1 }, { merge: true });
-          } catch (countErr) {
-            console.error("[DEBUG DOWNLOAD ROUTE] Failed to update download count:", countErr);
-          }
+          await setDoc(docRef, { downloads: (itemData.downloads || 0) + 1 }, { merge: true }).catch(ce => console.error("Count error:", ce));
 
           const googleStreamUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`;
           const response = await fetch(googleStreamUrl, {
-            headers: {
-              "Authorization": `Bearer ${accessToken}`
-            }
+            headers: { "Authorization": `Bearer ${accessToken}` }
           });
 
           if (!response.ok) {
-            console.error(`[DEBUG DOWNLOAD ROUTE] Google Drive stream returned status: ${response.status}`);
+            console.warn(`[DEBUG DOWNLOAD ROUTE] Google API failed with ${response.status}. Falling back to public link.`);
             return res.redirect(`https://drive.google.com/uc?export=download&id=${driveFileId}`);
           }
 
           res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(itemData.fileName)}"`);
           res.setHeader("Content-Type", response.headers.get("Content-Type") || "application/octet-stream");
-          if (response.headers.get("Content-Length")) {
-            res.setHeader("Content-Length", response.headers.get("Content-Length")!);
-          }
+          
+          const contentLength = response.headers.get("Content-Length");
+          if (contentLength) res.setHeader("Content-Length", contentLength);
 
           if (response.body) {
+            // Stream the file
             const reader = response.body.getReader();
-            const pump = async (): Promise<any> => {
+            const streamToRes = async () => {
               const { done, value } = await reader.read();
-              if (done) {
-                res.end();
-                return;
-              }
+              if (done) return res.end();
               res.write(value);
-              return pump();
+              return streamToRes();
             };
-            await pump();
+            await streamToRes();
             return;
           } else {
             return res.redirect(`https://drive.google.com/uc?export=download&id=${driveFileId}`);
           }
         } catch (err: any) {
-          console.error(`[DEBUG DOWNLOAD ROUTE] Error serving Google Drive file:`, err);
-          if (itemData.driveFileId) {
-            return res.redirect(`https://drive.google.com/uc?export=download&id=${itemData.driveFileId}`);
-          }
+          console.error(`[DEBUG DOWNLOAD ROUTE] Google Drive Error:`, err);
+          if (itemData.driveFileId) return res.redirect(`https://drive.google.com/uc?export=download&id=${itemData.driveFileId}`);
           throw err;
         }
       }
 
-      // Fetch Telegram Settings to see if we can use getFile as a primary path
-      const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-      const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
-      
-      let telegramDirectUrl = "";
-      if (botToken && itemData.telegramFileId) {
+      // Handle Telegram Storage
+      if (itemData.storage === "telegram" || itemData.telegramFileId) {
+        console.log(`[DEBUG DOWNLOAD ROUTE] [3/4] Telegram API lookup for file_id: ${itemData.telegramFileId}...`);
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        const tgSettings = telegramSettingsSnap.exists() ? telegramSettingsSnap.data() : {};
+        const botTokenEnc = tgSettings.botToken;
+        const botToken = botTokenEnc && botTokenEnc.startsWith("enc:") ? decryptSecret(botTokenEnc) : botTokenEnc;
+        const botUsername = (tgSettings.botUsername || "RoyShareBot").replace('@', '');
+
+        if (!botToken) {
+          console.error(`[DEBUG DOWNLOAD ROUTE] [3/4] FAILED: Telegram Bot Token not configured.`);
+          return res.status(500).send("Server configuration error: Telegram Bot Token missing.");
+        }
+
         try {
-          console.log(`[DEBUG DOWNLOAD ROUTE] Checking if file can be fetched via Telegram Bot API...`);
           const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${itemData.telegramFileId}`);
           const getFileData = await getFileRes.json();
+          
           if (getFileData.ok && getFileData.result?.file_path) {
-            telegramDirectUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
-            console.log(`[DEBUG DOWNLOAD ROUTE] Successfully retrieved direct Telegram download URL: ${telegramDirectUrl}`);
+            const telegramDirectUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
+            console.log(`[DEBUG DOWNLOAD ROUTE] [3/4] SUCCESS: Telegram direct URL obtained.`);
+            
+            // Increment download count
+            await setDoc(docRef, { downloads: (itemData.downloads || 0) + 1 }, { merge: true }).catch(() => {});
+            
+            console.log(`[DEBUG DOWNLOAD ROUTE] [4/4] Redirecting to Telegram file server...`);
+            return res.redirect(telegramDirectUrl);
           } else {
-            console.warn(`[DEBUG DOWNLOAD ROUTE] Telegram Bot API getFile returned error (likely file size > 20MB): ${JSON.stringify(getFileData)}`);
+            const tgError = getFileData.description || "Unknown error";
+            console.warn(`[DEBUG DOWNLOAD ROUTE] [3/4] Telegram getFile failed: ${tgError}`);
+            
+            // If it failed because it's too large, show friendly Telegram Bot redirect
+            return res.status(200).send(`
+              <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;text-align:center;background:#0f172a;color:white;border-radius:20px;margin-top:50px;">
+                <div style="font-size:4rem;margin-bottom:1rem;">🤖</div>
+                <h2 style="margin-bottom:1rem;">Large File Detected</h2>
+                <p style="color:#94a3b8;line-height:1.6;margin-bottom:2rem;">
+                  This file is too large to be downloaded directly via web. 
+                  Please use our Telegram Bot to get this file securely.
+                </p>
+                <a href="https://t.me/${botUsername}?start=dl_${fileId}" 
+                   style="display:inline-block;padding:1rem 2rem;background:#0088cc;color:white;text-decoration:none;border-radius:15px;font-weight:bold;font-size:1.1rem;box-shadow:0 10px 20px rgba(0,136,204,0.3);">
+                   Get File in Telegram
+                </a>
+                <p style="margin-top:1.5rem;font-size:0.8rem;color:#64748b;">RoyShare Secure Delivery</p>
+              </div>
+            `);
           }
-        } catch (e: any) {
-          console.error(`[DEBUG DOWNLOAD ROUTE] Error querying Telegram Bot API getFile:`, e.message || e);
+        } catch (tgErr: any) {
+          console.error(`[DEBUG DOWNLOAD ROUTE] [3/4] Telegram API Exception:`, tgErr);
+          return res.status(502).send("Error communicating with Telegram servers. Please try again later.");
         }
       }
 
-      // If we got a direct Telegram URL (i.e. file <= 20MB), we redirect directly to it!
-      if (telegramDirectUrl) {
-        console.log(`[DEBUG DOWNLOAD ROUTE] File is small enough to download via Telegram. Redirecting...`);
-        return res.redirect(telegramDirectUrl);
-      }
-
-      // Step 2: Resolve Firebase Storage path
-      console.log(`[DEBUG DOWNLOAD ROUTE] Step 2: Resolving Firebase Storage path for: ${itemData.fileName || 'file'}`);
-      const fileName = itemData.fileName || "file";
-      const storagePath = `uploads/${fileId}/${fileName}`;
-      console.log(`[DEBUG DOWNLOAD ROUTE] Resolved Firebase Storage path: "${storagePath}"`);
-
-      // Step 3: Generate download URL
-      console.log(`[DEBUG DOWNLOAD ROUTE] Step 3: Generating download URL for path: "${storagePath}"`);
+      // Default: Firebase Storage Lookup
+      console.log(`[DEBUG DOWNLOAD ROUTE] [3/4] Firebase Storage lookup...`);
+      const fileNameStr = itemData.fileName || "file";
+      const storagePath = `uploads/${fileId}/${fileNameStr}`;
       const bucket = getStorage().bucket();
       const fileRef = bucket.file(storagePath);
 
-      console.log(`[DEBUG DOWNLOAD ROUTE] Checking if file exists in Firebase Storage bucket: ${bucket.name}`);
       const [exists] = await fileRef.exists();
       if (!exists) {
-        const errorMsg = `File not found in Firebase Storage bucket at path: "${storagePath}"`;
-        console.error(`[DEBUG DOWNLOAD ROUTE] Error: ${errorMsg}`);
-        throw new Error(errorMsg);
+        console.error(`[DEBUG DOWNLOAD ROUTE] [3/4] FAILED: File not found in bucket at ${storagePath}`);
+        return res.status(404).send("The actual file data is missing from our cloud storage.");
       }
 
-      console.log(`[DEBUG DOWNLOAD ROUTE] File exists in bucket. Generating signed download URL...`);
+      console.log(`[DEBUG DOWNLOAD ROUTE] [4/4] Generating signed URL...`);
       const [downloadUrl] = await fileRef.getSignedUrl({
         action: 'read',
-        expires: Date.now() + 15 * 60 * 1000, // 15 minutes
+        expires: Date.now() + 15 * 60 * 1000,
       });
-      console.log(`[DEBUG DOWNLOAD ROUTE] Successfully generated signed download URL: ${downloadUrl}`);
 
-      // Step 4: Return the file
-      console.log(`[DEBUG DOWNLOAD ROUTE] Step 4: Returning/serving the file. Redirecting user to: ${downloadUrl}`);
+      // Increment download count
+      await setDoc(docRef, { downloads: (itemData.downloads || 0) + 1 }, { merge: true }).catch(() => {});
+
+      console.log(`[DEBUG DOWNLOAD ROUTE] [4/4] SUCCESS: Redirecting to signed URL.`);
       return res.redirect(downloadUrl);
 
     } catch (err: any) {
-      console.error(`\n🔴 [DEBUG DOWNLOAD ROUTE] EXCEPTION ENCOUNTERED FOR FILE ID: ${fileId}`);
+      console.error(`\n🔴 [DEBUG DOWNLOAD ROUTE] CRITICAL UNHANDLED ERROR FOR FILE ID: ${fileId}`);
       console.error(`Error Message: ${err.message || err}`);
       console.error(`Stack Trace:\n`, err.stack || err);
       console.error(`================================================================================\n`);
 
-      // Never redirect to Telegram on download failure. Return the real error (404, 403 or 500) with the reason.
       const statusCode = err.message?.includes("not found") ? 404 : 500;
-      return res.status(statusCode).send(`
-        <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;margin-top:4rem;box-shadow:0 4px 6px -1px rgb(0 0 0 / 0.1);background-color:#ffffff;">
-          <h1 style="color:#ef4444;font-size:1.875rem;margin-bottom:1rem;margin-top:0;">Download Failed</h1>
-          <p style="color:#475569;margin-bottom:1.5rem;">An error occurred while attempting to resolve your file download.</p>
-          <div style="background-color:#f1f5f9;padding:1rem;border-radius:6px;font-family:monospace;font-size:0.875rem;color:#0f172a;word-break:break-all;">
-            <strong>Error ${statusCode}:</strong> ${err.message || err}
+      res.status(statusCode).send(`
+        <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;text-align:center;background:#0f172a;color:white;border-radius:20px;margin-top:50px;border:1px solid #ef4444;">
+          <h1 style="color:#ef4444;margin-bottom:1rem;">500 System Error</h1>
+          <p style="color:#94a3b8;line-height:1.6;">An unexpected error occurred while preparing your download.</p>
+          <div style="background:#1e293b;padding:1rem;border-radius:10px;margin-top:1rem;text-align:left;font-family:monospace;font-size:0.875rem;color:#fca5a5;word-break:break-all;overflow-x:auto;">
+             <strong>Error ${statusCode}:</strong> ${err.message || err}
           </div>
+          <a href="/" style="display:inline-block;margin-top:2rem;padding:0.75rem 1.5rem;background:#3b82f6;color:white;text-decoration:none;border-radius:10px;font-weight:bold;">Try Again</a>
           <p style="color:#94a3b8;font-size:0.75rem;margin-top:1.5rem;text-align:center;">RoyShare Safe Download System</p>
         </div>
       `);

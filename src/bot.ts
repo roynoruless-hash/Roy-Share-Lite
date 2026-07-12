@@ -1351,6 +1351,7 @@ async function processRealUpload(botToken: string, chatId: number, user: any, ms
         uploadDate: formattedDate,
         generatedLink,
         status: "active",
+        storage: "telegram",
         downloads: 0,
         earnings: 0
     });
