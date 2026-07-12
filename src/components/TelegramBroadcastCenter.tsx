@@ -50,7 +50,11 @@ interface Broadcast {
   miniAppOpens?: number;
 }
 
-export default function TelegramBroadcastCenter() {
+interface TelegramBroadcastCenterProps {
+  onOpenSettings?: () => void;
+}
+
+export default function TelegramBroadcastCenter({ onOpenSettings }: TelegramBroadcastCenterProps) {
   // Broadcaster config
   const [telegramSettings, setTelegramSettings] = useState<any>({
     channelUsername: "",
@@ -59,6 +63,8 @@ export default function TelegramBroadcastCenter() {
     miniAppShortName: "app"
   });
   const [settingsLoading, setSettingsLoading] = useState(true);
+
+  const hasSettings = !!(telegramSettings && telegramSettings.botToken);
 
   // Active Editor State
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -368,6 +374,28 @@ export default function TelegramBroadcastCenter() {
 
   return (
     <div className="space-y-6">
+      {!settingsLoading && !hasSettings && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 animate-in fade-in duration-300">
+          <div className="space-y-1">
+            <h4 className="text-amber-400 font-bold flex items-center gap-2">
+              ⚠️ Telegram Broadcast Center is Not Configured
+            </h4>
+            <p className="text-xs text-slate-300">
+              Please configure your Telegram Bot Token, Bot Username, and other settings to begin using the Broadcast Center.
+            </p>
+          </div>
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold rounded-xl transition-all shadow-md flex items-center gap-1.5 shrink-0 cursor-pointer"
+            >
+              <Settings size={14} /> Open Telegram Settings
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Module Title & Navigation */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/60 p-6 rounded-2xl border border-slate-800/80">
         <div>

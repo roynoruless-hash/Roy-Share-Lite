@@ -2565,50 +2565,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     return calculatedHash === hash;
   }
 
-  // Admin APIs for Telegram settings
-  app.get("/api/admin/telegram-settings", async (req, res) => {
-    try {
-      const configRef = doc(db, "settings", "telegram");
-      let configSnap = await getDoc(configRef);
-      
-      let data: any = {};
-      if (configSnap.exists()) {
-        data = configSnap.data();
-      } else {
-        const legacyRef = doc(db, "telegram_settings", "config");
-        const legacySnap = await getDoc(legacyRef);
-        if (legacySnap.exists()) {
-          const d = legacySnap.data();
-          data = {
-            botToken: d.encryptedClientSecret || "",
-            botUsername: d.botUsername || "",
-            miniAppShortName: d.miniAppShortName || "",
-            clientId: d.clientId || "",
-            clientSecret: d.encryptedClientSecret || "",
-            redirectUri: d.redirectUri || "",
-            trustedOrigin: d.trustedOrigin || "",
-            botConnected: true,
-            loginConnected: true
-          };
-        }
-      }
-
-      res.json({
-        botToken: data.botToken ? "••••••••••••••" : "",
-        botUsername: data.botUsername || "",
-        miniAppShortName: data.miniAppShortName || "",
-        clientId: data.clientId || "",
-        clientSecret: data.clientSecret ? "••••••••••••••" : "",
-        redirectUri: data.redirectUri || "",
-        trustedOrigin: data.trustedOrigin || "",
-        botConnected: !!data.botConnected,
-        loginConnected: !!data.loginConnected
-      });
-    } catch (e: any) {
-      console.error("Error reading Telegram settings:", e);
-      res.status(500).json({ error: "Failed to fetch settings" });
-    }
-  });
+  // Duplicate GET /api/admin/telegram-settings route removed to prevent shadowing.
+  // The fully featured GET /api/admin/telegram-settings endpoint is declared further down in this file.
 
   app.post("/api/admin/telegram-settings/save", async (req, res) => {
     try {
@@ -6966,12 +6924,21 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           const channelUser = cleanUsername(data.channelUsername || data.channelLink || "");
           const groupUser = cleanUsername(data.groupUsername || data.groupLink || "");
 
+          let finalBotToken = data.botToken || "";
+          if (finalBotToken && !finalBotToken.startsWith("enc:")) {
+              finalBotToken = encryptSecret(finalBotToken);
+          }
+
           const updateData = {
               ...data,
+              botToken: finalBotToken,
+              adminChatId: data.chatId || data.adminChatId || "",
+              chatId: data.chatId || data.adminChatId || "",
               channelUsername: channelUser ? `@${channelUser}` : "",
               groupUsername: groupUser ? `@${groupUser}` : "",
               channelLink: channelUser ? `https://t.me/${channelUser}` : "",
-              groupLink: groupUser ? `https://t.me/${groupUser}` : ""
+              groupLink: groupUser ? `https://t.me/${groupUser}` : "",
+              updatedAt: data.updatedAt || new Date().toISOString()
           };
 
           await setDoc(doc(db, "settings", "telegram"), updateData, { merge: true });
@@ -9166,16 +9133,17 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const docRef = doc(db, "settings", "telegram");
       const snap = await getDoc(docRef);
       if (snap.exists()) {
-        res.json({ success: true, settings: snap.data() });
+        const data = snap.data() || {};
+        res.json({
+          success: true,
+          settings: {
+            ...data,
+            botToken: data.botToken ? "••••••••••••••" : "",
+            clientSecret: data.clientSecret ? "••••••••••••••" : ""
+          }
+        });
       } else {
-        const defaults = {
-          channelUsername: "@RoyShareOfficial",
-          groupUsername: "@RoyShareCommunity",
-          botUsername: "@Royshareearn_bot",
-          updatedAt: new Date().toISOString()
-        };
-        await setDoc(docRef, defaults);
-        res.json({ success: true, settings: defaults });
+        res.json({ success: true, settings: null });
       }
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
@@ -9185,8 +9153,132 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   app.put("/api/admin/telegram-settings", async (req, res) => {
     try {
       const docRef = doc(db, "settings", "telegram");
-      await setDoc(docRef, { ...req.body, updatedAt: new Date().toISOString() });
+      const snap = await getDoc(docRef);
+      let existingData: any = {};
+      if (snap.exists()) {
+        existingData = snap.data() || {};
+      }
+
+      const payload = req.body || {};
+      
+      let finalBotToken = existingData.botToken || "";
+      if (payload.botToken && payload.botToken !== "••••••••••••••" && payload.botToken !== "••••••••••••••••") {
+        finalBotToken = encryptSecret(payload.botToken);
+      }
+
+      let finalClientSecret = existingData.clientSecret || "";
+      if (payload.clientSecret && payload.clientSecret !== "••••••••••••••" && payload.clientSecret !== "••••••••••••••••") {
+        finalClientSecret = encryptSecret(payload.clientSecret);
+      }
+
+      const saveData = {
+        ...existingData,
+        ...payload,
+        botToken: finalBotToken,
+        clientSecret: finalClientSecret,
+        updatedAt: new Date().toISOString()
+      };
+
+      await setDoc(docRef, saveData);
       res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/admin/telegram-settings/test-bot", async (req, res) => {
+    try {
+      let { botToken } = req.body;
+      if (!botToken || botToken === "••••••••••••••" || botToken === "••••••••••••••••") {
+        const docRef = doc(db, "settings", "telegram");
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          botToken = snap.data().botToken;
+        }
+      }
+      if (!botToken) {
+        return res.status(400).json({ success: false, error: "Bot Token is required or not configured." });
+      }
+      const decBotToken = botToken.startsWith("enc:") ? decryptSecret(botToken) : botToken;
+      const response = await fetch(`https://api.telegram.org/bot${decBotToken}/getMe`);
+      const data = await response.json();
+      if (response.ok && data.ok) {
+        res.json({ success: true, botUsername: data.result.username });
+      } else {
+        res.status(400).json({ success: false, error: data.description || "Invalid Bot Token" });
+      }
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/admin/telegram-settings/verify-channel", async (req, res) => {
+    try {
+      let { botToken, channelUsername, channelChatId } = req.body;
+      if (!botToken || botToken === "••••••••••••••" || botToken === "••••••••••••••••") {
+        const docRef = doc(db, "settings", "telegram");
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          botToken = snap.data().botToken;
+        }
+      }
+      if (!botToken) {
+        return res.status(400).json({ success: false, error: "Bot Token is missing." });
+      }
+      const decBotToken = botToken.startsWith("enc:") ? decryptSecret(botToken) : botToken;
+      
+      let target = channelChatId || channelUsername;
+      if (!target) {
+        return res.status(400).json({ success: false, error: "Channel Username or Chat ID is required." });
+      }
+      
+      if (typeof target === 'string' && !target.startsWith("@") && !target.startsWith("-") && isNaN(Number(target))) {
+        target = `@${target}`;
+      }
+      
+      const response = await fetch(`https://api.telegram.org/bot${decBotToken}/getChat?chat_id=${target}`);
+      const data = await response.json();
+      if (response.ok && data.ok) {
+        res.json({ success: true, chat: data.result });
+      } else {
+        res.status(400).json({ success: false, error: data.description || "Cannot access channel. Ensure bot is an administrator of the channel." });
+      }
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/admin/telegram-settings/verify-group", async (req, res) => {
+    try {
+      let { botToken, groupUsername, groupChatId } = req.body;
+      if (!botToken || botToken === "••••••••••••••" || botToken === "••••••••••••••••") {
+        const docRef = doc(db, "settings", "telegram");
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          botToken = snap.data().botToken;
+        }
+      }
+      if (!botToken) {
+        return res.status(400).json({ success: false, error: "Bot Token is missing." });
+      }
+      const decBotToken = botToken.startsWith("enc:") ? decryptSecret(botToken) : botToken;
+      
+      let target = groupChatId || groupUsername;
+      if (!target) {
+        return res.status(400).json({ success: false, error: "Group Username or Chat ID is required." });
+      }
+      
+      if (typeof target === 'string' && !target.startsWith("@") && !target.startsWith("-") && isNaN(Number(target))) {
+        target = `@${target}`;
+      }
+      
+      const response = await fetch(`https://api.telegram.org/bot${decBotToken}/getChat?chat_id=${target}`);
+      const data = await response.json();
+      if (response.ok && data.ok) {
+        res.json({ success: true, chat: data.result });
+      } else {
+        res.status(400).json({ success: false, error: data.description || "Cannot access group. Ensure bot is an administrator/member of the group." });
+      }
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
     }
@@ -9198,16 +9290,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const docRef = doc(db, "settings", "telegram");
       const snap = await getDoc(docRef);
       if (snap.exists()) {
-        res.json({ success: true, settings: snap.data() });
+        const { botToken, clientSecret, ...publicSettings } = snap.data();
+        res.json({ success: true, settings: publicSettings });
       } else {
-        res.json({ 
-          success: true, 
-          settings: { 
-            channelUsername: "@RoyShareOfficial", 
-            groupUsername: "@RoyShareCommunity",
-            botUsername: "@Royshareearn_bot"
-          } 
-        });
+        res.json({ success: true, settings: null });
       }
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
