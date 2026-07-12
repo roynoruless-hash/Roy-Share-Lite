@@ -764,30 +764,13 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
               </div>
 
               <div className="max-w-4xl mx-auto">
-                <div className="bg-black rounded-[2.5rem] border border-white/10 overflow-hidden shadow-2xl relative aspect-video group">
-                  <iframe 
-                    title="Official Game Walkthrough"
-                    srcDoc={`
-                      <!DOCTYPE html>
-                      <html>
-                        <head>
-                          <style>
-                            body { margin: 0; padding: 0; background: black; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; }
-                            #gamemonetize-video { width: 100% !important; height: 100% !important; }
-                            iframe { width: 100% !important; height: 100% !important; border: none; }
-                          </style>
-                        </head>
-                        <body>
-                          ${walkthroughData.walkthrough.rawCode}
-                        </body>
-                      </html>
-                    `}
-                    frameBorder="0" 
-                    scrolling="no" 
-                    width="100%" 
-                    height="100%" 
-                    className="w-full h-full"
+                <div className="bg-black rounded-[2.5rem] border border-white/10 overflow-hidden shadow-2xl relative">
+                  <div 
+                    id="gamemonetize-walkthrough-container"
+                    dangerouslySetInnerHTML={{ __html: walkthroughData.walkthrough.rawCode }}
                   />
+                  {/* Dynamic Script Execution Helper */}
+                  <WalkthroughScriptExecutor code={walkthroughData.walkthrough.rawCode} />
                 </div>
               </div>
               
@@ -856,4 +839,48 @@ export const GamePlayerPage: React.FC<GamePlayerPageProps> = ({ gameId, userId, 
       </AnimatePresence>
     </div>
   );
+};
+
+const WalkthroughScriptExecutor: React.FC<{ code: string }> = ({ code }) => {
+  useEffect(() => {
+    if (!code) return;
+
+    // Create a temporary element to parse the HTML
+    const div = document.createElement("div");
+    div.innerHTML = code;
+    
+    const scripts = Array.from(div.querySelectorAll("script"));
+    const executedScripts: HTMLScriptElement[] = [];
+
+    scripts.forEach((oldScript) => {
+      const newScript = document.createElement("script");
+      
+      // Copy all attributes
+      Array.from(oldScript.attributes).forEach((attr) => {
+        newScript.setAttribute(attr.name, attr.value);
+      });
+
+      // Copy the inline content
+      if (oldScript.innerHTML) {
+        newScript.innerHTML = oldScript.innerHTML;
+      } else if (oldScript.text) {
+        newScript.text = oldScript.text;
+      }
+
+      // Append to the body to execute
+      document.body.appendChild(newScript);
+      executedScripts.push(newScript);
+    });
+
+    return () => {
+      // Cleanup: remove the scripts when the component unmounts
+      executedScripts.forEach((script) => {
+        if (script.parentNode) {
+          script.parentNode.removeChild(script);
+        }
+      });
+    };
+  }, [code]);
+
+  return null;
 };

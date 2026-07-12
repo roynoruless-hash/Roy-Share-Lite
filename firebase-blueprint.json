@@ -49,6 +49,29 @@
         "approvedCommission",
         "totalCommission"
       ]
+    },
+    "telegram_broadcast": {
+      "title": "Telegram Broadcast",
+      "description": "Record for Telegram Broadcast posts and scheduled tasks",
+      "type": "object",
+      "properties": {
+        "message": { "type": "string" },
+        "language": { "type": "string" },
+        "tone": { "type": "string" },
+        "length": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "buttons": { "type": "array" },
+        "status": { "type": "string", "enum": ["Draft", "Scheduled", "Sent", "Failed"] },
+        "scheduledAt": { "type": "string" },
+        "createdTime": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "sentTime": { "type": "string" },
+        "totalClicks": { "type": "number" },
+        "miniAppOpens": { "type": "number" },
+        "origin": { "type": "string" }
+      },
+      "required": ["message", "language", "tone", "length", "buttons", "status", "createdTime", "createdBy"]
     }
   },
   "firestore": {
@@ -63,6 +86,10 @@
     "/referrals/{referredUserId}": {
       "schema": "referral",
       "description": "Collection tracking user referrals and potential/approved commission"
+    },
+    "/telegram_broadcasts/{broadcastId}": {
+      "schema": "telegram_broadcast",
+      "description": "Collection tracking Telegram Broadcast posts, scheduled tasks, and interactive clicks"
     }
   }
 }

@@ -6178,6 +6178,369 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // ==========================================
+  // TELEGRAM BROADCAST CENTER API ENDPOINTS
+  // ==========================================
+
+  // Helper function to deliver Telegram Broadcast by ID
+  async function sendTelegramBroadcastById(broadcastId: string, isTest = false, testTargetOverride?: string) {
+    const db = getDb();
+    const docRef = doc(db, "telegram_broadcasts", broadcastId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) throw new Error("Broadcast not found");
+
+    const broadcast = snap.data();
+    
+    // Load Telegram Settings
+    const tgDoc = await getDoc(doc(db, "settings", "telegram"));
+    if (!tgDoc.exists()) throw new Error("Telegram settings are not configured in Firestore.");
+    
+    const tgData = tgDoc.data();
+    const botToken = tgData.botToken;
+    const channelUsername = tgData.channelUsername;
+    const groupUsername = tgData.groupUsername;
+    
+    if (!botToken) throw new Error("Telegram Bot Token is missing in settings.");
+
+    // Determine target chat ID
+    let chatId = "";
+    if (isTest) {
+      chatId = testTargetOverride || groupUsername || channelUsername;
+    } else {
+      chatId = channelUsername; // Default to Channel for channel broadcasts
+    }
+
+    if (!chatId) throw new Error("No target Chat ID (Channel/Group Username) found.");
+    
+    // Ensure chatId starts with @ if it's a public channel name and doesn't start with @ or -
+    if (!chatId.startsWith("@") && !chatId.startsWith("-") && isNaN(Number(chatId))) {
+      chatId = `@${chatId}`;
+    }
+
+    const origin = broadcast.origin || "http://localhost:3000";
+
+    // Build the inline keyboard markup
+    const inlineKeyboard: any[] = [];
+    if (broadcast.buttons && Array.isArray(broadcast.buttons)) {
+      broadcast.buttons.forEach((row: any, rIdx: number) => {
+        const rowBtns: any[] = [];
+        row.forEach((btn: any, cIdx: number) => {
+          const trackingUrl = `${origin}/api/tg-click?broadcastId=${broadcastId}&row=${rIdx}&col=${cIdx}`;
+          rowBtns.push({
+            text: btn.text,
+            url: trackingUrl
+          });
+        });
+        if (rowBtns.length > 0) {
+          inlineKeyboard.push(rowBtns);
+        }
+      });
+    }
+
+    let telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const body: any = {
+      chat_id: chatId,
+      reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
+    };
+
+    const textMessage = broadcast.message || "";
+
+    // Image vs Text
+    if (broadcast.imageUrl) {
+      telegramUrl = `https://api.telegram.org/bot${botToken}/sendPhoto`;
+      body.photo = broadcast.imageUrl;
+      body.caption = textMessage;
+    } else {
+      body.text = textMessage;
+    }
+
+    const res = await fetch(telegramUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    const resJson = await res.json();
+    if (!resJson.ok) {
+      throw new Error(`Telegram Bot API Error: ${resJson.description || "Unknown error"}`);
+    }
+
+    // Update status in Firestore (only if not a test send)
+    if (!isTest) {
+      await setDoc(docRef, {
+        status: "Sent",
+        sentTime: new Date().toISOString()
+      }, { merge: true });
+    }
+
+    return resJson;
+  }
+
+  // Periodic scheduler to check for and send scheduled broadcasts (every 60 seconds)
+  setInterval(async () => {
+    try {
+      const db = getDb();
+      const broadcastsRef = collection(db, "telegram_broadcasts");
+      const q = query(
+        broadcastsRef,
+        where("status", "==", "Scheduled")
+      );
+      const snap = await getDocs(q);
+      const now = new Date();
+
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data();
+        if (data.scheduledAt) {
+          const schedTime = new Date(data.scheduledAt);
+          if (schedTime <= now) {
+            console.log(`[Scheduler] Sending scheduled broadcast: ${docSnap.id}`);
+            try {
+              await sendTelegramBroadcastById(docSnap.id);
+            } catch (err: any) {
+              console.error(`[Scheduler Error] Failed to send broadcast ${docSnap.id}:`, err.message);
+              // Mark as Failed so we don't try forever
+              await setDoc(docSnap.ref, {
+                status: "Failed",
+                error: err.message || "Failed to deliver scheduled broadcast"
+              }, { merge: true });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("[Scheduler Error] Failed checking scheduled broadcasts:", error);
+    }
+  }, 60000);
+
+  // AI Generation endpoint for Telegram Broadcasts
+  app.post("/api/admin/telegram-broadcast/generate-ai", async (req, res) => {
+    try {
+      const { prompt, language, tone, length, action, originalText } = req.body;
+      
+      const supportDoc = await getDoc(doc(db, "settings", "support"));
+      const supportData = supportDoc.exists() ? supportDoc.data() : {};
+      const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.status(400).json({ error: "No Gemini API Key configured in server or support settings." });
+      }
+
+      const model = supportData.geminiModel || "gemini-3.5-flash";
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      let systemInstruction = `You are a professional copywriter, Telegram community manager, and growth hacker.
+Your task is to write high-converting, extremely engaging, visually appealing messages specifically for a Telegram Channel or Group.
+Use proper Telegram text formatting:
+- Bold for headings or emphasis (e.g. use **text** for bold).
+- Tasteful and relevant emojis to increase readability and excitement.
+- Bulleted lists or numbered lists to make information scannable.
+- Clear and exciting Call to Actions (CTAs).
+- Avoid any explanations, introductory text (like "Here is your post:"), or closing text. Return ONLY the final message content itself.`;
+
+      let userPrompt = "";
+      if (action === "improve" && originalText) {
+        userPrompt = `Please improve the following message to make it more engaging, compelling, and high-converting.
+Tone: ${tone}
+Language: ${language}
+Length: ${length}
+
+Original message:
+"""
+${originalText}
+"""`;
+      } else if (action === "regenerate" && originalText) {
+        userPrompt = `Please regenerate a completely unique, fresh variation of the following message.
+Tone: ${tone}
+Language: ${language}
+Length: ${length}
+
+Original message:
+"""
+${originalText}
+"""`;
+      } else {
+        userPrompt = `Create a completely new message for a Telegram broadcast.
+Topic / Prompt: ${prompt || "General exciting update, game release, or community reward announcement"}
+Tone: ${tone}
+Language: ${language}
+Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet points, long = full detailed newsletter/announcement with headings and bullet points)`;
+      }
+
+      const response = await safeGenerateContent(ai, {
+        model,
+        contents: userPrompt,
+        config: {
+          systemInstruction,
+        }
+      });
+
+      const text = response.text ? response.text.trim() : "";
+      res.json({ success: true, text });
+    } catch (error: any) {
+      console.error("Error generating Telegram broadcast:", error);
+      res.status(500).json({ error: error.message || "Failed to generate AI content" });
+    }
+  });
+
+  // Save/Broadcast POST handler
+  app.post("/api/admin/telegram-broadcast/broadcast", async (req, res) => {
+    try {
+      const payload = req.body;
+      const db = getDb();
+      const broadcastsRef = collection(db, "telegram_broadcasts");
+      
+      let docId = payload.id;
+      let docRef;
+
+      const broadcastData = {
+        message: payload.message || "",
+        language: payload.language || "English",
+        tone: payload.tone || "Exciting",
+        length: payload.length || "Medium",
+        imageUrl: payload.imageUrl || "",
+        thumbnailUrl: payload.thumbnailUrl || "",
+        buttons: payload.buttons || [],
+        status: payload.status || "Draft",
+        scheduledAt: payload.scheduledAt || null,
+        createdTime: payload.createdTime || new Date().toISOString(),
+        createdBy: payload.createdBy || "Admin",
+        sentTime: payload.sentTime || null,
+        totalClicks: payload.totalClicks || 0,
+        miniAppOpens: payload.miniAppOpens || 0,
+        origin: payload.origin || "http://localhost:3000"
+      };
+
+      if (docId) {
+        docRef = doc(db, "telegram_broadcasts", docId);
+        await setDoc(docRef, broadcastData, { merge: true });
+      } else {
+        docRef = await addDoc(broadcastsRef, broadcastData);
+        docId = docRef.id;
+      }
+
+      // Handle the actions
+      if (payload.action === "send_now") {
+        try {
+          await sendTelegramBroadcastById(docId, false);
+          res.json({ success: true, id: docId, status: "Sent" });
+        } catch (err: any) {
+          console.error("Error sending live broadcast:", err);
+          res.status(400).json({ error: "Failed to send to Telegram: " + err.message });
+        }
+      } else if (payload.action === "send_test") {
+        try {
+          await sendTelegramBroadcastById(docId, true, payload.testTarget);
+          res.json({ success: true, id: docId, status: "Test Sent" });
+        } catch (err: any) {
+          console.error("Error sending test broadcast:", err);
+          res.status(400).json({ error: "Failed to send test: " + err.message });
+        }
+      } else {
+        // Just saved draft or schedule
+        res.json({ success: true, id: docId, status: broadcastData.status });
+      }
+    } catch (error: any) {
+      console.error("Error in broadcast endpoint:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // List all Telegram broadcasts
+  app.get("/api/admin/telegram-broadcast/list", async (req, res) => {
+    try {
+      const db = getDb();
+      const broadcastsRef = collection(db, "telegram_broadcasts");
+      const qSnap = await getDocs(query(broadcastsRef, orderBy("createdTime", "desc")));
+      const list = qSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      res.json({ success: true, list });
+    } catch (error: any) {
+      console.error("Error fetching telegram broadcast list:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete specific Telegram broadcast
+  app.delete("/api/admin/telegram-broadcast/:id", async (req, res) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const docRef = doc(db, "telegram_broadcasts", id);
+      await deleteDoc(docRef);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting broadcast:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Public Click/Open tracking redirect endpoint
+  app.get("/api/tg-click", async (req, res) => {
+    try {
+      const { broadcastId, row, col } = req.query;
+      if (!broadcastId) {
+        return res.status(400).send("Missing broadcastId");
+      }
+
+      const db = getDb();
+      const docRef = doc(db, "telegram_broadcasts", broadcastId as string);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) {
+        return res.status(404).send("Broadcast not found");
+      }
+
+      const data = snap.data();
+      const rowIndex = parseInt(row as string, 10);
+      const colIndex = parseInt(col as string, 10);
+
+      // Extract the target URL
+      const buttonRows = data.buttons || [];
+      const buttonRow = buttonRows[rowIndex];
+      if (!buttonRow) {
+        return res.status(404).send("Button row not found");
+      }
+      const button = buttonRow[colIndex];
+      if (!button) {
+        return res.status(404).send("Button not found");
+      }
+
+      const targetUrl = button.url || "#";
+
+      // Increment click counters in Firestore
+      const isMiniApp = button.action === "mini_app";
+      const totalClicks = (data.totalClicks || 0) + 1;
+      const miniAppOpens = (data.miniAppOpens || 0) + (isMiniApp ? 1 : 0);
+
+      // Increment button specific clicks if tracking at button level
+      const updatedButtons = [...buttonRows];
+      if (updatedButtons[rowIndex] && updatedButtons[rowIndex][colIndex]) {
+        updatedButtons[rowIndex][colIndex] = {
+          ...updatedButtons[rowIndex][colIndex],
+          clicks: (updatedButtons[rowIndex][colIndex].clicks || 0) + 1
+        };
+      }
+
+      await setDoc(docRef, {
+        totalClicks,
+        miniAppOpens,
+        buttons: updatedButtons
+      }, { merge: true });
+
+      // Redirect user to the actual target URL!
+      return res.redirect(targetUrl);
+    } catch (error: any) {
+      console.error("Error tracking telegram click:", error);
+      res.status(500).send("Error tracking redirect");
+    }
+  });
+
   // AI Message Writing improvement route
   app.post("/api/admin/broadcasts/improve", async (req, res) => {
     try {
@@ -9409,6 +9772,27 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (directSnap.exists()) {
           docRef = directRef;
           itemData = directSnap.data();
+        } else {
+          const qFileId = query(collection(db, "uploads"), where("fileId", "==", id));
+          const qFileIdSnap = await getDocs(qFileId);
+          if (!qFileIdSnap.empty) {
+            docRef = qFileIdSnap.docs[0].ref;
+            itemData = qFileIdSnap.docs[0].data();
+          } else {
+            const qDriveId = query(collection(db, "uploads"), where("driveFileId", "==", id));
+            const qDriveIdSnap = await getDocs(qDriveId);
+            if (!qDriveIdSnap.empty) {
+              docRef = qDriveIdSnap.docs[0].ref;
+              itemData = qDriveIdSnap.docs[0].data();
+            } else {
+              const qAlias = query(collection(db, "uploads"), where("customAlias", "==", id));
+              const qAliasSnap = await getDocs(qAlias);
+              if (!qAliasSnap.empty) {
+                docRef = qAliasSnap.docs[0].ref;
+                itemData = qAliasSnap.docs[0].data();
+              }
+            }
+          }
         }
       }
 
@@ -9529,14 +9913,22 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // Security checking - Fraud Protection (Prevent rapid refreshes within 10 seconds)
-      const tenSecondsAgo = new Date(Date.now() - 10000).toISOString();
       const qRecent = query(
         collection(db, "shortener_sessions"),
-        where("visitorId", "==", visitorId),
-        where("createdAt", ">=", tenSecondsAgo)
+        where("visitorId", "==", visitorId)
       );
       const recentSnap = await getDocs(qRecent);
+      let hasRecent = false;
       if (!recentSnap.empty) {
+        const tenSecondsAgoTime = new Date(Date.now() - 10000).getTime();
+        hasRecent = recentSnap.docs.some(doc => {
+          const data = doc.data();
+          const createdAtTime = data.createdAt ? new Date(data.createdAt).getTime() : 0;
+          return createdAtTime >= tenSecondsAgoTime;
+        });
+      }
+
+      if (hasRecent) {
         try {
           const currentBlocked = Number(itemData.blockedClicks || 0) + 1;
           await updateDoc(docRef, { blockedClicks: currentBlocked });
@@ -9589,17 +9981,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Duplicate-click check (same visitor clicked within 24 hours)
       let isDuplicate = false;
       if (!isSelfClick) {
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         const qDup = query(
           collection(db, "shortener_sessions"),
-          where("linkId", "==", itemData.id || id),
-          where("visitorId", "==", visitorId),
-          where("createdAt", ">=", twentyFourHoursAgo),
-          where("isVerified", "==", true)
+          where("visitorId", "==", visitorId)
         );
         const dupSnap = await getDocs(qDup);
         if (!dupSnap.empty) {
-          isDuplicate = true;
+          const targetLinkId = itemData.id || id;
+          const twentyFourHoursAgoTime = new Date(Date.now() - 24 * 60 * 60 * 1000).getTime();
+          isDuplicate = dupSnap.docs.some(doc => {
+            const data = doc.data();
+            const createdAtTime = data.createdAt ? new Date(data.createdAt).getTime() : 0;
+            return data.linkId === targetLinkId && data.isVerified === true && createdAtTime >= twentyFourHoursAgoTime;
+          });
         }
       }
 
@@ -9876,6 +10270,27 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (directSnap.exists()) {
           docRef = directRef;
           itemData = directSnap.data();
+        } else {
+          const qFileId = query(collection(db, "uploads"), where("fileId", "==", linkId));
+          const qFileIdSnap = await getDocs(qFileId);
+          if (!qFileIdSnap.empty) {
+            docRef = qFileIdSnap.docs[0].ref;
+            itemData = qFileIdSnap.docs[0].data();
+          } else {
+            const qDriveId = query(collection(db, "uploads"), where("driveFileId", "==", linkId));
+            const qDriveIdSnap = await getDocs(qDriveId);
+            if (!qDriveIdSnap.empty) {
+              docRef = qDriveIdSnap.docs[0].ref;
+              itemData = qDriveIdSnap.docs[0].data();
+            } else {
+              const qAlias = query(collection(db, "uploads"), where("customAlias", "==", linkId));
+              const qAliasSnap = await getDocs(qAlias);
+              if (!qAliasSnap.empty) {
+                docRef = qAliasSnap.docs[0].ref;
+                itemData = qAliasSnap.docs[0].data();
+              }
+            }
+          }
         }
       }
 
@@ -11218,10 +11633,39 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     try {
       // Step 1: Firestore Lookup
       console.log(`[DEBUG DOWNLOAD ROUTE] [1/4] Firestore lookup for uploads/${fileId}...`);
-      const docRef = doc(db, "uploads", fileId);
-      const docSnap = await getDoc(docRef);
+      let docRef = doc(db, "uploads", fileId);
+      let docSnap = await getDoc(docRef);
+      let itemData: any = null;
       
-      if (!docSnap.exists()) {
+      if (docSnap.exists()) {
+        itemData = docSnap.data();
+      } else {
+        const qFileId = query(collection(db, "uploads"), where("fileId", "==", fileId));
+        const qFileIdSnap = await getDocs(qFileId);
+        if (!qFileIdSnap.empty) {
+          docRef = qFileIdSnap.docs[0].ref;
+          docSnap = qFileIdSnap.docs[0];
+          itemData = qFileIdSnap.docs[0].data();
+        } else {
+          const qDriveId = query(collection(db, "uploads"), where("driveFileId", "==", fileId));
+          const qDriveIdSnap = await getDocs(qDriveId);
+          if (!qDriveIdSnap.empty) {
+            docRef = qDriveIdSnap.docs[0].ref;
+            docSnap = qDriveIdSnap.docs[0];
+            itemData = qDriveIdSnap.docs[0].data();
+          } else {
+            const qAlias = query(collection(db, "uploads"), where("customAlias", "==", fileId));
+            const qAliasSnap = await getDocs(qAlias);
+            if (!qAliasSnap.empty) {
+              docRef = qAliasSnap.docs[0].ref;
+              docSnap = qAliasSnap.docs[0];
+              itemData = qAliasSnap.docs[0].data();
+            }
+          }
+        }
+      }
+      
+      if (!itemData) {
         console.error(`[DEBUG DOWNLOAD ROUTE] [1/4] FAILED: Document uploads/${fileId} not found.`);
         return res.status(404).send(`
           <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;text-align:center;background:#0f172a;color:white;border-radius:20px;margin-top:50px;">
@@ -11233,7 +11677,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         `);
       }
       
-      const itemData = docSnap.data();
       console.log(`[DEBUG DOWNLOAD ROUTE] [1/4] SUCCESS: Metadata retrieved for "${itemData.fileName}"`);
 
       // Validation of required fields

@@ -69,6 +69,7 @@ import {
 import React from 'react';
 import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
+import TelegramBroadcastCenter from "../components/TelegramBroadcastCenter";
 import buildInfo from "../build-info.json";
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -4044,6 +4045,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "📥 Google Drive Accounts",
               "📉 Analytics",
               "📢 Broadcast",
+              "📢 Telegram Broadcast Center",
               "💰 Verified Tasks",
               "🛡 Security Center",
               "📜 Activity Logs",
@@ -9006,6 +9008,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 </div>
               )}
             </div>
+          )}
+          {activeTab === "📢 Telegram Broadcast Center" && (
+            <TelegramBroadcastCenter />
           )}
           {activeTab === "🛡 Security Center" && (
             <div className="space-y-6">
