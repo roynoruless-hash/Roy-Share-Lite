@@ -71,6 +71,7 @@ import React from 'react';
 import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
 import TelegramBroadcastCenter from "../components/TelegramBroadcastCenter";
+import UpiGiveawayAdminManager from "../components/UpiGiveawayAdminManager";
 import buildInfo from "../build-info.json";
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -4317,6 +4318,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "📱 Telegram Settings",
               "🎁 Gift Link Generator",
               "📊 Gift Claims History",
+              "💸 UPI Giveaway",
             ].map((btn) => (
               <button
                 key={btn}
@@ -13167,6 +13169,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 </div>
               )}
             </div>
+          )}
+
+          {activeTab === "💸 UPI Giveaway" && (
+            <UpiGiveawayAdminManager />
           )}
 
           {activeTab === "📄 Ads.txt Manager" && (

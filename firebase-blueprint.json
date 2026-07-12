@@ -115,6 +115,47 @@
         "status": { "type": "string" }
       },
       "required": ["userId", "username", "telegramId", "giftId", "giftName", "claimedCode", "claimedAt", "status"]
+    },
+    "upi_giveaway": {
+      "title": "UPI Giveaway",
+      "description": "UPI Giveaway campaign created by admin",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "bannerUrl": { "type": "string" },
+        "description": { "type": "string" },
+        "totalBudget": { "type": "number" },
+        "totalWinners": { "type": "number" },
+        "minReward": { "type": "number" },
+        "maxReward": { "type": "number" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["Draft", "Live", "Paused", "Ended"] },
+        "entryRules": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "winnersDrawn": { "type": "boolean" }
+      },
+      "required": ["title", "bannerUrl", "totalBudget", "totalWinners", "minReward", "maxReward", "startDate", "endDate", "status", "entryRules", "createdAt"]
+    },
+    "upi_giveaway_entry": {
+      "title": "UPI Giveaway Entry",
+      "description": "User entry for a UPI Giveaway campaign",
+      "type": "object",
+      "properties": {
+        "giveawayId": { "type": "string" },
+        "telegramId": { "type": "string" },
+        "username": { "type": "string" },
+        "firstName": { "type": "string" },
+        "upiId": { "type": "string" },
+        "qrUrl": { "type": "string" },
+        "qrPath": { "type": "string" },
+        "entryTime": { "type": "string" },
+        "status": { "type": "string" },
+        "rewardAmount": { "type": "number" },
+        "paymentStatus": { "type": "string" },
+        "paidAt": { "type": "string" }
+      },
+      "required": ["giveawayId", "telegramId", "entryTime", "status"]
     }
   },
   "firestore": {
@@ -145,6 +186,14 @@
     "/gift_claims/{claimId}": {
       "schema": "gift_claim",
       "description": "Collection of user gift claims history"
+    },
+    "/upi_giveaways/{giveawayId}": {
+      "schema": "upi_giveaway",
+      "description": "Collection of UPI giveaways"
+    },
+    "/upi_giveaway_entries/{entryId}": {
+      "schema": "upi_giveaway_entry",
+      "description": "Collection of UPI giveaway entries"
     }
   }
 }

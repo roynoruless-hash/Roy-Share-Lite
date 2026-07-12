@@ -15,6 +15,7 @@ import { getStorage } from "firebase-admin/storage";
 fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] Vite import removed\n`);
 import { getDb } from "./src/lib/firebase";
 import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch } from "firebase/firestore";
+import upiGiveawayRouter from "./src/routes/upiGiveaway";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "royshare_aes_256_encryption_key_32bytes_long!";
 const hashKey = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
@@ -213,6 +214,9 @@ async function startServer() {
   debugLog("startServer: Initializing Express app...");
   const app = express();
   app.use(express.json({ limit: '10mb' }));
+
+  // Register UPI Giveaway Router
+  app.use("/api/upi-giveaway", upiGiveawayRouter);
 
   // Global Request Logger
   app.use((req, res, next) => {
