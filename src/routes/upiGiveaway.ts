@@ -14,8 +14,10 @@ import {
   where, 
   updateDoc,
   deleteDoc,
-  writeBatch
+  writeBatch,
+  Timestamp
 } from "firebase/firestore";
+import { parseInKolkata, getGiveawayTimingStatus } from "../lib/dateUtils";
 
 const router = express.Router();
 
@@ -210,17 +212,11 @@ router.post("/submit-entry", async (req: any, res: any) => {
     }
 
     const giveaway = giveawayDoc.data();
-    if (giveaway.status !== "Live") {
-      return res.status(400).json({ success: false, error: `This giveaway is currently ${giveaway.status.toLowerCase()}` });
-    }
-
-    // Validate dates
-    const now = new Date();
-    if (giveaway.startDate && now < new Date(giveaway.startDate)) {
-      return res.status(400).json({ success: false, error: "This giveaway has not started yet." });
-    }
-    if (giveaway.endDate && now > new Date(giveaway.endDate)) {
-      return res.status(400).json({ success: false, error: "This giveaway has already ended." });
+    
+    // Validate status and dates using getGiveawayTimingStatus
+    const timingStatus = getGiveawayTimingStatus({ id: giveawayDoc.id, ...giveaway });
+    if (timingStatus.status !== "Active") {
+      return res.status(400).json({ success: false, error: timingStatus.message });
     }
 
     // Check Duplicate Telegram ID & accounts for SAME giveaway (Always active to prevent multi-entries)
@@ -328,8 +324,8 @@ router.post("/save-giveaway", async (req: any, res: any) => {
       totalWinners: Number(totalWinners),
       minReward: Number(minReward),
       maxReward: Number(maxReward),
-      startDate,
-      endDate,
+      startDate: Timestamp.fromDate(parseInKolkata(startDate)),
+      endDate: Timestamp.fromDate(parseInKolkata(endDate)),
       status: status || "Draft",
       entryRules: entryRules || {
         telegramLoginRequired: true,

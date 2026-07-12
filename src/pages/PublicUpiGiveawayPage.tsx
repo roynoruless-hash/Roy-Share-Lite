@@ -21,6 +21,7 @@ import {
   Eye
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { parseInKolkata, formatFriendlyKolkata, getGiveawayTimingStatus } from "../lib/dateUtils";
 
 interface PublicUpiGiveawayPageProps {
   giveawayId: string;
@@ -56,18 +57,20 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack }: PublicUpiG
     if (!giveawayId) return;
 
     const docRef = doc(db, "upi_giveaways", giveawayId);
-    getDoc(docRef).then((snap) => {
+    const unsub = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
         setGiveaway(snap.data());
       } else {
         setError("This UPI Giveaway campaign was not found or has been deleted.");
       }
       setLoading(false);
-    }).catch((err) => {
+    }, (err) => {
       console.error("Error fetching giveaway:", err);
       setError("Failed to connect to the database.");
       setLoading(false);
     });
+
+    return unsub;
   }, [giveawayId]);
 
   // Sync Existing Entry
@@ -100,7 +103,8 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack }: PublicUpiG
     if (!giveaway?.endDate) return;
 
     const calculateTimeLeft = () => {
-      const difference = +new Date(giveaway.endDate) - +new Date();
+      const parsedEnd = parseInKolkata(giveaway.endDate);
+      const difference = +parsedEnd - +new Date();
       if (difference <= 0) {
         setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true });
         return;
@@ -418,103 +422,150 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack }: PublicUpiG
             </div>
 
           </div>
-        ) : giveawayIsEnded ? (
-          <div className="bg-slate-900/60 border border-slate-800 p-8 rounded-3xl text-center text-slate-400 text-sm space-y-3">
-            <AlertCircle className="w-10 h-10 mx-auto text-slate-500" />
-            <h3 className="font-bold text-white">Campaign Closed</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">Submissions for this giveaway are closed. Stay tuned for our next exciting giveaway campaigns!</p>
-          </div>
-        ) : (
-          
-          /* Form Submission Block */
-          <form onSubmit={handleSubmitEntry} className="bg-slate-900/50 border border-slate-800 p-6 rounded-3xl space-y-6 shadow-2xl">
-            <div className="border-b border-slate-800 pb-3">
-              <h3 className="font-black text-sm text-white flex items-center gap-1.5">
-                <Trophy className="w-4.5 h-4.5 text-yellow-400" />
-                Submit Your Entry Details
-              </h3>
-              <p className="text-slate-400 text-[10px]">Please complete the verified field(s) below to enroll.</p>
-            </div>
-
-            {/* Notifications inside Form */}
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3.5 rounded-xl flex items-center gap-2.5 text-xs">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
+        ) : (() => {
+          const timing = getGiveawayTimingStatus(giveaway);
+          if (timing.status === "Draft") {
+            return (
+              <div className="bg-amber-500/10 border border-amber-500/20 p-8 rounded-3xl text-center text-amber-400 text-sm space-y-3">
+                <AlertCircle className="w-10 h-10 mx-auto text-amber-500 animate-pulse" />
+                <h3 className="font-bold text-white">Giveaway Draft</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
               </div>
-            )}
-            {successMsg && (
-              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3.5 rounded-xl flex items-center gap-2.5 text-xs">
-                <CheckCircle className="w-4 h-4 shrink-0" />
-                <span>{successMsg}</span>
+            );
+          }
+          if (timing.status === "NotStarted") {
+            return (
+              <div className="bg-blue-500/10 border border-blue-500/20 p-8 rounded-3xl text-center text-blue-400 text-sm space-y-3">
+                <Clock className="w-10 h-10 mx-auto text-blue-500" />
+                <h3 className="font-bold text-white">Not Started Yet</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
+                {giveaway.startDate && (
+                  <p className="text-[11px] text-slate-500 font-mono mt-2">
+                    Starts at: {formatFriendlyKolkata(giveaway.startDate)}
+                  </p>
+                )}
               </div>
-            )}
-
-            {/* Field: UPI ID */}
-            {allowUpiInput && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300 flex justify-between">
-                  <span>Enter Your UPI ID</span>
-                  <span className="text-[10px] text-slate-500 font-bold font-mono">Example: user@upi</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., paytmuser@paytm"
-                  value={upiId}
-                  onChange={(e) => setUpiId(e.target.value)}
-                  className="w-full bg-slate-950/80 border border-slate-800 px-4 py-3.5 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 transition"
-                />
+            );
+          }
+          if (timing.status === "Paused") {
+            return (
+              <div className="bg-amber-500/10 border border-amber-500/20 p-8 rounded-3xl text-center text-amber-400 text-sm space-y-3">
+                <AlertCircle className="w-10 h-10 mx-auto text-amber-500" />
+                <h3 className="font-bold text-white">Giveaway Paused</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
               </div>
-            )}
+            );
+          }
+          if (timing.status === "Ended") {
+            return (
+              <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-3xl text-center text-red-400 text-sm space-y-3">
+                <AlertCircle className="w-10 h-10 mx-auto text-red-500" />
+                <h3 className="font-bold text-white">Giveaway Ended</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
+              </div>
+            );
+          }
+          if (timing.status === "Completed" || timing.status === "Drawing") {
+            return (
+              <div className="bg-purple-500/10 border border-purple-500/20 p-8 rounded-3xl text-center text-purple-400 text-sm space-y-3">
+                <Trophy className="w-10 h-10 mx-auto text-purple-500" />
+                <h3 className="font-bold text-white">Campaign Closed</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
+              </div>
+            );
+          }
 
-            {/* Field: QR Code Upload */}
-            {allowQrUpload && (
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300 block">Upload Payment QR Code</label>
-                <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-850 flex items-center gap-4">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    id="qr-file"
-                    onChange={handleQrUpload}
-                    className="hidden"
-                  />
-                  <label
-                    htmlFor="qr-file"
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-xs font-bold text-slate-200 rounded-lg cursor-pointer flex items-center gap-1.5 transition shrink-0"
-                  >
-                    <QrCode className="w-3.5 h-3.5" />
-                    {uploadingQr ? "Uploading..." : "Select QR"}
-                  </label>
+          return (
+            /* Form Submission Block */
+            <form onSubmit={handleSubmitEntry} className="bg-slate-900/50 border border-slate-800 p-6 rounded-3xl space-y-6 shadow-2xl">
+              <div className="border-b border-slate-800 pb-3">
+                <h3 className="font-black text-sm text-white flex items-center gap-1.5">
+                  <Trophy className="w-4.5 h-4.5 text-yellow-400" />
+                  Submit Your Entry Details
+                </h3>
+                <p className="text-slate-400 text-[10px]">Please complete the verified field(s) below to enroll.</p>
+              </div>
 
-                  {qrUrl ? (
-                    <div className="relative shrink-0 w-11 h-11 rounded border border-slate-700 bg-slate-900 overflow-hidden">
-                      <img src={qrUrl} alt="QR Preview" className="w-full h-full object-cover" />
-                    </div>
-                  ) : (
-                    <span className="text-slate-500 text-[11px]">No QR code uploaded yet</span>
-                  )}
+              {/* Notifications inside Form */}
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3.5 rounded-xl flex items-center gap-2.5 text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{error}</span>
                 </div>
-              </div>
-            )}
-
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={submitting || uploadingQr}
-              className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-black rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/20 cursor-pointer"
-            >
-              {submitting ? (
-                <Loader2 className="w-5 h-5 text-white animate-spin" />
-              ) : (
-                <>
-                  <Send className="w-4.5 h-4.5" />
-                  Enroll In Giveaway 🍀
-                </>
               )}
-            </button>
-          </form>
-        )}
+              {successMsg && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3.5 rounded-xl flex items-center gap-2.5 text-xs">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  <span>{successMsg}</span>
+                </div>
+              )}
+
+              {/* Field: UPI ID */}
+              {allowUpiInput && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex justify-between">
+                    <span>Enter Your UPI ID</span>
+                    <span className="text-[10px] text-slate-500 font-bold font-mono">Example: user@upi</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g., paytmuser@paytm"
+                    value={upiId}
+                    onChange={(e) => setUpiId(e.target.value)}
+                    className="w-full bg-slate-950/80 border border-slate-800 px-4 py-3.5 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 transition"
+                  />
+                </div>
+              )}
+
+              {/* Field: QR Code Upload */}
+              {allowQrUpload && (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-300 block">Upload Payment QR Code</label>
+                  <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-850 flex items-center gap-4">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      id="qr-file"
+                      onChange={handleQrUpload}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="qr-file"
+                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-xs font-bold text-slate-200 rounded-lg cursor-pointer flex items-center gap-1.5 transition shrink-0"
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      {uploadingQr ? "Uploading..." : "Select QR"}
+                    </label>
+
+                    {qrUrl ? (
+                      <div className="relative shrink-0 w-11 h-11 rounded border border-slate-700 bg-slate-900 overflow-hidden">
+                        <img src={qrUrl} alt="QR Preview" className="w-full h-full object-cover" />
+                      </div>
+                    ) : (
+                      <span className="text-slate-500 text-[11px]">No QR code uploaded yet</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={submitting || uploadingQr}
+                className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-black rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/20 cursor-pointer"
+              >
+                {submitting ? (
+                  <Loader2 className="w-5 h-5 text-white animate-spin" />
+                ) : (
+                  <>
+                    <Send className="w-4.5 h-4.5" />
+                    Enroll In Giveaway 🍀
+                  </>
+                )}
+              </button>
+            </form>
+          );
+        })()}
 
       </main>
 

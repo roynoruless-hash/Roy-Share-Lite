@@ -42,6 +42,7 @@ import {
   ArrowRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { parseInKolkata, formatInKolkata, formatFriendlyKolkata } from "../lib/dateUtils";
 
 export default function UpiGiveawayAdminManager() {
   const [giveaways, setGiveaways] = useState<any[]>([]);
@@ -196,7 +197,7 @@ export default function UpiGiveawayAdminManager() {
     }
     if (!formStartDate) return setError("Start date & time is required.");
     if (!formEndDate) return setError("End date & time is required.");
-    if (new Date(formEndDate) <= new Date(formStartDate)) {
+    if (parseInKolkata(formEndDate) <= parseInKolkata(formStartDate)) {
       return setError("End date must be after start date.");
     }
 
@@ -280,8 +281,8 @@ export default function UpiGiveawayAdminManager() {
     setFormTotalWinners(giveaway.totalWinners || 10);
     setFormMinReward(giveaway.minReward || 10);
     setFormMaxReward(giveaway.maxReward || 100);
-    setFormStartDate(giveaway.startDate || "");
-    setFormEndDate(giveaway.endDate || "");
+    setFormStartDate(formatInKolkata(giveaway.startDate));
+    setFormEndDate(formatInKolkata(giveaway.endDate));
     setFormStatus(giveaway.status || "Draft");
     setAutoPostChannel(false);
     
@@ -538,7 +539,7 @@ export default function UpiGiveawayAdminManager() {
       e.telegramId || "",
       e.upiId || "",
       e.qrUrl || "",
-      new Date(e.entryTime).toLocaleString(),
+      formatFriendlyKolkata(e.entryTime),
       e.status || "",
       e.isDuplicateUpi ? "Yes" : "No"
     ]);
@@ -579,7 +580,7 @@ export default function UpiGiveawayAdminManager() {
       `₹${e.rewardAmount || 0}`,
       e.paymentStatus || "",
       e.qrUrl || "",
-      e.drawConfirmedAt ? new Date(e.drawConfirmedAt).toLocaleString() : ""
+      e.drawConfirmedAt ? formatFriendlyKolkata(e.drawConfirmedAt) : ""
     ]);
 
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -939,7 +940,8 @@ export default function UpiGiveawayAdminManager() {
           {giveaways.map((giveaway) => {
             const isLive = giveaway.status === "Live";
             const isCompleted = giveaway.status === "Completed" || giveaway.winnersDrawn;
-            const isEnded = giveaway.status === "Ended" || new Date() > new Date(giveaway.endDate);
+            const parsedEnd = parseInKolkata(giveaway.endDate);
+            const isEnded = giveaway.status === "Ended" || new Date() > parsedEnd;
             const statusColor = 
               giveaway.status === "Live" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" :
               giveaway.status === "Completed" ? "text-indigo-400 bg-indigo-500/10 border-indigo-500/20" :
@@ -972,7 +974,7 @@ export default function UpiGiveawayAdminManager() {
                     <h4 className="font-bold text-slate-100 text-sm truncate">{giveaway.title}</h4>
                     <p className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
                       <Calendar className="w-3.5 h-3.5" />
-                      Ends: {new Date(giveaway.endDate).toLocaleString()}
+                      Ends: {formatFriendlyKolkata(giveaway.endDate)}
                     </p>
                   </div>
                 </div>
@@ -1200,7 +1202,7 @@ export default function UpiGiveawayAdminManager() {
                                 )}
                               </td>
                               <td className="p-4 text-slate-400">
-                                {new Date(entry.entryTime).toLocaleString()}
+                                {formatFriendlyKolkata(entry.entryTime)}
                               </td>
                               <td className="p-4">
                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-black border uppercase tracking-wider ${
@@ -1452,7 +1454,7 @@ export default function UpiGiveawayAdminManager() {
                                 )}
                               </td>
                               <td className="p-4 text-slate-500">
-                                {new Date(winner.entryTime).toLocaleString()}
+                                {formatFriendlyKolkata(winner.entryTime)}
                               </td>
                               <td className="p-4">
                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-black border uppercase tracking-wider ${
@@ -1637,7 +1639,7 @@ export default function UpiGiveawayAdminManager() {
                           <div className="space-y-1">
                             <div className="flex items-center gap-3">
                               <span className="font-black text-sm text-slate-200">{log.action}</span>
-                              <span className="text-[10px] text-slate-500 font-mono">{new Date(log.timestamp).toLocaleString()}</span>
+                              <span className="text-[10px] text-slate-500 font-mono">{formatFriendlyKolkata(log.timestamp)}</span>
                             </div>
                             
                             {log.details && (
