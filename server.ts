@@ -259,20 +259,7 @@ async function startServer() {
       await setDoc(doc(db, "users", String(userId)), { uploadTestMode: true }, { merge: true });
 
       // 3. Send upload prompt message to user's chatId (which is the userId)
-      const messageText = `📤 *Send the file you want to upload.*
-
-Supported Files:
-
-📄 PDF
-📦 APK
-🎬 Video
-🎵 Audio
-🖼 Image
-📁 ZIP/RAR
-📃 Documents
-
-Maximum File Size:
-20 MB`;
+      const messageText = `📤 *Send the file you want to upload.*\n\nSupported Files:\n📄 PDF\n📦 APK\n🎬 Video\n🎵 Audio\n🖼 Image\n📁 ZIP/RAR\n📃 Documents`;
 
       const inlineKeyboard = {
           inline_keyboard: [
@@ -8707,16 +8694,28 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Find the task amount from Firestore or fallback to hardcoded REWARD_TASKS
       let amount = 0;
       let isDbTask = false;
+      let taskTitle = "Task";
+      let taskProvider = "";
       try {
         const dbTaskRef = doc(db, "tasks", taskId);
         const dbTaskSnap = await getDoc(dbTaskRef);
         if (dbTaskSnap.exists()) {
           const tData = dbTaskSnap.data();
           
-          // Direct completion permitted for all tasks temporarily
+          if (tData.status === "Pause" || tData.status === "🔴 Disabled") {
+            return res.status(400).json({ error: "This task is currently paused." });
+          }
+
+          if (tData.totalLimit && tData.totalLimit > 0) {
+            if ((tData.completedUsers || 0) >= tData.totalLimit) {
+              return res.status(400).json({ error: "Total task limit reached." });
+            }
+          }
 
           amount = Number(tData.rewardAmount) || 0;
           isDbTask = true;
+          taskTitle = tData.title || "Task";
+          taskProvider = tData.provider || "Unknown";
           
           // Increment participants, completedUsers, and totalRewardsDistributed on dynamic task
           await setDoc(dbTaskRef, {
@@ -8733,7 +8732,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).json({ error: "Invalid taskId" });
       }
 
-      // Anti-abuse: Check if already completed
+      // Anti-abuse: Check if already completed (incorporating Daily Limit and Cooldown)
+      const taskDocRef = doc(db, "tasks", taskId);
+      const tSnap = await getDoc(taskDocRef);
+      let cooldown = 30; // default 30 mins
+      let dailyLimit = 0; // 0 = unlimited
+      if (tSnap.exists()) {
+        cooldown = Number(tSnap.data().cooldown) || 30;
+        dailyLimit = Number(tSnap.data().dailyLimitPerUser) || 0;
+      }
+
       const qCheck = query(
         collection(db, "task_completions"),
         where("userId", "==", userId),
@@ -8741,9 +8749,33 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         where("status", "==", "completed")
       );
       const qSnap = await getDocs(qCheck);
+      
       if (!qSnap.empty) {
-        return res.status(400).json({ error: "Task already completed. No duplicate rewards allowed." });
+        const completions = qSnap.docs.map(d => d.data());
+        // Sort descending by date
+        completions.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+        
+        // 1. Check Cooldown
+        const lastCompletion = completions[0];
+        if (lastCompletion && cooldown > 0) {
+          const lastTime = new Date(lastCompletion.completedAt).getTime();
+          const nowTime = Date.now();
+          const diffMins = (nowTime - lastTime) / (1000 * 60);
+          if (diffMins < cooldown) {
+            return res.status(400).json({ error: `You must wait ${cooldown} minutes between completions.` });
+          }
+        }
+
+        // 2. Check Daily Limit
+        if (dailyLimit > 0) {
+          const today = new Date().toISOString().split('T')[0];
+          const todayCompletions = completions.filter(c => c.completedAt && c.completedAt.startsWith(today));
+          if (todayCompletions.length >= dailyLimit) {
+            return res.status(400).json({ error: `Daily limit of ${dailyLimit} completions reached for this task.` });
+          }
+        }
       }
+
 
       // Fetch user
       const userDocRef = doc(db, "users", userId);
@@ -11920,7 +11952,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (botToken) {
           const formattedSize = formatBytes(Number(fileSize));
           const escapedName = fileName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          const messageText = `✅ <b>Large File Uploaded Successfully</b>\n\n📄 <b>File Name:</b> <code>${escapedName}</code>\n📦 <b>File Size:</b> ${formattedSize}\n☁ <b>Storage:</b> Google Drive\n\n🔗 <b>RoyShare Link:</b> ${royshareLink}`;
+          const messageText = `✅ <b>Upload Successful</b>\n\n📄 <b>File Name:</b> <code>${escapedName}</code>\n📦 <b>File Size:</b> ${formattedSize}\n☁️ <b>Storage:</b> Google Drive\n🔗 <b>RoyShare Link:</b>\n${royshareLink}`;
           
           const rawAppUrl = process.env.APP_URL || "https://www.royshare.online";
           const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
@@ -11938,8 +11970,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
               reply_markup: {
                 inline_keyboard: [
                   [
-                    { text: "📁 My Files", web_app: { url: `${cleanAppUrl}/app?page=files&userId=${tg_id}` } },
-                    { text: "⬆️ Upload Another", web_app: { url: `${cleanAppUrl}/app?page=upload&userId=${tg_id}` } }
+                    { text: "🔗 Open Link", url: royshareLink },
+                    { text: "📋 Copy Link", callback_data: `mycontent_copy_${uniqueFileId}` }
+                  ],
+                  [
+                    { text: "📂 My Files", web_app: { url: `${cleanAppUrl}/app?page=content&userId=${tg_id}` } }
                   ]
                 ]
               }

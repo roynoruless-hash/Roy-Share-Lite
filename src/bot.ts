@@ -303,28 +303,7 @@ Type your invite code below and send, or click Skip to continue.`;
             await processAccount(botToken, chatId, user);
         } else if (msg.text === "📤 Upload File") {
             console.log("User selected Upload File");
-            const db = getDb();
-            await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: true }, { merge: true });
-            const messageText = `📤 *Send the file you want to upload.*
-
-Supported Files:
-
-📄 PDF
-📦 APK
-🎬 Video
-🎵 Audio
-🖼 Image
-📁 ZIP/RAR
-📃 Documents
-
-Maximum File Size:
-20 MB`;
-            const inlineKeyboard = {
-                inline_keyboard: [
-                    [{ text: "❌ Cancel", callback_data: "upload_back" }]
-                ]
-            };
-            await sendTelegramMessage(botToken, chatId, messageText, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+            await showUploadMenu(botToken, chatId, String(user.id));
         } else if (msg.text === "📁 My Content") {
             console.log("User selected My Content");
             await processMyContent(botToken, chatId, user);
@@ -1395,29 +1374,21 @@ async function processRealUpload(botToken: string, chatId: number, user: any, ms
     // 8. Send reply
     const displaySize = formatBytes(fileSize);
     
-    const message = `✅ File Uploaded Successfully
-
-📁 File Name: ${fileName}
-
-📦 File Size: ${displaySize}
-
-🆔 File ID: ${uniqueFileId}
-
-📅 Upload Date: ${formattedDate}
-
-🔗 File Link:
-
-${generatedLink}`;
+    const message = `✅ *Upload Successful*\n\n📄 *File Name:* ${fileName}\n📦 *File Size:* ${displaySize}\n☁️ *Storage:* Telegram\n🔗 *RoyShare Link:*\n${generatedLink}`;
 
     const inlineKeyboard = {
         inline_keyboard: [
-            [{ text: "📋 Copy Link", callback_data: `mycontent_copy_${uniqueFileId}` }],
-            [{ text: "📁 My Content", web_app: { url: getMiniAppUrl(`/app?page=content&userId=${chatId}`) } }],
-            [{ text: "📤 Upload Another File", callback_data: "upload_type_small" }]
+            [
+                { text: "🔗 Open Link", url: generatedLink },
+                { text: "📋 Copy Link", callback_data: `mycontent_copy_${uniqueFileId}` }
+            ],
+            [
+                { text: "📂 My Files", web_app: { url: getMiniAppUrl(`/app?page=content&userId=${chatId}`) } }
+            ]
         ]
     };
     
-    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
 }
 
 async function copyMessage(botToken: string, chatId: number | string, fromChatId: string | number, messageId: number | string) {
@@ -5812,17 +5783,13 @@ https://youtube.com`;
             const messageText = `📤 *Send the file you want to upload.*
 
 Supported Files:
-
 📄 PDF
 📦 APK
 🎬 Video
 🎵 Audio
 🖼 Image
 📁 ZIP/RAR
-📃 Documents
-
-Maximum File Size:
-20 MB`;
+📃 Documents`;
             if (callbackQuery.message?.message_id) {
                 try {
                     await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
@@ -6069,17 +6036,19 @@ async function showUploadMenu(botToken: string, chatId: number, userId: string, 
 
     const message = `📤 *Choose Upload Type*
 
-① 📦 *Small Files (0 MB – 20 MB)*
-⚡ Upload using Telegram Storage
+🟢 *Small File (Telegram Storage)*
+• Up to 20 MB
+• Fast upload
 
-② ☁️ *Large Files (20 MB – 10 GB)*
-☁️ Upload using your connected Google Drive`;
+🔵 *Large File (Google Drive)*
+• No size limit
+• Stored in connected Google Drive`;
 
     const inlineKeyboard = {
         inline_keyboard: [
             [
-                { text: "📦 Small Files", callback_data: "upload_type_small" },
-                { text: "☁️ Large Files", callback_data: "upload_type_large" }
+                { text: "🟢 Small File", callback_data: "upload_type_small" },
+                { text: "🔵 Large File", callback_data: "upload_type_large" }
             ],
             [
                 { text: "🔙 Back", callback_data: "upload_back" }

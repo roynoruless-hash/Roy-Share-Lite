@@ -12,12 +12,26 @@ export default function GPVerifyPage() {
   const [taskTitle, setTaskTitle] = useState("");
 
   const searchParams = new URLSearchParams(window.location.search);
-  const userId = searchParams.get("userId");
-  const taskId = searchParams.get("taskId");
+  let userId = searchParams.get("userId");
+  let taskId = searchParams.get("taskId");
+  let type = searchParams.get("type") || "gplink";
+
+  if (!userId) {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.initDataUnsafe?.user?.id) {
+      userId = String(tg.initDataUnsafe.user.id);
+    }
+  }
+
+  if (!taskId) {
+    taskId = localStorage.getItem("pending_verification_taskId");
+    const storedType = localStorage.getItem("pending_verification_type");
+    if (storedType) type = storedType;
+  }
 
   useEffect(() => {
     if (!userId || !taskId) {
-      setError("Missing userId or taskId parameters.");
+      setError("Missing userId or taskId. Please start the task from the Mini App.");
       setLoading(false);
       return;
     }
@@ -25,7 +39,9 @@ export default function GPVerifyPage() {
     const verifyTask = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`${API_BASE}/api/gplinks-tasks/verify`, {
+        const endpoint = type === "task" ? `${API_BASE}/api/earn-rewards/complete` : `${API_BASE}/api/gplinks-tasks/verify`;
+        
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -34,11 +50,14 @@ export default function GPVerifyPage() {
         });
 
         const data = await res.json();
-        if (res.ok && data.success) {
+        if (res.ok && (data.success || !data.error)) {
           setSuccess(true);
-          setRewardAmount(data.rewardAmount);
+          setRewardAmount(data.rewardAmount || data.amount || 0);
           setCurrency(data.currency || "INR");
-          setTaskTitle(data.taskTitle || "Shortener Smart Task");
+          setTaskTitle(data.taskTitle || "Reward Task Completed");
+          
+          localStorage.removeItem("pending_verification_taskId");
+          localStorage.removeItem("pending_verification_type");
         } else {
           setError(data.error || "Verification failed. Please ensure the timer has completed and you did not exit early.");
         }
@@ -51,7 +70,7 @@ export default function GPVerifyPage() {
     };
 
     verifyTask();
-  }, [userId, taskId]);
+  }, [userId, taskId, type]);
 
   const handleClose = () => {
     const tg = (window as any).Telegram?.WebApp;

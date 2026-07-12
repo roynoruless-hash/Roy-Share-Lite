@@ -580,6 +580,16 @@ export const MiniAppHome: React.FC = () => {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
+  const handleStartTask = (taskId: string, shortenerUrl: string, type: "task" | "gplink") => {
+    if (!shortenerUrl) {
+      alert("No shortener URL provided for this task.");
+      return;
+    }
+    localStorage.setItem("pending_verification_taskId", taskId);
+    localStorage.setItem("pending_verification_type", type);
+    window.location.href = shortenerUrl;
+  };
+
   // Fetch Leaderboard when that view is active
   useEffect(() => {
     if (currentView === "leaderboard") {
@@ -624,6 +634,7 @@ export const MiniAppHome: React.FC = () => {
               amount: Number(d.rewardAmount) || 0,
               status: d.status || "🟢 Active",
               description: d.description || "",
+              shortenerUrl: d.shortenerUrl || "",
             });
           });
           // Filter to active tasks
@@ -1290,7 +1301,7 @@ export const MiniAppHome: React.FC = () => {
                             </div>
                           </div>
                           <button 
-                            onClick={() => setActiveTaskId(task.id)}
+                            onClick={() => handleStartTask(task.id, task.shortenerUrl, "task")}
                             className="w-full py-3 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
                           >
                             <PlayCircle className="w-4 h-4" /> Start Task
@@ -1354,14 +1365,12 @@ export const MiniAppHome: React.FC = () => {
                                 <CheckCircle2 className="w-4 h-4" /> Reward Claimed Successfully
                               </button>
                             ) : (
-                              <a
-                                href={startUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <button 
+                                onClick={() => handleStartTask(task.id, url, "gplink")}
                                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors text-center"
                               >
                                 <Zap className="w-4 h-4" /> Start {task.provider || "Shortener"} Task
-                              </a>
+                              </button>
                             )}
                           </div>
                         );

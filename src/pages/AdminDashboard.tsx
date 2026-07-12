@@ -3651,14 +3651,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         endpoint = `/api/admin/tasks`;
         let finalForm = {
           ...taskForm,
-          rewardAmount: Number(taskForm.rewardAmount) || 0,
-          timerDuration: Number(taskForm.timerDuration) || 0,
-          totalPages: Number(taskForm.totalPages) || 0,
+          cpm: Number(taskForm.cpm) || 0,
+          targetViews: Number(taskForm.targetViews) || 0,
+          dailyLimitPerUser: Number(taskForm.dailyLimitPerUser) || 0,
+          totalLimit: Number(taskForm.totalLimit) || 0,
+          cooldown: Number(taskForm.cooldown) || 0,
+          rewardAmount: Number(taskForm.cpm) ? Number(taskForm.cpm) / 1000 : 0
         };
-        if (taskForm.adNetwork === "Monetag Mini App") {
-          (finalForm as any).provider = "monetag_mini";
-          (finalForm as any).adType = "rewarded_interstitial";
-        }
         body = finalForm;
       } else if (modalAction === "edit_task") {
         console.log("Editing task with form:", taskForm);
@@ -3666,14 +3665,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         method = "PUT";
         let finalForm = {
           ...taskForm,
-          rewardAmount: Number(taskForm.rewardAmount) || 0,
-          timerDuration: Number(taskForm.timerDuration) || 0,
-          totalPages: Number(taskForm.totalPages) || 0,
+          cpm: Number(taskForm.cpm) || 0,
+          targetViews: Number(taskForm.targetViews) || 0,
+          dailyLimitPerUser: Number(taskForm.dailyLimitPerUser) || 0,
+          totalLimit: Number(taskForm.totalLimit) || 0,
+          cooldown: Number(taskForm.cooldown) || 0,
+          rewardAmount: Number(taskForm.cpm) ? Number(taskForm.cpm) / 1000 : 0
         };
-        if (taskForm.adNetwork === "Monetag Mini App") {
-          (finalForm as any).provider = "monetag_mini";
-          (finalForm as any).adType = "rewarded_interstitial";
-        }
         body = finalForm;
       } else if (modalAction === "create_ad") {
         if (!adForm.scriptCode?.trim()) {
@@ -4296,7 +4294,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
 
             <div className="space-y-4 text-sm">
-              {/* Task Title */}
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                   Task Title *
@@ -4311,7 +4308,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 />
               </div>
 
-              {/* Task Description */}
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                   Task Description *
@@ -4325,112 +4321,162 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 />
               </div>
 
-              {/* Image URL */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Shortener Provider *
+                  </label>
+                  <select
+                    value={["GPLinks", "ShrinkMe", "Droplink", "ShrinkEarn", "Ouo.io", "Shorte.st", "AdFly"].includes(taskForm.provider) ? taskForm.provider : (taskForm.provider ? "Other" : "GPLinks")}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val !== "Other") {
+                        setTaskForm({ ...taskForm, provider: val });
+                      } else {
+                        setTaskForm({ ...taskForm, provider: "Other" });
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="GPLinks">GPLinks</option>
+                    <option value="ShrinkMe">ShrinkMe</option>
+                    <option value="Droplink">Droplink</option>
+                    <option value="ShrinkEarn">ShrinkEarn</option>
+                    <option value="Ouo.io">Ouo.io</option>
+                    <option value="Shorte.st">Shorte.st</option>
+                    <option value="AdFly">AdFly</option>
+                    <option value="Other">Other (Custom)</option>
+                  </select>
+                </div>
+                {taskForm.provider === "Other" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Custom Provider Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={taskForm.customProvider || ""}
+                      onChange={(e) => setTaskForm({ ...taskForm, customProvider: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                      placeholder="e.g. MyShortener"
+                    />
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                  Image URL (Optional)
+                  Shortener URL *
                 </label>
                 <input
-                  type="text"
-                  value={taskForm.imageUrl || ""}
-                  onChange={(e) => setTaskForm({ ...taskForm, imageUrl: e.target.value })}
+                  type="url"
+                  required
+                  value={taskForm.shortenerUrl || ""}
+                  onChange={(e) => setTaskForm({ ...taskForm, shortenerUrl: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  placeholder="https://example.com/image.png"
+                  placeholder="https://gplinks.com/..."
                 />
               </div>
 
-              {/* Reward and Timer and Pages */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Reward (INR / ₹) *
+                    CPM (₹ per 1000 Views) *
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     required
-                    value={taskForm.rewardAmount ?? ""}
-                    onChange={(e) => setTaskForm({ ...taskForm, rewardAmount: e.target.value })}
+                    value={taskForm.cpm ?? ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, cpm: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                    placeholder="e.g. 0.50"
+                    placeholder="e.g. 381"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Timer Duration (Seconds) *
+                    Total Target Views *
                   </label>
                   <input
                     type="number"
                     required
-                    value={taskForm.timerDuration ?? ""}
-                    onChange={(e) => setTaskForm({ ...taskForm, timerDuration: e.target.value })}
+                    value={taskForm.targetViews ?? ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, targetViews: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                    placeholder="e.g. 15"
+                    placeholder="e.g. 1000"
                   />
                 </div>
+              </div>
+
+              <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-4 flex items-center justify-between">
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-indigo-400 tracking-wider">Auto Calculated</span>
+                  <span className="text-sm font-semibold text-slate-300">Reward Per Completion</span>
+                </div>
+                <div className="text-xl font-black text-white">
+                  ₹{taskForm.cpm ? (Number(taskForm.cpm) / 1000).toFixed(4) : "0.0000"}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Total Pages / Steps *
+                    Daily Limit Per User
                   </label>
                   <input
                     type="number"
-                    min="1"
-                    max="20"
                     required
-                    value={taskForm.totalPages ?? ""}
-                    onChange={(e) => setTaskForm({ ...taskForm, totalPages: e.target.value })}
+                    value={taskForm.dailyLimitPerUser ?? ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, dailyLimitPerUser: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                    placeholder="e.g. 3"
+                    placeholder="e.g. 5"
                   />
                 </div>
-              </div>
-
-              {/* Status and Ad Network */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Status
+                    Total Task Limit
                   </label>
-                  <select
-                    value={taskForm.status || "🟢 Active"}
-                    onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value })}
+                  <input
+                    type="number"
+                    required
+                    value={taskForm.totalLimit ?? ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, totalLimit: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="🟢 Active">🟢 Active</option>
-                    <option value="🔴 Disabled">🔴 Disabled</option>
-                  </select>
+                    placeholder="e.g. 5000"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Ad Network / Provider
+                    Cooldown
                   </label>
                   <select
-                    value={taskForm.adNetwork || "Monetag Mini App"}
-                    onChange={(e) => setTaskForm({ ...taskForm, adNetwork: e.target.value })}
+                    value={taskForm.cooldown ?? 30}
+                    onChange={(e) => setTaskForm({ ...taskForm, cooldown: Number(e.target.value) })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                   >
-                    <option value="Monetag Mini App">Monetag Mini App</option>
-                    <option value="Monetag">Monetag Standard</option>
-                    <option value="Direct Ads">Direct Ads</option>
-                    <option value="Other">Other</option>
+                    <option value={30}>30 Minutes</option>
+                    <option value={60}>1 Hour</option>
+                    <option value={360}>6 Hours</option>
+                    <option value={1440}>24 Hours</option>
                   </select>
                 </div>
               </div>
 
-              {/* AI helper button */}
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => handleGenerateAiTask(undefined, undefined, taskForm.adNetwork)}
-                  disabled={aiGeneratingTask}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-semibold transition"
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                  Status
+                </label>
+                <select
+                  value={taskForm.status || "Active"}
+                  onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                 >
-                  {aiGeneratingTask ? "⏳ AI Generating..." : "✨ Auto-generate with AI"}
-                </button>
-                {aiError && (
-                  <p className="text-xs text-rose-400 mt-1 font-medium">{aiError}</p>
-                )}
+                  <option value="Active">🟢 Active</option>
+                  <option value="Pause">🔴 Pause</option>
+                </select>
               </div>
+
             </div>
 
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
@@ -4480,38 +4526,46 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   <span className="block text-[10px] uppercase font-bold text-slate-500">Description</span>
                   <span className="text-xs text-slate-300 block whitespace-pre-wrap mt-0.5 leading-relaxed">{taskForm.description}</span>
                 </div>
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Shortener URL</span>
+                  <a href={taskForm.shortenerUrl} target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline block mt-0.5 break-all">{taskForm.shortenerUrl}</a>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
-                  <span className="block text-[10px] uppercase font-bold text-slate-500">Reward</span>
-                  <span className="text-sm font-bold text-yellow-400 block mt-0.5">₹{taskForm.rewardAmount}</span>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Provider</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.provider === "Other" ? taskForm.customProvider : taskForm.provider}</span>
                 </div>
                 <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
-                  <span className="block text-[10px] uppercase font-bold text-slate-500">Duration</span>
-                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.timerDuration} Seconds</span>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">CPM</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">₹{taskForm.cpm}</span>
                 </div>
                 <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
-                  <span className="block text-[10px] uppercase font-bold text-slate-500">Total Steps / Pages</span>
-                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.totalPages}</span>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Reward Per Completion</span>
+                  <span className="text-sm font-bold text-yellow-400 block mt-0.5">₹{taskForm.cpm ? (Number(taskForm.cpm) / 1000).toFixed(4) : "0.0000"}</span>
+                </div>
+                <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Total Target Views</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.targetViews}</span>
+                </div>
+                <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Daily Limit Per User</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.dailyLimitPerUser}</span>
+                </div>
+                <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Total Limit</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.totalLimit}</span>
+                </div>
+                <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Cooldown</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.cooldown} Minutes</span>
                 </div>
                 <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
                   <span className="block text-[10px] uppercase font-bold text-slate-500">Status</span>
                   <span className="text-sm font-bold text-white block mt-0.5">{taskForm.status}</span>
                 </div>
               </div>
-
-              <div>
-                <span className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Ad Network</span>
-                <span className="text-xs text-slate-300 bg-slate-950 px-3 py-2 rounded-xl border border-slate-850 block">{taskForm.adNetwork || "None / Custom"}</span>
-              </div>
-
-              {taskForm.imageUrl && (
-                <div>
-                  <span className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Image Preview</span>
-                  <img src={taskForm.imageUrl} alt="Task" className="max-h-40 rounded-xl object-cover border border-slate-800" referrerPolicy="no-referrer" />
-                </div>
-              )}
             </div>
 
             <div className="flex justify-end pt-4 border-t border-slate-800">
@@ -6003,8 +6057,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             <tr>
                               <th className="px-4 py-3">Task ID</th>
                               <th className="px-4 py-3">📝 Task Name</th>
-                              <th className="px-4 py-3">💰 Reward</th>
-                              <th className="px-4 py-3">📄 Pages</th>
+                              <th className="px-4 py-3">🔗 Provider</th>
+                              <th className="px-4 py-3">💰 CPM / Reward</th>
+                              <th className="px-4 py-3">🎯 Target Views</th>
                               <th className="px-4 py-3">📌 Status</th>
                               <th className="px-4 py-3 text-right">Action</th>
                             </tr>
@@ -6021,19 +6076,30 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                 <td className="px-4 py-3 font-medium text-white">
                                   {t.title}
                                 </td>
-                                <td className="px-4 py-3 font-medium text-yellow-400">
-                                  ₹{t.rewardAmount}
+                                <td className="px-4 py-3">
+                                  <span className="bg-slate-800 text-xs px-2 py-1 rounded-md text-slate-300">{t.provider === "Other" ? t.customProvider : t.provider}</span>
                                 </td>
-                                <td className="px-4 py-3">{t.totalPages}</td>
+                                <td className="px-4 py-3 font-medium text-yellow-400">
+                                  <div className="flex flex-col">
+                                    <span>₹{t.cpm || 0} CPM</span>
+                                    <span className="text-[10px] text-slate-500 uppercase tracking-wider">₹{(Number(t.cpm || 0) / 1000).toFixed(4)} / task</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex flex-col">
+                                    <span className="text-white">{t.completedUsers || 0} / {t.targetViews || 0}</span>
+                                    <span className="text-[10px] text-slate-500 uppercase tracking-wider">Completions</span>
+                                  </div>
+                                </td>
                                 <td className="px-4 py-3">
                                   <span
                                     className={`px-2 py-1 rounded text-xs font-bold ${
-                                      t.status === "🟢 Active"
+                                      t.status === "Active" || t.status === "🟢 Active"
                                         ? "bg-emerald-500/20 text-emerald-400"
                                         : "bg-red-500/20 text-red-400"
                                     }`}
                                   >
-                                    {t.status}
+                                    {t.status === "Active" || t.status === "🟢 Active" ? "Active" : "Pause"}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3 text-right">
