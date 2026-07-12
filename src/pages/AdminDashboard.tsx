@@ -4279,6 +4279,254 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         </div>
       )}
 
+      {(modalAction === "create_task" || modalAction === "edit_task") && taskForm && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto text-slate-100">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-800">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                {modalAction === "create_task" ? "➕ Create Reward Task" : "✏️ Edit Reward Task"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setModalAction("none")}
+                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-full transition cursor-pointer font-bold text-xs"
+              >
+                ✖
+              </button>
+            </div>
+
+            <div className="space-y-4 text-sm">
+              {/* Task Title */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                  Task Title *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={taskForm.title || ""}
+                  onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  placeholder="Enter task title"
+                />
+              </div>
+
+              {/* Task Description */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                  Task Description *
+                </label>
+                <textarea
+                  required
+                  value={taskForm.description || ""}
+                  onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 h-24 resize-none"
+                  placeholder="Describe the steps to complete this task"
+                />
+              </div>
+
+              {/* Image URL */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                  Image URL (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={taskForm.imageUrl || ""}
+                  onChange={(e) => setTaskForm({ ...taskForm, imageUrl: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  placeholder="https://example.com/image.png"
+                />
+              </div>
+
+              {/* Reward and Timer and Pages */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Reward (INR / ₹) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={taskForm.rewardAmount ?? ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, rewardAmount: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                    placeholder="e.g. 0.50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Timer Duration (Seconds) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    value={taskForm.timerDuration ?? ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, timerDuration: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                    placeholder="e.g. 15"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Total Pages / Steps *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    required
+                    value={taskForm.totalPages ?? ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, totalPages: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                    placeholder="e.g. 3"
+                  />
+                </div>
+              </div>
+
+              {/* Status and Ad Network */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Status
+                  </label>
+                  <select
+                    value={taskForm.status || "🟢 Active"}
+                    onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="🟢 Active">🟢 Active</option>
+                    <option value="🔴 Disabled">🔴 Disabled</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                    Ad Network / Provider
+                  </label>
+                  <select
+                    value={taskForm.adNetwork || "Monetag Mini App"}
+                    onChange={(e) => setTaskForm({ ...taskForm, adNetwork: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="Monetag Mini App">Monetag Mini App</option>
+                    <option value="Monetag">Monetag Standard</option>
+                    <option value="Direct Ads">Direct Ads</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* AI helper button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleGenerateAiTask(undefined, undefined, taskForm.adNetwork)}
+                  disabled={aiGeneratingTask}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-semibold transition"
+                >
+                  {aiGeneratingTask ? "⏳ AI Generating..." : "✨ Auto-generate with AI"}
+                </button>
+                {aiError && (
+                  <p className="text-xs text-rose-400 mt-1 font-medium">{aiError}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setModalAction("none")}
+                className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleActionSubmit}
+                disabled={modalLoading}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition shadow-lg shadow-indigo-900/20 cursor-pointer disabled:opacity-50"
+              >
+                {modalLoading ? "⏳ Saving..." : "💾 Save Task"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalAction === "view_task" && taskForm && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto text-slate-100">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-800">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                👁 View Reward Task
+              </h3>
+              <button
+                type="button"
+                onClick={() => setModalAction("none")}
+                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-full transition cursor-pointer font-bold text-xs"
+              >
+                ✖
+              </button>
+            </div>
+
+            <div className="space-y-4 text-sm">
+              <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850 space-y-3">
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Title</span>
+                  <span className="text-sm font-semibold text-white block mt-0.5">{taskForm.title}</span>
+                </div>
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Description</span>
+                  <span className="text-xs text-slate-300 block whitespace-pre-wrap mt-0.5 leading-relaxed">{taskForm.description}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Reward</span>
+                  <span className="text-sm font-bold text-yellow-400 block mt-0.5">₹{taskForm.rewardAmount}</span>
+                </div>
+                <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Duration</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.timerDuration} Seconds</span>
+                </div>
+                <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Total Steps / Pages</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.totalPages}</span>
+                </div>
+                <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Status</span>
+                  <span className="text-sm font-bold text-white block mt-0.5">{taskForm.status}</span>
+                </div>
+              </div>
+
+              <div>
+                <span className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Ad Network</span>
+                <span className="text-xs text-slate-300 bg-slate-950 px-3 py-2 rounded-xl border border-slate-850 block">{taskForm.adNetwork || "None / Custom"}</span>
+              </div>
+
+              {taskForm.imageUrl && (
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Image Preview</span>
+                  <img src={taskForm.imageUrl} alt="Task" className="max-h-40 rounded-xl object-cover border border-slate-800" referrerPolicy="no-referrer" />
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setModalAction("none")}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition cursor-pointer text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans pt-20">
       {/* Header */}
       <div className="mb-8 border-b border-slate-800 pb-6 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
