@@ -6182,6 +6182,61 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   // TELEGRAM BROADCAST CENTER API ENDPOINTS
   // ==========================================
 
+  // Helper functions for Telegram buttons Firestore compatibility (flattening & reconstructing)
+  function flattenButtons(nested: any[][]): any[] {
+    const flat: any[] = [];
+    if (!Array.isArray(nested)) return flat;
+    
+    nested.forEach((row, rIdx) => {
+      if (!Array.isArray(row)) return;
+      row.forEach((btn, cIdx) => {
+        if (!btn) return;
+        const id = btn.id || `btn_${rIdx}_${cIdx}_${Math.random().toString(36).substring(2, 11)}`;
+        flat.push({
+          id,
+          row: rIdx,
+          text: btn.text || "",
+          action: btn.action || "mini_app",
+          url: btn.url || "",
+          callbackData: btn.callbackData || "",
+          clicks: btn.clicks || 0
+        });
+      });
+    });
+    return flat;
+  }
+
+  function reconstructButtons(flat: any[]): any[][] {
+    const nested: any[][] = [];
+    if (!Array.isArray(flat)) return nested;
+    
+    const groupedRows: { [key: number]: any[] } = {};
+    flat.forEach((btn) => {
+      const r = typeof btn.row === 'number' ? btn.row : 0;
+      if (!groupedRows[r]) {
+        groupedRows[r] = [];
+      }
+      groupedRows[r].push(btn);
+    });
+    
+    const sortedRowIndices = Object.keys(groupedRows).map(Number).sort((a, b) => a - b);
+    
+    sortedRowIndices.forEach((rIdx) => {
+      const row = groupedRows[rIdx];
+      const rowBtns = row.map(btn => ({
+        id: btn.id,
+        text: btn.text || "",
+        action: btn.action || "mini_app",
+        url: btn.url || "",
+        clicks: btn.clicks || 0,
+        callbackData: btn.callbackData || undefined
+      }));
+      nested.push(rowBtns);
+    });
+    
+    return nested;
+  }
+
   // Helper function to deliver Telegram Broadcast by ID
   async function sendTelegramBroadcastById(broadcastId: string, isTest = false, testTargetOverride?: string) {
     const db = getDb();
@@ -6219,10 +6274,22 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
     const origin = broadcast.origin || "http://localhost:3000";
 
-    // Build the inline keyboard markup
+    // Build the inline keyboard markup from flat array stored in Firestore
     const inlineKeyboard: any[] = [];
     if (broadcast.buttons && Array.isArray(broadcast.buttons)) {
-      broadcast.buttons.forEach((row: any, rIdx: number) => {
+      const groupedRows: { [key: number]: any[] } = {};
+      broadcast.buttons.forEach((btn: any) => {
+        const r = typeof btn.row === 'number' ? btn.row : 0;
+        if (!groupedRows[r]) {
+          groupedRows[r] = [];
+        }
+        groupedRows[r].push(btn);
+      });
+
+      const sortedRowIndices = Object.keys(groupedRows).map(Number).sort((a, b) => a - b);
+
+      sortedRowIndices.forEach((rIdx) => {
+        const row = groupedRows[rIdx];
         const rowBtns: any[] = [];
         row.forEach((btn: any, cIdx: number) => {
           const trackingUrl = `${origin}/api/tg-click?broadcastId=${broadcastId}&row=${rIdx}&col=${cIdx}`;
@@ -6407,7 +6474,7 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
         length: payload.length || "Medium",
         imageUrl: payload.imageUrl || "",
         thumbnailUrl: payload.thumbnailUrl || "",
-        buttons: payload.buttons || [],
+        buttons: flattenButtons(payload.buttons || []),
         status: payload.status || "Draft",
         scheduledAt: payload.scheduledAt || null,
         createdTime: payload.createdTime || new Date().toISOString(),
@@ -6459,7 +6526,14 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
       const db = getDb();
       const broadcastsRef = collection(db, "telegram_broadcasts");
       const qSnap = await getDocs(query(broadcastsRef, orderBy("createdTime", "desc")));
-      const list = qSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const list = qSnap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          buttons: reconstructButtons(data.buttons || [])
+        };
+      });
       res.json({ success: true, list });
     } catch (error: any) {
       console.error("Error fetching telegram broadcast list:", error);
@@ -6501,7 +6575,7 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
       const colIndex = parseInt(col as string, 10);
 
       // Extract the target URL
-      const buttonRows = data.buttons || [];
+      const buttonRows = reconstructButtons(data.buttons || []);
       const buttonRow = buttonRows[rowIndex];
       if (!buttonRow) {
         return res.status(404).send("Button row not found");
@@ -6530,7 +6604,7 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
       await setDoc(docRef, {
         totalClicks,
         miniAppOpens,
-        buttons: updatedButtons
+        buttons: flattenButtons(updatedButtons)
       }, { merge: true });
 
       // Redirect user to the actual target URL!
