@@ -11354,7 +11354,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       const appUrl = "https://www.royshare.online";
-      const redirectUri = "https://www.royshare.online/api/google-drive/callback";
+      const redirectUri = "https://royshare.online/api/google-drive/callback";
 
       const clientId = process.env.GOOGLE_CLIENT_ID;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -11469,7 +11469,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       const appUrl = "https://www.royshare.online";
-      const redirectUri = "https://www.royshare.online/api/google-drive/callback";
+      const redirectUri = "https://royshare.online/api/google-drive/callback";
       const oauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
@@ -11584,7 +11584,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      "https://www.royshare.online/api/google-drive/callback"
+      "https://royshare.online/api/google-drive/callback"
     );
 
     oauth2Client.setCredentials({
