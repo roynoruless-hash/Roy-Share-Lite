@@ -948,9 +948,11 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
 
       const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
       const telegramSettings = telegramSettingsDoc.exists() ? telegramSettingsDoc.data() : {};
-      const botToken = telegramSettings.botToken;
-      let channelId = telegramSettings.channelId || -1003385031126;
-      let groupId = telegramSettings.groupId || -1003929156200;
+      const botToken = telegramSettings.botToken || process.env.TELEGRAM_BOT_TOKEN;
+      
+      // Use configured usernames if available, otherwise fallback to hardcoded IDs
+      let channelId: string | number = telegramSettings.channelUsername || -1003385031126;
+      let groupId: string | number = telegramSettings.groupUsername || -1003929156200;
 
       if (!botToken) return res.status(500).json({ error: "Bot token not configured" });
 
@@ -8717,6 +8719,59 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         response: text,
         testUrl
       });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.get("/api/admin/telegram-settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "telegram");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        res.json({ success: true, settings: snap.data() });
+      } else {
+        const defaults = {
+          channelUsername: "@RoyShareOfficial",
+          groupUsername: "@RoyShareCommunity",
+          botUsername: "@Royshareearn_bot",
+          updatedAt: new Date().toISOString()
+        };
+        await setDoc(docRef, defaults);
+        res.json({ success: true, settings: defaults });
+      }
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.put("/api/admin/telegram-settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "telegram");
+      await setDoc(docRef, { ...req.body, updatedAt: new Date().toISOString() });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Public endpoint for telegram settings
+  app.get("/api/telegram-settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "telegram");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        res.json({ success: true, settings: snap.data() });
+      } else {
+        res.json({ 
+          success: true, 
+          settings: { 
+            channelUsername: "@RoyShareOfficial", 
+            groupUsername: "@RoyShareCommunity",
+            botUsername: "@Royshareearn_bot"
+          } 
+        });
+      }
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
     }

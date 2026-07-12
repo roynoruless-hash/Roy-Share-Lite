@@ -67,6 +67,20 @@ interface MembershipVerificationProps {
 const MembershipVerification: React.FC<MembershipVerificationProps> = ({ user }) => {
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tgSettings, setTgSettings] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/telegram-settings`);
+        const data = await res.json();
+        if (data.success) setTgSettings(data.settings);
+      } catch (e) {
+        console.error("Failed to load telegram settings:", e);
+      }
+    };
+    fetchSettings();
+  }, []);
 
   const handleVerify = async () => {
     setVerifying(true);
@@ -88,6 +102,12 @@ const MembershipVerification: React.FC<MembershipVerificationProps> = ({ user })
     }
   };
 
+  const getCleanLink = (username: string) => {
+    if (!username) return "#";
+    const clean = username.replace("@", "");
+    return `https://t.me/${clean}`;
+  };
+
   return (
     <div className="min-h-screen bg-[#020617] text-white flex flex-col items-center justify-center p-6 font-sans">
       <motion.div 
@@ -105,7 +125,7 @@ const MembershipVerification: React.FC<MembershipVerificationProps> = ({ user })
 
         <div className="space-y-3">
           <a 
-            href="https://t.me/RoyShareEarn" 
+            href={getCleanLink(tgSettings?.channelUsername || "RoyShareEarn")} 
             target="_blank" 
             rel="noopener noreferrer"
             className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-2xl hover:border-blue-500/50 transition-all group"
@@ -120,7 +140,7 @@ const MembershipVerification: React.FC<MembershipVerificationProps> = ({ user })
           </a>
           
           <a 
-            href="https://t.me/RoyShareCommunity" 
+            href={getCleanLink(tgSettings?.groupUsername || "RoyShareCommunity")} 
             target="_blank" 
             rel="noopener noreferrer"
             className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-2xl hover:border-indigo-500/50 transition-all group"

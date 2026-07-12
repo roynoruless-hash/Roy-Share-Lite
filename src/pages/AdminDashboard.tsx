@@ -61,6 +61,8 @@ import {
   Monitor,
   Laptop,
   Tablet,
+  Send,
+  MessageSquare,
 } from "lucide-react";
 
 
@@ -387,6 +389,83 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [editBannerUploadProgress, setEditBannerUploadProgress] = useState(0);
   const [editThumbnailUploading, setEditThumbnailUploading] = useState(false);
   const [editThumbnailUploadProgress, setEditThumbnailUploadProgress] = useState(0);
+
+  // Telegram Official Settings State (Requested Section)
+  const [telegramOfficialSettings, setTelegramOfficialSettings] = useState<any>({
+    channelUsername: "",
+    groupUsername: "",
+    botUsername: ""
+  });
+  const [telegramOfficialLoading, setTelegramOfficialLoading] = useState(false);
+  const [telegramOfficialSaving, setTelegramOfficialSaving] = useState(false);
+  const [telegramOfficialSuccess, setTelegramOfficialSuccess] = useState("");
+  const [telegramOfficialError, setTelegramOfficialError] = useState("");
+
+  const fetchTelegramOfficialSettings = async () => {
+    setTelegramOfficialLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/telegram-settings`);
+      const data = await res.json();
+      if (data.success) setTelegramOfficialSettings(data.settings);
+    } catch (err: any) {
+      console.error("Error fetching telegram settings:", err);
+    } finally {
+      setTelegramOfficialLoading(false);
+    }
+  };
+
+  const saveTelegramOfficialSettings = async (type?: any) => {
+    setTelegramOfficialSaving(true);
+    setTelegramOfficialSuccess("");
+    setTelegramOfficialError("");
+    
+    // Validation
+    const formatUsername = (val: string) => {
+      if (!val) return "";
+      let cleaned = val.trim().replace(/\s+/g, "");
+      if (cleaned && !cleaned.startsWith("@")) cleaned = "@" + cleaned;
+      return cleaned;
+    };
+
+    const updatedSettings = {
+      channelUsername: formatUsername(telegramOfficialSettings.channelUsername),
+      groupUsername: formatUsername(telegramOfficialSettings.groupUsername),
+      botUsername: formatUsername(telegramOfficialSettings.botUsername)
+    };
+
+    // Simple validation for required fields
+    if (!updatedSettings.channelUsername || !updatedSettings.groupUsername) {
+      setTelegramOfficialError("❌ Channel and Group usernames are required");
+      setTelegramOfficialSaving(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/telegram-settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedSettings)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTelegramOfficialSettings(updatedSettings);
+        setTelegramOfficialSuccess("✅ Telegram Settings Saved Successfully");
+        setTimeout(() => setTelegramOfficialSuccess(""), 3000);
+      } else {
+        setTelegramOfficialError("❌ Failed to save settings");
+      }
+    } catch (err: any) {
+      setTelegramOfficialError("❌ Network error: " + err.message);
+    } finally {
+      setTelegramOfficialSaving(false);
+    }
+  };
+
+  const testTelegramOfficialLink = (username: string) => {
+    if (!username) return;
+    const cleanUsername = username.replace("@", "");
+    window.open(`https://t.me/${cleanUsername}`, "_blank");
+  };
 
   const fetchGoogleDriveAccounts = async () => {
     setGoogleDriveLoading(true);
@@ -3978,6 +4057,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🎮 Game Catalog",
               "➕ Add Custom Game",
               "✏️ Manage Games",
+              "📱 Telegram Settings",
             ].map((btn) => (
               <button
                 key={btn}
@@ -3989,6 +4069,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     fetchWalkthroughSettings();
                     fetchWalkthroughs();
                   }
+                  if (btn === "📱 Telegram Settings") fetchTelegramOfficialSettings();
                 }}
                 className={`px-4 py-2 hover:bg-slate-800 border border-slate-800 rounded-xl text-sm font-medium transition-colors ${activeTab === btn ? "bg-blue-600 text-white border-blue-500" : "bg-slate-900 text-slate-300"}`}
               >
@@ -12253,6 +12334,163 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               </div>
             )}
           </AnimatePresence>
+
+          {activeTab === "📱 Telegram Settings" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    📱 Telegram Configuration
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Manage your official Telegram channels, groups, and bots for verification.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Official Channel Card */}
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-xl hover:border-blue-500/30 transition-all group">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-blue-500/10 rounded-2xl group-hover:scale-110 transition-transform">
+                      <Send className="w-6 h-6 text-blue-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-white">Official Channel</h3>
+                      <p className="text-xs text-slate-500">Public broadcast channel</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Channel Username</label>
+                      <input
+                        type="text"
+                        placeholder="@RoyShareOfficial"
+                        value={telegramOfficialSettings.channelUsername}
+                        onChange={(e) => setTelegramOfficialSettings({...telegramOfficialSettings, channelUsername: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-blue-500 transition-all"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => testTelegramOfficialLink(telegramOfficialSettings.channelUsername)}
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                      >
+                        <ExternalLink size={16} /> Test Link
+                      </button>
+                      <button
+                        onClick={() => saveTelegramOfficialSettings()}
+                        disabled={telegramOfficialSaving}
+                        className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-2xl font-bold text-sm shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {telegramOfficialSaving ? <RefreshCw className="animate-spin" size={16} /> : <Save size={16} />} Save
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Community Group Card */}
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-xl hover:border-emerald-500/30 transition-all group">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-emerald-500/10 rounded-2xl group-hover:scale-110 transition-transform">
+                      <MessageSquare className="w-6 h-6 text-emerald-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-white">Community Group</h3>
+                      <p className="text-xs text-slate-500">Public discussion group</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Group Username</label>
+                      <input
+                        type="text"
+                        placeholder="@RoyShareCommunity"
+                        value={telegramOfficialSettings.groupUsername}
+                        onChange={(e) => setTelegramOfficialSettings({...telegramOfficialSettings, groupUsername: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-emerald-500 transition-all"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => testTelegramOfficialLink(telegramOfficialSettings.groupUsername)}
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                      >
+                        <ExternalLink size={16} /> Test Link
+                      </button>
+                      <button
+                        onClick={() => saveTelegramOfficialSettings()}
+                        disabled={telegramOfficialSaving}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-2xl font-bold text-sm shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {telegramOfficialSaving ? <RefreshCw className="animate-spin" size={16} /> : <Save size={16} />} Save
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bot Card */}
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-xl hover:border-purple-500/30 transition-all group">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-purple-500/10 rounded-2xl group-hover:scale-110 transition-transform">
+                      <Laptop className="w-6 h-6 text-purple-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-white">Official Bot</h3>
+                      <p className="text-xs text-slate-500">Verification & Utility bot</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Bot Username (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="@Royshareearn_bot"
+                        value={telegramOfficialSettings.botUsername}
+                        onChange={(e) => setTelegramOfficialSettings({...telegramOfficialSettings, botUsername: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-purple-500 transition-all"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => testTelegramOfficialLink(telegramOfficialSettings.botUsername)}
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                      >
+                        <ExternalLink size={16} /> Test Link
+                      </button>
+                      <button
+                        onClick={() => saveTelegramOfficialSettings()}
+                        disabled={telegramOfficialSaving}
+                        className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-2xl font-bold text-sm shadow-lg shadow-purple-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {telegramOfficialSaving ? <RefreshCw className="animate-spin" size={16} /> : <Save size={16} />} Save
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Notifications */}
+              <div className="max-w-2xl">
+                {telegramOfficialSuccess && (
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 text-sm font-bold flex items-center gap-2 animate-bounce">
+                    <span>{telegramOfficialSuccess}</span>
+                  </div>
+                )}
+                {telegramOfficialError && (
+                  <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-sm font-bold flex items-center gap-2">
+                    <span>{telegramOfficialError}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {activeTab === "📄 Ads.txt Manager" && (
             <div className="space-y-6">
