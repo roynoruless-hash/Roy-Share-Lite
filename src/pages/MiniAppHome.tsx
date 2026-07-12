@@ -587,7 +587,18 @@ export const MiniAppHome: React.FC = () => {
     }
     localStorage.setItem("pending_verification_taskId", taskId);
     localStorage.setItem("pending_verification_type", type);
-    window.location.href = shortenerUrl;
+
+    let finalUrl = shortenerUrl;
+    if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://") && !finalUrl.startsWith("/")) {
+       finalUrl = "https://" + finalUrl;
+    }
+
+    const tgApp = (window as any).Telegram?.WebApp;
+    if (finalUrl.startsWith("/") || !tgApp || !tgApp.openLink) {
+       window.location.href = finalUrl;
+    } else {
+       tgApp.openLink(finalUrl, { try_instant_view: false });
+    }
   };
 
   // Fetch Leaderboard when that view is active
@@ -637,10 +648,12 @@ export const MiniAppHome: React.FC = () => {
               shortenerUrl: d.shortenerUrl || "",
             });
           });
-          // Filter to active tasks
+          // Filter to active tasks, excluding shortener tasks
           const activeTasks = fetchedTasks.filter((t) => 
-            t.status === "🟢 Active" || 
-            String(t.status || "").toLowerCase().includes("active")
+            (t.status === "🟢 Active" || String(t.status || "").toLowerCase().includes("active")) &&
+            !t.shortenerUrl && 
+            t.provider !== "Other" && 
+            t.provider !== "GPLinks"
           );
           setTasks(activeTasks);
         })
@@ -1281,7 +1294,7 @@ export const MiniAppHome: React.FC = () => {
                     </div>
                   ) : tasks.length === 0 ? (
                     <div className="text-center py-12 text-slate-400 text-sm">
-                      No active tasks available. Check back soon!
+                      No tasks available
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -1301,7 +1314,7 @@ export const MiniAppHome: React.FC = () => {
                             </div>
                           </div>
                           <button 
-                            onClick={() => handleStartTask(task.id, task.shortenerUrl, "task")}
+                            onClick={() => setActiveTaskId(task.id)}
                             className="w-full py-3 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
                           >
                             <PlayCircle className="w-4 h-4" /> Start Task
@@ -1319,7 +1332,7 @@ export const MiniAppHome: React.FC = () => {
                     </div>
                   ) : gpTasks.length === 0 ? (
                     <div className="text-center py-12 text-slate-400 text-sm">
-                      No shortener tasks available. Check back soon!
+                      No tasks available
                     </div>
                   ) : (
                     <div className="space-y-4">

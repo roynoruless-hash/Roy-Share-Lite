@@ -161,7 +161,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
 
   // Redesign Download Page Custom States & Helpers
   const [copiedShare, setCopiedShare] = useState(false);
-  const [relatedFiles, setRelatedFiles] = useState<any[]>([]);
 
   const handleCopyShare = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -207,37 +206,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
     return mimeMap[ext] || `${ext.toUpperCase()} File`;
   };
 
-  useEffect(() => {
-    if (type === "download" && itemData?.fileName) {
-      const fetchRelated = async () => {
-        try {
-          const ext = itemData.fileName.split(".").pop()?.toLowerCase() || "";
-          const { db } = await import("../lib/firebase");
-          const { collection, getDocs, limit, query, where } = await import("firebase/firestore");
-          
-          const q = query(collection(db, "uploads"), where("status", "==", "active"), limit(12));
-          const snap = await getDocs(q);
-          const list: any[] = [];
-          snap.forEach((doc) => {
-            const data = doc.data();
-            if (doc.id !== id) {
-              list.push({ id: doc.id, ...data });
-            }
-          });
-          
-          let filtered = list.filter((f) => f.fileName?.toLowerCase().endsWith(`.${ext}`));
-          if (filtered.length < 3) {
-            const otherFiles = list.filter((f) => !f.fileName?.toLowerCase().endsWith(`.${ext}`));
-            filtered = [...filtered, ...otherFiles];
-          }
-          setRelatedFiles(filtered.slice(0, 3));
-        } catch (err) {
-          console.error("Error fetching related files:", err);
-        }
-      };
-      fetchRelated();
-    }
-  }, [type, itemData, id]);
   
   // Security
   const [securityChecked, setSecurityChecked] = useState(false);
@@ -942,40 +910,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                       </div>
                     )}
 
-                    {/* RELATED FILES SECTION */}
-                    {relatedFiles && relatedFiles.length > 0 && (
-                      <div className="space-y-3 pt-2 text-left">
-                        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <FileIcon size={12} className="text-indigo-400" /> Related Files
-                        </h4>
-                        <div className="space-y-2">
-                          {relatedFiles.map((rf) => (
-                            <a
-                              key={rf.id}
-                              href={`/download/${rf.id}`}
-                              className="flex items-center gap-3 p-3 bg-slate-950/40 hover:bg-slate-950/80 border border-white/5 rounded-xl transition group"
-                            >
-                              <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400 group-hover:bg-indigo-500/20 transition">
-                                <FileIcon size={16} />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-semibold text-slate-200 truncate group-hover:text-white transition">
-                                  {rf.fileName || "Unnamed File"}
-                                </p>
-                                <p className="text-[10px] text-slate-500 mt-0.5">
-                                  {typeof rf.fileSize === "number"
-                                    ? (rf.fileSize / (1024 * 1024)).toFixed(2) + " MB"
-                                    : rf.fileSize || "Unknown size"}
-                                </p>
-                              </div>
-                              <span className="text-[10px] font-bold text-indigo-400 opacity-60 group-hover:opacity-100 transition uppercase tracking-wider bg-indigo-500/5 group-hover:bg-indigo-500/10 px-2 py-1 rounded">
-                                View
-                              </span>
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ) : (
                   // SHORTENER FINAL CORE VIEW

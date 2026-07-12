@@ -1961,13 +1961,30 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   // User GP Links Tasks list (Only active and non-expired tasks)
   app.get("/api/gplinks-tasks", async (req, res) => {
     try {
-      const q = query(collection(db, "gplinks_tasks"));
-      const snapshot = await getDocs(q);
-      const allTasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const q1 = query(collection(db, "gplinks_tasks"));
+      const snapshot1 = await getDocs(q1);
+      const q2 = query(collection(db, "tasks"));
+      const snapshot2 = await getDocs(q2);
+      
+      const allTasks = [
+        ...snapshot1.docs.map(doc => ({ id: doc.id, ...doc.data() })),
+        ...snapshot2.docs
+          .filter(doc => doc.data().shortenerUrl || (doc.data().provider && doc.data().provider !== "monetag_mini"))
+          .map(doc => {
+             const d = doc.data();
+             return {
+               id: doc.id,
+               ...d,
+               cpmAmount: d.cpm || d.cpmAmount || (d.rewardAmount ? d.rewardAmount * 1000 : 0),
+               provider: d.customProvider || d.provider || "Unknown",
+               status: d.status,
+             };
+          })
+      ];
       
       const now = new Date();
       const activeTasks = allTasks.filter((t: any) => {
-        if (t.status !== "Active") return false;
+        if (t.status !== "Active" && t.status !== "🟢 Active" && !String(t.status || "").toLowerCase().includes("active")) return false;
         if (t.totalViewsLimit && (t.completedViews || 0) >= t.totalViewsLimit) return false;
         if (t.expiryDate && new Date(t.expiryDate) < now) return false;
         return true;
@@ -1989,14 +2006,18 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       }
 
       // 1. Fetch task
-      const taskRef = doc(db, "gplinks_tasks", taskId);
-      const taskSnap = await getDoc(taskRef);
+      let taskRef = doc(db, "gplinks_tasks", taskId);
+      let taskSnap = await getDoc(taskRef);
       if (!taskSnap.exists()) {
-        return res.status(404).json({ error: "This task campaign does not exist." });
+        taskRef = doc(db, "tasks", taskId);
+        taskSnap = await getDoc(taskRef);
+        if (!taskSnap.exists()) {
+          return res.status(404).json({ error: "This task campaign does not exist." });
+        }
       }
 
       const tData = taskSnap.data();
-      if (tData.status !== "Active") {
+      if (tData.status !== "Active" && tData.status !== "🟢 Active" && !String(tData.status || "").toLowerCase().includes("active")) {
         return res.status(400).json({ error: "This campaign is not active." });
       }
 
@@ -2032,8 +2053,11 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       }
 
       // 4. Calculate reward per view
-      const cpmAmount = Number(tData.cpmAmount) || 0;
-      const rewardAmount = cpmAmount / 1000;
+      const cpmAmount = Number(tData.cpmAmount) || Number(tData.cpm) || 0;
+      let rewardAmount = cpmAmount / 1000;
+      if (rewardAmount === 0 && tData.rewardAmount) {
+        rewardAmount = Number(tData.rewardAmount) || 0;
+      }
 
       // 5. Update task, user balance, and insert completion log
       const uData = userSnap.data();
