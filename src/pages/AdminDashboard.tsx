@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { db } from "../lib/firebase";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, where, deleteDoc, writeBatch, orderBy } from "firebase/firestore";
 import { StatCard, HealthItem } from "../components/AdminComponents";
 import {
   Zap,
@@ -1364,6 +1364,284 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       console.error(err);
     } finally {
       setTaskLogsLoading(false);
+    }
+  };
+
+  // ==========================================
+  // 🎁 Gift Rewards State & Handlers
+  // ==========================================
+  const [gifts, setGifts] = useState<any[]>([]);
+  const [giftsLoading, setGiftsLoading] = useState(false);
+  const [giftForm, setGiftForm] = useState({
+    id: "",
+    name: "",
+    imageUrl: "",
+    status: "Active" as "Active" | "Paused",
+    codesText: "",
+  });
+  const [activeGift, setActiveGift] = useState<any | null>(null);
+  const [activeGiftStats, setActiveGiftStats] = useState({
+    total: 0,
+    claimed: 0,
+    remaining: 0,
+  });
+
+  const [giftClaims, setGiftClaims] = useState<any[]>([]);
+  const [giftClaimsLoading, setGiftClaimsLoading] = useState(false);
+  const [giftClaimsSearch, setGiftClaimsSearch] = useState("");
+
+  const fetchGifts = async () => {
+    setGiftsLoading(true);
+    try {
+      const q = query(collection(db, "gifts"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      const list: any[] = [];
+      snap.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setGifts(list);
+    } catch (err) {
+      console.error("Error fetching gifts:", err);
+    } finally {
+      setGiftsLoading(false);
+    }
+  };
+
+  const fetchGiftClaims = async () => {
+    setGiftClaimsLoading(true);
+    try {
+      const q = query(collection(db, "gift_claims"), orderBy("claimedAt", "desc"));
+      const snap = await getDocs(q);
+      const list: any[] = [];
+      snap.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setGiftClaims(list);
+    } catch (err) {
+      console.error("Error fetching claims:", err);
+    } finally {
+      setGiftClaimsLoading(false);
+    }
+  };
+
+  const handleSelectGift = async (gift: any) => {
+    setActiveGift(gift);
+    setGiftsLoading(true);
+    try {
+      const codesSnap = await getDocs(collection(db, "gifts", gift.id, "codes"));
+      const allCodes: any[] = [];
+      codesSnap.forEach((cSnap) => {
+        allCodes.push(cSnap.data());
+      });
+      
+      const codesText = allCodes.map((c) => c.code).join("\n");
+      const total = allCodes.length;
+      const claimed = allCodes.filter((c) => c.claimed).length;
+      const remaining = total - claimed;
+
+      setGiftForm({
+        id: gift.id,
+        name: gift.name,
+        imageUrl: gift.imageUrl || "",
+        status: gift.status,
+        codesText,
+      });
+
+      setActiveGiftStats({
+        total,
+        claimed,
+        remaining,
+      });
+    } catch (err) {
+      console.error("Error fetching gift detail codes:", err);
+    } finally {
+      setGiftsLoading(false);
+    }
+  };
+
+  const handleResetGiftForm = () => {
+    setActiveGift(null);
+    setGiftForm({
+      id: "",
+      name: "",
+      imageUrl: "",
+      status: "Active",
+      codesText: "",
+    });
+    setActiveGiftStats({
+      total: 0,
+      claimed: 0,
+      remaining: 0,
+    });
+  };
+
+  const handleSaveGift = async () => {
+    if (!giftForm.name.trim()) {
+      alert("Gift Name is required.");
+      return;
+    }
+    setGiftsLoading(true);
+    try {
+      const parsedCodes = giftForm.codesText
+        .split("\n")
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0);
+
+      const uniqueCodes = Array.from(new Set(parsedCodes));
+
+      const giftId = doc(collection(db, "gifts")).id;
+      const giftData = {
+        name: giftForm.name.trim(),
+        imageUrl: giftForm.imageUrl.trim(),
+        status: giftForm.status,
+        totalCodes: uniqueCodes.length,
+        claimedCodes: 0,
+        remainingCodes: uniqueCodes.length,
+        createdAt: new Date().toISOString(),
+      };
+
+      await setDoc(doc(db, "gifts", giftId), giftData);
+
+      const batch = writeBatch(db);
+      uniqueCodes.forEach((code) => {
+        const codeRef = doc(db, "gifts", giftId, "codes", code);
+        batch.set(codeRef, {
+          code,
+          claimed: false,
+          claimedBy: null,
+          claimedAt: null,
+        });
+      });
+      await batch.commit();
+
+      alert("Gift saved successfully!");
+      handleResetGiftForm();
+      fetchGifts();
+    } catch (err) {
+      console.error("Error saving gift:", err);
+      alert("Failed to save gift.");
+    } finally {
+      setGiftsLoading(false);
+    }
+  };
+
+  const handleUpdateGift = async () => {
+    if (!activeGift) return;
+    if (!giftForm.name.trim()) {
+      alert("Gift Name is required.");
+      return;
+    }
+    setGiftsLoading(true);
+    try {
+      const parsedCodes = giftForm.codesText
+        .split("\n")
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0);
+
+      const uniquePastedCodes = Array.from(new Set(parsedCodes));
+
+      const codesSnap = await getDocs(collection(db, "gifts", activeGift.id, "codes"));
+      const existingCodesMap = new Map<string, any>();
+      codesSnap.forEach((cSnap) => {
+        existingCodesMap.set(cSnap.id, cSnap.data());
+      });
+
+      const batch = writeBatch(db);
+      const codesToSave = new Set<string>();
+      let claimedCodesCount = 0;
+      let remainingCodesCount = 0;
+
+      existingCodesMap.forEach((data, code) => {
+        if (data.claimed) {
+          codesToSave.add(code);
+          claimedCodesCount++;
+        } else {
+          if (uniquePastedCodes.includes(code)) {
+            codesToSave.add(code);
+            remainingCodesCount++;
+          } else {
+            batch.delete(doc(db, "gifts", activeGift.id, "codes", code));
+          }
+        }
+      });
+
+      uniquePastedCodes.forEach((code) => {
+        if (!existingCodesMap.has(code)) {
+          codesToSave.add(code);
+          batch.set(doc(db, "gifts", activeGift.id, "codes", code), {
+            code,
+            claimed: false,
+            claimedBy: null,
+            claimedAt: null,
+          });
+          remainingCodesCount++;
+        }
+      });
+
+      await batch.commit();
+
+      const totalCodesCount = claimedCodesCount + remainingCodesCount;
+      await setDoc(doc(db, "gifts", activeGift.id), {
+        name: giftForm.name.trim(),
+        imageUrl: giftForm.imageUrl.trim(),
+        status: giftForm.status,
+        totalCodes: totalCodesCount,
+        claimedCodes: claimedCodesCount,
+        remainingCodes: remainingCodesCount,
+        createdAt: activeGift.createdAt || new Date().toISOString(),
+      }, { merge: true });
+
+      alert("Gift updated successfully!");
+      handleResetGiftForm();
+      fetchGifts();
+    } catch (err) {
+      console.error("Error updating gift:", err);
+      alert("Failed to update gift.");
+    } finally {
+      setGiftsLoading(false);
+    }
+  };
+
+  const handleDeleteGift = async () => {
+    if (!activeGift) return;
+    if (!confirm("Are you sure you want to delete this gift and all its codes? This action cannot be undone.")) return;
+    setGiftsLoading(true);
+    try {
+      const codesSnap = await getDocs(collection(db, "gifts", activeGift.id, "codes"));
+      const batch = writeBatch(db);
+      codesSnap.forEach((cSnap) => {
+        batch.delete(doc(db, "gifts", activeGift.id, "codes", cSnap.id));
+      });
+      await batch.commit();
+
+      await deleteDoc(doc(db, "gifts", activeGift.id));
+
+      alert("Gift deleted successfully!");
+      handleResetGiftForm();
+      fetchGifts();
+    } catch (err) {
+      console.error("Error deleting gift:", err);
+      alert("Failed to delete gift.");
+    } finally {
+      setGiftsLoading(false);
+    }
+  };
+
+  const handleTogglePause = async (pause: boolean) => {
+    if (!activeGift) return;
+    setGiftsLoading(true);
+    try {
+      await setDoc(doc(db, "gifts", activeGift.id), {
+        status: pause ? "Paused" : "Active"
+      }, { merge: true });
+      alert(pause ? "Gift paused!" : "Gift activated!");
+      setGiftForm(prev => ({ ...prev, status: pause ? "Paused" : "Active" }));
+      fetchGifts();
+    } catch (err) {
+      console.error("Error pausing/resuming gift:", err);
+      alert("Failed to update status.");
+    } finally {
+      setGiftsLoading(false);
     }
   };
 
@@ -4175,6 +4453,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "➕ Add Custom Game",
               "✏️ Manage Games",
               "📱 Telegram Settings",
+              "🎁 Gift Rewards",
+              "📊 Gift Claims History",
             ].map((btn) => (
               <button
                 key={btn}
@@ -4187,6 +4467,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     fetchWalkthroughs();
                   }
                   if (btn === "📱 Telegram Settings") fetchTelegramOfficialSettings();
+                  if (btn === "🎁 Gift Rewards") fetchGifts();
+                  if (btn === "📊 Gift Claims History") fetchGiftClaims();
                 }}
                 className={`px-4 py-2 hover:bg-slate-800 border border-slate-800 rounded-xl text-sm font-medium transition-colors ${activeTab === btn ? "bg-blue-600 text-white border-blue-500" : "bg-slate-900 text-slate-300"}`}
               >
@@ -12730,6 +13012,365 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   {telegramOfficialSaving ? "Saving Settings..." : "Save Settings"}
                 </button>
               </div>
+            </div>
+          )}
+
+          {activeTab === "🎁 Gift Rewards" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    🎁 Gift Rewards Management
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Create, update, pause, resume and delete active gift reward items with unique claimable codes.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                {/* Left Side: Gifts List (6 cols) */}
+                <div className="lg:col-span-7 space-y-4">
+                  <div className="flex justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                    <span className="text-sm font-semibold text-white">
+                      Existing Reward Gifts ({gifts.length})
+                    </span>
+                    <button
+                      onClick={fetchGifts}
+                      disabled={giftsLoading}
+                      className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-3 py-1.5 rounded-xl transition border border-slate-700 cursor-pointer"
+                    >
+                      🔄 Refresh
+                    </button>
+                  </div>
+
+                  {giftsLoading && gifts.length === 0 ? (
+                    <div className="flex justify-center py-12">
+                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                  ) : gifts.length === 0 ? (
+                    <div className="bg-slate-900/50 border border-slate-800 p-8 rounded-2xl text-center text-slate-500">
+                      No gift rewards configured yet.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4">
+                      {gifts.map((gift) => {
+                        const lowStock = gift.remainingCodes <= 10 && gift.remainingCodes > 0;
+                        const outOfStock = gift.remainingCodes === 0;
+                        return (
+                          <div
+                            key={gift.id}
+                            onClick={() => handleSelectGift(gift)}
+                            className={`p-5 bg-slate-900/80 hover:bg-slate-800 border rounded-2xl transition cursor-pointer flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
+                              activeGift?.id === gift.id ? "border-blue-500 bg-slate-800" : "border-slate-800"
+                            }`}
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className="w-14 h-14 bg-slate-800 border border-slate-700 rounded-xl flex items-center justify-center overflow-hidden shrink-0">
+                                {gift.imageUrl ? (
+                                  <img
+                                    src={gift.imageUrl}
+                                    alt={gift.name}
+                                    className="w-full h-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <Award className="w-6 h-6 text-blue-500" />
+                                )}
+                              </div>
+                              <div>
+                                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                                  {gift.name}
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      gift.status === "Active"
+                                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                        : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                    }`}
+                                  >
+                                    {gift.status}
+                                  </span>
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-1 flex items-center gap-3">
+                                  <span>Total: <strong>{gift.totalCodes}</strong></span>
+                                  <span>Claimed: <strong>{gift.claimedCodes}</strong></span>
+                                  <span className={outOfStock ? "text-red-400 font-bold" : lowStock ? "text-amber-400 font-bold" : ""}>
+                                    Remaining: <strong>{gift.remainingCodes}</strong>
+                                  </span>
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col items-end gap-2">
+                              {outOfStock ? (
+                                <span className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/20 font-bold px-2 py-1 rounded">
+                                  Out of Stock
+                                </span>
+                              ) : lowStock ? (
+                                <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold px-2 py-1 rounded">
+                                  ⚠️ Low Stock
+                                </span>
+                              ) : null}
+                              <span className="text-[11px] text-slate-500">
+                                Click to select / edit
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Side: Create/Edit Form (5 cols) */}
+                <div className="lg:col-span-5">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 sticky top-6">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        {activeGift ? "✏️ Edit Gift Reward" : "🎁 Create Gift Reward"}
+                      </h3>
+                      {activeGift && (
+                        <button
+                          onClick={handleResetGiftForm}
+                          className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 px-2.5 py-1 rounded-lg border border-slate-700 transition cursor-pointer"
+                        >
+                          Clear / New
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                          Gift Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. RoyShare Premium Key"
+                          value={giftForm.name}
+                          onChange={(e) => setGiftForm({ ...giftForm, name: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                          Gift Image URL (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. https://domain.com/image.png"
+                          value={giftForm.imageUrl}
+                          onChange={(e) => setGiftForm({ ...giftForm, imageUrl: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                          Status
+                        </label>
+                        <select
+                          value={giftForm.status}
+                          onChange={(e) => setGiftForm({ ...giftForm, status: e.target.value as "Active" | "Paused" })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                        >
+                          <option value="Active">Active</option>
+                          <option value="Paused">Paused</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                            Gift Codes (one per line)
+                          </label>
+                          <span className="text-xs text-blue-400 font-bold bg-blue-500/10 px-2 py-0.5 rounded-full">
+                            {giftForm.codesText.split("\n").filter(Boolean).length} codes entered
+                          </span>
+                        </div>
+                        <textarea
+                          placeholder="ABCD-EFGH-IJKL&#10;QWER-TYUI-OPAS&#10;ZXCV-BNMK-HJGF"
+                          rows={6}
+                          value={giftForm.codesText}
+                          onChange={(e) => setGiftForm({ ...giftForm, codesText: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono focus:outline-none focus:border-blue-500 transition"
+                        />
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Paste multiple unique gift codes. Duplicate or blank lines are auto-removed.
+                        </p>
+                      </div>
+
+                      {activeGift && (
+                        <div className="grid grid-cols-3 gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800 text-center text-xs">
+                          <div>
+                            <p className="text-slate-500">Total</p>
+                            <p className="text-base font-bold text-white mt-0.5">{activeGiftStats.total}</p>
+                          </div>
+                          <div>
+                            <p className="text-emerald-500">Claimed</p>
+                            <p className="text-base font-bold text-emerald-400 mt-0.5">{activeGiftStats.claimed}</p>
+                          </div>
+                          <div>
+                            <p className="text-blue-500">Remaining</p>
+                            <p className="text-base font-bold text-blue-400 mt-0.5">{activeGiftStats.remaining}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="pt-4 border-t border-slate-800 flex flex-col gap-2">
+                        {!activeGift ? (
+                          <button
+                            onClick={handleSaveGift}
+                            disabled={giftsLoading}
+                            className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <Save size={16} />
+                            Save
+                          </button>
+                        ) : (
+                          <div className="space-y-2">
+                            <button
+                              onClick={handleUpdateGift}
+                              disabled={giftsLoading}
+                              className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                              <Save size={16} />
+                              Update
+                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                              {giftForm.status === "Active" ? (
+                                <button
+                                  onClick={() => handleTogglePause(true)}
+                                  disabled={giftsLoading}
+                                  className="py-2.5 bg-amber-600/10 hover:bg-amber-600/20 text-amber-400 border border-amber-600/20 font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+                                >
+                                  Pause
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleTogglePause(false)}
+                                  disabled={giftsLoading}
+                                  className="py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-600/20 font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+                                >
+                                  Resume
+                                </button>
+                              )}
+                              <button
+                                onClick={handleDeleteGift}
+                                disabled={giftsLoading}
+                                className="py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-600/20 font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "📊 Gift Claims History" && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    📊 Gift Claim History
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Review and search history of claimed gift codes by username, gift, or Telegram ID.
+                  </p>
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div className="flex flex-col md:flex-row gap-4 items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                <div className="relative flex-1 w-full">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Search by User, Gift Name, Telegram ID..."
+                    value={giftClaimsSearch}
+                    onChange={(e) => setGiftClaimsSearch(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                  />
+                </div>
+                <button
+                  onClick={fetchGiftClaims}
+                  disabled={giftClaimsLoading}
+                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2.5 rounded-xl transition border border-slate-700 whitespace-nowrap cursor-pointer"
+                >
+                  🔄 Refresh History
+                </button>
+              </div>
+
+              {giftClaimsLoading && giftClaims.length === 0 ? (
+                <div className="flex justify-center py-20">
+                  <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : giftClaims.length === 0 ? (
+                <div className="bg-slate-900/50 border border-slate-800 p-12 rounded-2xl text-center text-slate-500">
+                  No gift claims recorded yet.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {giftClaims
+                    .filter((claim) => {
+                      const s = giftClaimsSearch.toLowerCase();
+                      return (
+                        (claim.username || "").toLowerCase().includes(s) ||
+                        (claim.giftName || "").toLowerCase().includes(s) ||
+                        (claim.telegramId || "").toString().toLowerCase().includes(s)
+                      );
+                    })
+                    .map((claim) => (
+                      <div
+                        key={claim.id}
+                        className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition flex flex-col justify-between gap-4 shadow-xl"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="font-bold text-white text-lg flex items-center gap-2">
+                                <Award className="w-4 h-4 text-pink-500 shrink-0" />
+                                {claim.giftName}
+                              </h4>
+                            </div>
+                            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold px-2 py-0.5 rounded uppercase tracking-wider">
+                              {claim.status || "Claimed"}
+                            </span>
+                          </div>
+
+                          <div className="border-t border-slate-800/80 pt-3 space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">User:</span>
+                              <span className="text-white font-medium">{claim.username || "Anonymous"}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Telegram ID:</span>
+                              <span className="font-mono text-xs text-blue-400">{claim.telegramId}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-slate-400">Claimed Code:</span>
+                              <span className="font-mono text-sm bg-slate-950 px-2.5 py-1 rounded border border-slate-800 text-indigo-400 font-bold tracking-wider select-all">
+                                {claim.claimedCode}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-slate-800/80 pt-3 flex justify-between items-center text-[11px] text-slate-500">
+                          <span>Claim Date & Time</span>
+                          <span>{claim.claimedAt ? new Date(claim.claimedAt).toLocaleString() : "N/A"}</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
           )}
 

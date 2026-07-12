@@ -7,6 +7,15 @@ service cloud.firestore {
     match /settings/{settingId} {
       allow read, write: if true;
     }
+    match /gifts/{giftId} {
+      allow read, write: if true;
+    }
+    match /gifts/{giftId}/codes/{codeId} {
+      allow read, write: if true;
+    }
+    match /gift_claims/{claimId} {
+      allow read, write: if true;
+    }
     match /{document=**} {
       allow read, write: if true;
     }

@@ -58,6 +58,7 @@ const AnnouncementsPage = lazy(() => import("./AnnouncementsPage"));
 const SettingsPage = lazy(() => import("./SettingsPage"));
 const ShortenPage = lazy(() => import("./ShortenPage"));
 const RewardEarningsPage = lazy(() => import("./RewardEarningsPage"));
+const GiftRewardsPage = lazy(() => import("./GiftRewardsPage"));
 
 interface MembershipVerificationProps {
   user: any;
@@ -805,6 +806,7 @@ export const MiniAppHome: React.FC = () => {
 
   const actionButtons = [
     { id: "self-earning", label: "Self Earning", icon: Star, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
+    { id: "gift-rewards", label: "Gift Rewards", icon: Gift, color: "bg-pink-600", shadow: "shadow-pink-500/20" },
     { id: "game-earn", label: "Game & Earn", icon: PlayCircle, color: "bg-purple-600", shadow: "shadow-purple-500/20" },
     { id: "upload-file", label: "Upload File", icon: Upload, color: "bg-emerald-600", shadow: "shadow-emerald-500/20" },
     { id: "url-shortener", label: "URL Shortener", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
@@ -824,6 +826,10 @@ export const MiniAppHome: React.FC = () => {
     }
     if (id === "self-earning") {
       setCurrentView("earn-rewards");
+      return;
+    }
+    if (id === "gift-rewards") {
+      setCurrentView("gift-rewards");
       return;
     }
     if (id === "url-shortener") {
@@ -1002,6 +1008,12 @@ export const MiniAppHome: React.FC = () => {
         {currentView === "my-links" && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
             <RewardEarningsPage onBack={() => setCurrentView("dashboard")} />
+          </Suspense>
+        )}
+
+        {currentView === "gift-rewards" && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <GiftRewardsPage user={activeUser} onBack={() => setCurrentView("dashboard")} />
           </Suspense>
         )}
 

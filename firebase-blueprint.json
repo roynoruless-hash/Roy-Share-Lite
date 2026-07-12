@@ -72,6 +72,49 @@
         "origin": { "type": "string" }
       },
       "required": ["message", "language", "tone", "length", "buttons", "status", "createdTime", "createdBy"]
+    },
+    "gift": {
+      "title": "Gift",
+      "description": "A reward gift item that users can claim",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Paused"] },
+        "totalCodes": { "type": "number" },
+        "claimedCodes": { "type": "number" },
+        "remainingCodes": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "status", "totalCodes", "claimedCodes", "remainingCodes", "createdAt"]
+    },
+    "gift_code": {
+      "title": "Gift Code",
+      "description": "A single code for a reward gift",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "claimed": { "type": "boolean" },
+        "claimedBy": { "type": "string" },
+        "claimedAt": { "type": "string" }
+      },
+      "required": ["code", "claimed"]
+    },
+    "gift_claim": {
+      "title": "Gift Claim",
+      "description": "Record of a claim made by a user for a gift reward",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "telegramId": { "type": "string" },
+        "giftId": { "type": "string" },
+        "giftName": { "type": "string" },
+        "claimedCode": { "type": "string" },
+        "claimedAt": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["userId", "username", "telegramId", "giftId", "giftName", "claimedCode", "claimedAt", "status"]
     }
   },
   "firestore": {
@@ -90,6 +133,18 @@
     "/telegram_broadcasts/{broadcastId}": {
       "schema": "telegram_broadcast",
       "description": "Collection tracking Telegram Broadcast posts, scheduled tasks, and interactive clicks"
+    },
+    "/gifts/{giftId}": {
+      "schema": "gift",
+      "description": "Collection of reward gifts"
+    },
+    "/gifts/{giftId}/codes/{codeId}": {
+      "schema": "gift_code",
+      "description": "Subcollection of unique codes for a specific gift"
+    },
+    "/gift_claims/{claimId}": {
+      "schema": "gift_claim",
+      "description": "Collection of user gift claims history"
     }
   }
 }
