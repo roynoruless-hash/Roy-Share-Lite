@@ -48,6 +48,7 @@ const ReferralProgramPage = lazy(() => import("./pages/ReferralProgramPage"));
 const EnterpriseSecurityPage = lazy(() => import("./pages/EnterpriseSecurityPage"));
 const FastGlobalDeliveryPage = lazy(() => import("./pages/FastGlobalDeliveryPage"));
 const ReferralLandingPage = lazy(() => import("./pages/ReferralLandingPage"));
+const PublicGiftPage = lazy(() => import("./pages/PublicGiftPage"));
 
 import MoreMenu from "./components/MoreMenu";
 
@@ -107,6 +108,12 @@ export default function App() {
     const path = window.location.pathname;
     if (path.startsWith("/ref/") || path === "/ref" || path.startsWith("/r/") || path === "/r" || path === "/referral-success") {
       return <ReferralLandingPage />;
+    }
+
+    const giftMatch = path.match(/^\/gift\/([a-zA-Z0-9_-]+)/);
+    if (giftMatch) {
+      const giftId = giftMatch[1];
+      return <PublicGiftPage giftId={giftId} />;
     }
 
     // Check if we are in Telegram Mini App context
