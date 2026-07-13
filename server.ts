@@ -3307,6 +3307,7 @@ app.get("/watch/:token", async (req, res) => {
 
     const q = query(collection(db, "video_task_sessions"), where("token", "==", token));
     const snap = await getDocs(q);
+
     if (snap.empty) return res.status(404).send("<h1>Session not found</h1>");
 
     const sessionDoc = snap.docs[0];
@@ -3315,17 +3316,25 @@ app.get("/watch/:token", async (req, res) => {
 
     const taskSnap = await getDoc(doc(db, "video_tasks", taskId));
     if (!taskSnap.exists()) return res.status(404).send("<h1>Video task not found</h1>");
-
+    
     const taskData = taskSnap.data();
+    
     const minWatchTimeSecs = parseInt(taskData.countdown) || 30;
     const clickAdillaScript = taskData.clickAdillaScript || "";
-
+    
     const estimatedHiddenTimeSecs = (sessionData.focusLossCount || 0) * 5;
     const elapsedActiveSecs = Math.max(0, (sessionData.heartbeats || 0) * 5 - estimatedHiddenTimeSecs);
 
-    const escapeHTML = (str: any) => (str || "").toString().replace(/&/g, "\&amp;").replace(/</g, "\&lt;").replace(/>/g, "\&gt;").replace(/"/g, "\&quot;").replace(/'/g, "\&#39;");
-    res.send(`
-<!DOCTYPE html>
+    const escapeHTML = (str) => {
+      return (str || "").toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    };
+
+    res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -3335,14 +3344,11 @@ app.get("/watch/:token", async (req, res) => {
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-    body {
-      font-family: 'Inter', sans-serif;
-      background-color: #0b0f19;
-    }
+    body { font-family: 'Inter', sans-serif; background-color: #0b0f19; }
   </style>
 </head>
 <body class="min-h-screen text-slate-100 flex flex-col justify-between p-4 sm:p-6 md:p-8 bg-slate-950">
-  <!-- Header / Nav -->
+  
   <header class="max-w-2xl mx-auto w-full flex items-center justify-between py-4 border-b border-slate-800/60 mb-6">
     <div class="flex items-center gap-2">
       <span class="text-xl font-black tracking-tight text-blue-500">ROY<span class="text-white">SHARE</span></span>
@@ -3353,9 +3359,15 @@ app.get("/watch/:token", async (req, res) => {
     </div>
   </header>
 
-  <!-- Main Area -->
-  <main class="max-w-2xl mx-auto w-full flex-1 flex flex-col gap-6">
-    <!-- Info Card -->
+  <main id="app-data"
+        data-token="${escapeHTML(token)}"
+        data-user-id="${escapeHTML(sessionData.userId)}"
+        data-task-id="${escapeHTML(taskId)}"
+        data-required-seconds="${minWatchTimeSecs}"
+        data-elapsed-active-secs="${elapsedActiveSecs}"
+        data-focus-loss-count="${sessionData.focusLossCount || 0}"
+        class="max-w-2xl mx-auto w-full flex-1 flex flex-col gap-6">
+    
     <div class="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-5 md:p-6 shadow-xl relative overflow-hidden">
       <div class="absolute -top-10 -right-10 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
       
@@ -3370,18 +3382,15 @@ app.get("/watch/:token", async (req, res) => {
         </div>
       </div>
 
-      <!-- Action Box -->
       <div id="status-container" class="mt-6 p-5 bg-slate-950 rounded-2xl border border-slate-800/80 text-center flex flex-col items-center justify-center min-h-[140px]">
         <div id="timer-box" class="w-16 h-16 rounded-full bg-blue-950/40 border-4 border-blue-500 flex items-center justify-center text-2xl font-black text-white shadow-lg shadow-blue-500/10 mb-2">
           ${Math.max(0, minWatchTimeSecs - elapsedActiveSecs)}
         </div>
         <div id="status-text" class="text-sm text-slate-300 font-medium mt-1">Please watch the advertisement below. Keep this page visible.</div>
         
-        <!-- Progress Bar -->
         <div class="w-full max-w-xs bg-slate-800 rounded-full h-2 mt-4 overflow-hidden relative border border-slate-700/30">
           <div id="progress-bar" class="bg-blue-500 h-full w-0 transition-all duration-1000 ease-linear"></div>
         </div>
-        <!-- Progress Percentage & Countdown estimate -->
         <div class="flex justify-between w-full max-w-xs mt-2 text-[10px] text-slate-400">
           <span id="progress-percentage">0% completed</span>
           <span id="est-remaining">Estimated remaining: ${Math.max(0, minWatchTimeSecs - elapsedActiveSecs)}s</span>
@@ -3389,475 +3398,129 @@ app.get("/watch/:token", async (req, res) => {
       </div>
     </div>
 
-    <!-- Live Verification Timeline -->
-    <div class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4">
-      <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-        <i class="fa-solid fa-list-check text-blue-500"></i> Live Verification Timeline
-      </h3>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs" id="timeline-container">
-        <!-- Dynamically rendered timeline steps -->
-      </div>
-    </div>
-
     <!-- Ad Wrapper -->
     <div class="bg-slate-950 rounded-3xl border border-slate-800/80 p-6 flex flex-col items-center justify-center min-h-[280px] shadow-2xl relative overflow-hidden">
-      <!-- Loading placeholder -->
-      <div id="ad-placeholder" class="text-slate-400 text-sm font-medium flex flex-col items-center gap-3 w-full text-center py-8">
-        <i class="fa-solid fa-spinner fa-spin text-3xl text-blue-500"></i>
-        <span>Loading Advertisement Script...</span>
-      </div>
-      
-      <!-- Ad Output Container -->
-      <div id="ad-container" class="w-full h-full min-h-[180px] flex items-center justify-center relative z-10"></div>
-    </div>
-
-    <!-- Collapsible Diagnostics Panel -->
-    <div class="border border-slate-800/80 rounded-2xl overflow-hidden bg-slate-900/20">
-      <button onclick="toggleDebugPanel()" class="w-full p-4 flex items-center justify-between text-left hover:bg-slate-900/40 transition-all">
-        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-          <i class="fa-solid fa-bug text-yellow-500"></i> Production Debug Panel (Test Mode Only)
-        </span>
-        <i id="debug-toggle-icon" class="fa-solid fa-chevron-down text-slate-500 transition-transform"></i>
-      </button>
-      
-      <div id="debug-content" class="hidden p-4 border-t border-slate-800/80 bg-slate-950/60 text-[11px] font-mono grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="space-y-2">
-          <p><span class="text-slate-500">Session Token:</span> <span id="debug-session-token" class="text-blue-400 break-all"></span></p>
-          <p><span class="text-slate-500">Task ID:</span> <span id="debug-task-id" class="text-slate-300"></span></p>
-          <p><span class="text-slate-500">User ID:</span> <span id="debug-user-id" class="text-slate-300"></span></p>
-          <p><span class="text-slate-500">Script Loaded:</span> <span id="debug-script-loaded" class="text-slate-300">No</span></p>
-          <p><span class="text-slate-500">Script Onload Fired:</span> <span id="debug-script-onload" class="text-slate-300">No</span></p>
-          <p><span class="text-slate-500">Script Onerror Message:</span> <span id="debug-script-onerror" class="text-red-400">None</span></p>
-        </div>
-        <div class="space-y-2">
-          <p><span class="text-slate-500">Heartbeats Sent:</span> <span id="debug-heartbeats" class="text-emerald-400">0</span></p>
-          <p><span class="text-slate-500">Verification Status:</span> <span id="debug-verification-status" class="text-slate-300">Pending</span></p>
-          <p><span class="text-slate-500">Watch Time (Active):</span> <span id="debug-watch-time" class="text-slate-300">0s</span></p>
-          <p><span class="text-slate-500">Hidden Time:</span> <span id="debug-hidden-time" class="text-slate-300">0s</span></p>
-          <p><span class="text-slate-500">Page Visibility Status:</span> <span id="debug-visibility" class="text-slate-300">visible</span></p>
-          <p class="truncate"><span class="text-slate-500">Last API Response:</span> <span id="debug-last-response" class="text-slate-400">None</span></p>
-        </div>
-        <div class="col-span-1 md:col-span-2 border-t border-slate-800/80 pt-3">
-          <span class="text-slate-500 block mb-1">Diagnostics Event Logs:</span>
-          <textarea id="debug-logs" readonly class="w-full h-24 bg-slate-950 border border-slate-800 rounded-xl p-2 text-[10px] text-slate-300 focus:outline-none focus:border-slate-700 font-mono resize-none"></textarea>
-        </div>
+      <!-- Native HTML Injection for Ad Network Verification -->
+      <div id="ad-container" class="w-full h-full min-h-[180px] flex items-center justify-center relative z-10 overflow-x-auto">
+        ${clickAdillaScript || "<p class='text-slate-500 text-sm'>No ad configured.</p>"}
       </div>
     </div>
   </main>
 
-  <!-- Footer -->
   <footer class="max-w-2xl mx-auto w-full text-center py-6 border-t border-slate-800/40 mt-8 text-xs text-slate-500 flex flex-col gap-1">
     <p>RoyShare Security Protection & anti-fraud verification engines are active.</p>
-    <p>ClickAdilla Ad Provider • Session Token: ${token.substring(0, 16)}...</p>
   </footer>
 
   <script>
-    const token = ${JSON.stringify(token)};
-    const userId = ${JSON.stringify(sessionData.userId)};
-    const taskId = ${JSON.stringify(taskId)};
-    const requiredSeconds = ${minWatchTimeSecs};
-    const elapsedActiveSecs = ${elapsedActiveSecs};
-    
-    let timeLeft = Math.max(0, requiredSeconds - elapsedActiveSecs);
-    let isVerified = false;
-    let heartbeatsSent = 0;
-    let totalHeartbeatsExpected = Math.ceil(requiredSeconds / 5);
-
-    window.scriptLoaded = false;
-    window.scriptExecuted = false;
-    window.scriptOnloadFired = false;
-    window.scriptLoadErrorMsg = "";
-    
-    let currentWatchTime = elapsedActiveSecs;
-    let focusLossCount = ${sessionData.focusLossCount || 0};
-    let hiddenTime = focusLossCount * 5;
-    let lastApiResponse = "None";
-
-    const timerBox = document.getElementById("timer-box");
-    const statusText = document.getElementById("status-text");
-    const progressBar = document.getElementById("progress-bar");
-    const adContainer = document.getElementById("ad-container");
-    const adPlaceholder = document.getElementById("ad-placeholder");
-
-    // Dynamic Logs & Diagnostics
-    const debugLogs = [];
-    function addDebugLog(msg) {
-      const time = new Date().toLocaleTimeString();
-      debugLogs.push("[" + time + "] " + msg);
-      const logArea = document.getElementById("debug-logs");
-      if (logArea) {
-        logArea.value = debugLogs.join("\\n");
-        logArea.scrollTop = logArea.scrollHeight;
-      }
-    }
-
-    function toggleDebugPanel() {
-      const content = document.getElementById("debug-content");
-      const icon = document.getElementById("debug-toggle-icon");
-      if (content.classList.contains("hidden")) {
-        content.classList.remove("hidden");
-        icon.classList.add("rotate-180");
-      } else {
-        content.classList.add("hidden");
-        icon.classList.remove("rotate-180");
-      }
-    }
-
-    function refreshDebugPanel() {
-      document.getElementById("debug-session-token").innerText = token;
-      document.getElementById("debug-task-id").innerText = taskId;
-      document.getElementById("debug-user-id").innerText = userId;
-      document.getElementById("debug-script-loaded").innerText = window.scriptLoaded ? "Yes" : "No";
-      document.getElementById("debug-script-onload").innerText = window.scriptOnloadFired ? "Yes" : "No";
-      document.getElementById("debug-script-onerror").innerText = window.scriptLoadErrorMsg || "None";
-      document.getElementById("debug-heartbeats").innerText = heartbeatsSent;
-      document.getElementById("debug-verification-status").innerText = isVerified ? "Verified (Completed)" : "Pending";
-      document.getElementById("debug-last-response").innerText = typeof lastApiResponse === 'object' ? JSON.stringify(lastApiResponse) : lastApiResponse;
-      document.getElementById("debug-watch-time").innerText = currentWatchTime + "s";
-      document.getElementById("debug-hidden-time").innerText = hiddenTime + "s";
-      document.getElementById("debug-visibility").innerText = document.visibilityState;
-    }
-
-    // Timeline Configuration
-    const timelineData = {
-      session_created: { label: "Session Created", status: "success" },
-      task_loaded: { label: "Task Loaded", status: "success" },
-      ad_loading: { label: "Ad Script Triggered", status: "loading" },
-      ad_loaded: { label: "Advertisement Loaded", status: "pending" },
-      watching_ad: { label: "Watching Advertisement", status: "pending" },
-      heartbeats_active: { label: "Heartbeats Active", status: "pending" },
-      min_watch_time: { label: "Minimum Watch Time Reached", status: "pending" },
-      backend_verified: { label: "Backend Verified", status: "pending" },
-      reward_ready: { label: "Reward Ready", status: "pending" }
-    };
-
-    function renderTimeline() {
-      const container = document.getElementById("timeline-container");
-      if (!container) return;
-      container.innerHTML = "";
+    // Client-side script strictly separate from server template rendering
+    document.addEventListener("DOMContentLoaded", function() {
+      const appData = document.getElementById("app-data").dataset;
+      const token = appData.token;
+      const userId = appData.userId;
+      const taskId = appData.taskId;
+      const requiredSeconds = parseInt(appData.requiredSeconds, 10);
+      const elapsedActiveSecs = parseInt(appData.elapsedActiveSecs, 10);
       
-      Object.keys(timelineData).forEach(key => {
-        const step = timelineData[key];
-        let iconHtml = '';
-        let textClass = 'text-slate-400';
-        let bgClass = 'bg-slate-950/40 border-slate-800/80';
-        
-        if (step.status === 'success') {
-          iconHtml = '<i class="fa-solid fa-circle-check text-emerald-400"></i>';
-          textClass = 'text-emerald-400 font-semibold';
-          bgClass = 'bg-emerald-500/5 border-emerald-500/10';
-        } else if (step.status === 'loading') {
-          iconHtml = '<i class="fa-solid fa-spinner fa-spin text-blue-400"></i>';
-          textClass = 'text-blue-400 font-semibold';
-          bgClass = 'bg-blue-500/5 border-blue-500/15 animate-pulse';
-        } else if (step.status === 'failed') {
-          iconHtml = '<i class="fa-solid fa-circle-xmark text-red-400"></i>';
-          textClass = 'text-red-400 font-bold';
-          bgClass = 'bg-red-500/5 border-red-500/20';
-        } else {
-          iconHtml = '<i class="fa-regular fa-clock text-slate-600"></i>';
-        }
-        
-        const card = document.createElement("div");
-        card.className = "p-2 rounded-xl border flex items-center gap-2 " + bgClass;
-        card.innerHTML = '<div class="text-xs shrink-0">' + iconHtml + '</div>' +
-                         '<div class="flex-1 min-w-0">' +
-                           '<p class="' + textClass + ' truncate text-[11px]">' + step.label + '</p>' +
-                           (step.error ? '<p class="text-[9px] text-red-400 leading-none truncate mt-0.5">' + step.error + '</p>' : '') +
-                           (step.detail ? '<p class="text-[9px] text-slate-500 leading-none truncate mt-0.5">' + step.detail + '</p>' : '') +
-                         '</div>';
-        container.appendChild(card);
-      });
-    }
-
-    function updateTimelineStep(stepId, status, errorMsg = '', detail = '') {
-      if (timelineData[stepId]) {
-        timelineData[stepId].status = status;
-        if (errorMsg !== undefined) timelineData[stepId].error = errorMsg;
-        if (detail !== undefined) timelineData[stepId].detail = detail;
-        renderTimeline();
-      }
-    }
-
-    // Auto Script Loading & Injection Logic
-    let retryCount = 0;
-    const maxRetries = 3;
-
-    function loadAdScript() {
-      addDebugLog("Starting script loading (Attempt " + (retryCount + 1) + " of " + maxRetries + ")...");
-      updateTimelineStep("ad_loading", "loading", "", "Loading attempt " + (retryCount+1));
+      let timeLeft = Math.max(0, requiredSeconds - elapsedActiveSecs);
+      let isVerified = false;
+      let heartbeatsSent = 0;
+      let currentWatchTime = elapsedActiveSecs;
       
-      adPlaceholder.style.display = "flex";
-      adPlaceholder.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-2xl text-blue-500 mb-2"></i>' +
-                                '<span class="text-xs text-slate-400">Loading advertisement (Attempt ' + (retryCount + 1) + ')...</span>';
+      const timerBox = document.getElementById("timer-box");
+      const statusText = document.getElementById("status-text");
+      const progressBar = document.getElementById("progress-bar");
+      const adContainer = document.getElementById("ad-container");
       
-      adContainer.innerHTML = "";
-
-      try {
-        const scriptHtml = ${JSON.stringify(clickAdillaScript).replace(/<\//g, '<\\/')};
-        if (!scriptHtml || scriptHtml.trim() === "") {
-          const errMsg = "Advertisement script is blank or not configured.";
-          addDebugLog("Error: " + errMsg);
-          showScriptError(errMsg);
-          updateTimelineStep("ad_loaded", "failed", errMsg);
-          return;
-        }
-
-        const parser = new DOMParser();
-        const parsedDoc = parser.parseFromString(scriptHtml, "text/html");
-        
-        // Append visual helper wrappers or layout containers from parsed snippet
-        Array.from(parsedDoc.body.childNodes).forEach(node => {
-          if (node.nodeName.toLowerCase() !== "script") {
-            adContainer.appendChild(node.cloneNode(true));
-          }
-        });
-
-        const scripts = Array.from(parsedDoc.getElementsByTagName("script"));
-        if (scripts.length === 0) {
-          addDebugLog("Parsed empty script tag, triggering instant fallback.");
-          adPlaceholder.style.display = "none";
-          window.scriptLoaded = true;
-          window.scriptExecuted = true;
-          updateTimelineStep("ad_loading", "success");
-          updateTimelineStep("ad_loaded", "success", "", "No external scripts detected");
-          return;
-        }
-
-        let totalScriptsToLoad = scripts.filter(s => s.src).length;
-        let scriptsCompleted = 0;
-
-        scripts.forEach((s, idx) => {
-          const newScript = document.createElement("script");
-          Array.from(s.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+      const timerInterval = setInterval(() => {
+        if (document.hidden) return;
+        if (timeLeft > 0 && !isVerified) {
+          timeLeft--;
+          currentWatchTime++;
+          if (timerBox) timerBox.innerText = timeLeft;
+          if (document.getElementById("est-remaining")) document.getElementById("est-remaining").innerText = "Estimated remaining: " + timeLeft + "s";
           
-          if (s.src) {
-            newScript.src = s.src;
-            newScript.async = true;
-            
-            newScript.onload = () => {
-              scriptsCompleted++;
-              window.scriptLoaded = true;
-              window.scriptOnloadFired = true;
-              addDebugLog("Script " + (idx + 1) + " loaded: " + s.src);
-              
-              if (scriptsCompleted === totalScriptsToLoad) {
-                adPlaceholder.style.display = "none";
-                window.scriptExecuted = true;
-                updateTimelineStep("ad_loading", "success");
-                updateTimelineStep("ad_loaded", "success");
-                addDebugLog("All remote scripts loaded successfully.");
-              }
-            };
+          if (progressBar) {
+            const percent = Math.min(100, (currentWatchTime / requiredSeconds) * 100);
+            progressBar.style.width = percent + "%";
+            if (document.getElementById("progress-percentage")) document.getElementById("progress-percentage").innerText = Math.floor(percent) + "% completed";
+          }
+        }
+      }, 1000);
 
-            newScript.onerror = (err) => {
-              const scriptError = "Script source failed: " + s.src;
-              addDebugLog("Error: " + scriptError);
-              window.scriptLoadErrorMsg = scriptError;
-              handleScriptFailure(scriptError);
-            };
-          } else {
-            // Inline Script Injection
-            newScript.text = s.text;
-            adContainer.appendChild(newScript);
+      const heartbeatInterval = setInterval(async () => {
+        if (isVerified) return;
+        heartbeatsSent++;
+        
+        // Check if ad script is present in DOM or executed
+        const hasAdb = Object.keys(window).some(k => k.startsWith('adb') || k.startsWith('clickadilla') || k.startsWith('AdManager'));
+        const hasScripts = adContainer ? adContainer.getElementsByTagName('script').length > 0 : false;
+        const hasIframes = adContainer ? adContainer.getElementsByTagName('iframe').length > 0 : false;
+        
+        const scriptExecuted = hasAdb || hasIframes;
+        const scriptLoaded = hasScripts || scriptExecuted;
+        
+        try {
+          const res = await fetch("/api/video-tasks/heartbeat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              token, userId, taskId, fingerprint: "BROWSER_ENV",
+              documentHidden: document.hidden,
+              devToolsDetected: false, automationDetected: false,
+              scriptLoaded: scriptLoaded, 
+              scriptExecuted: scriptExecuted,
+              scriptLoadTime: 0, failureReason: scriptExecuted ? "" : "Script not executed"
+            })
+          });
+          
+          if (!res.ok) throw new Error("Heartbeat failed");
+          
+          const statusRes = await fetch("/api/video-tasks/session-status?token=" + encodeURIComponent(token));
+          const statusData = await statusRes.json();
+          
+          if (statusData.status === "verified" || statusData.status === "completed" || statusData.status === "claimed") {
+            isVerified = true;
+            clearInterval(timerInterval);
+            clearInterval(heartbeatInterval);
             
-            window.scriptLoaded = true;
-            window.scriptExecuted = true;
-            addDebugLog("Executed inline script snippet.");
-            
-            // If there were no external source scripts, complete the loading timeline step instantly
-            if (totalScriptsToLoad === 0) {
-              adPlaceholder.style.display = "none";
-              updateTimelineStep("ad_loading", "success");
-              updateTimelineStep("ad_loaded", "success", "", "Inline script executed");
+            const container = document.getElementById("status-container");
+            if (container) {
+              container.innerHTML = 
+                '<div class="w-16 h-16 rounded-full bg-emerald-500/20 border-4 border-emerald-500 flex items-center justify-center mb-3 shadow-lg shadow-emerald-500/10">' +
+                  '<i class="fa-solid fa-check text-2xl text-emerald-400"></i>' +
+                '</div>' +
+                '<h2 class="text-lg font-black text-white">✅ Ad Verified Successfully</h2>' +
+                '<p class="text-xs text-slate-400 mt-1 max-w-sm">Your ad session is complete. Return to the RoyShare Mini App to instantly claim your reward.</p>' +
+                '<button onclick="window.close()" class="mt-4 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-xl text-xs tracking-wider uppercase transition-all shadow-lg shadow-emerald-500/20 active:scale-95">' +
+                  'Return to RoyShare' +
+                '</button>';
+            }
+          } else if (statusData.status === "invalidated") {
+            isVerified = true;
+            clearInterval(timerInterval);
+            clearInterval(heartbeatInterval);
+            const container = document.getElementById("status-container");
+            if (container) {
+              container.innerHTML = 
+                '<div class="w-16 h-16 rounded-full bg-red-500/20 border-4 border-red-500 flex items-center justify-center mb-3">' +
+                  '<i class="fa-solid fa-triangle-exclamation text-2xl text-red-400"></i>' +
+                '</div>' +
+                '<h2 class="text-base font-extrabold text-white">Session Invalidated</h2>' +
+                '<p class="text-xs text-slate-400 mt-1">' + (statusData.reason || "Verification checks failed. Please try again.") + '</p>';
             }
           }
-
-          if (s.src) {
-            adContainer.appendChild(newScript);
-          }
-        });
-
-      } catch (err) {
-        addDebugLog("Exception in loader: " + err.message);
-        handleScriptFailure(err.message);
-      }
-    }
-
-    function handleScriptFailure(errorMsg) {
-      if (retryCount < maxRetries - 1) {
-        retryCount++;
-        addDebugLog("Retrying ad load in 2s (Errors occurred)...");
-        setTimeout(loadAdScript, 2000);
-      } else {
-        updateTimelineStep("ad_loaded", "failed", errorMsg);
-        showScriptError(errorMsg);
-      }
-    }
-
-    function showScriptError(errorMsg) {
-      adPlaceholder.style.display = "flex";
-      adPlaceholder.innerHTML = '<div class="text-center p-4 max-w-sm">' +
-                                  '<i class="fa-solid fa-triangle-exclamation text-red-500 text-3xl mb-3"></i>' +
-                                  '<h4 class="text-xs font-bold text-white mb-1">Ad Loading Failed</h4>' +
-                                  '<p class="text-[10px] text-slate-400 mb-3 leading-tight">' + errorMsg + '</p>' +
-                                  '<button onclick="retryLoadingAd()" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold rounded-lg transition-all">' +
-                                    '<i class="fa-solid fa-rotate-right mr-1"></i> Retry Loading' +
-                                  '</button>' +
-                                '</div>';
-    }
-
-    function retryLoadingAd() {
-      retryCount = 0;
-      loadAdScript();
-    }
-
-    // Network & Visibility Monitored Countdown timer
-    const timerInterval = setInterval(() => {
-      if (isVerified) return;
-
-      const isHidden = document.hidden || document.visibilityState === "hidden";
-      const isOnline = navigator.onLine;
-
-      if (!isOnline) {
-        statusText.innerText = "🔌 Network disconnected! Pausing timer...";
-        statusText.className = "text-sm text-red-500 font-bold animate-pulse mt-1";
-        updateTimelineStep("watching_ad", "failed", "Offline - Paused");
-        return;
-      }
-
-      if (isHidden) {
-        statusText.innerText = "⚠️ Focus Lost! Playback paused. Keep this page open.";
-        statusText.className = "text-sm text-yellow-500 font-bold mt-1 animate-pulse";
-        updateTimelineStep("watching_ad", "failed", "Focus Lost - Tab Hidden");
-        return;
-      }
-
-      statusText.innerText = "Please watch the advertisement below. Keep this page visible.";
-      statusText.className = "text-sm text-slate-300 font-medium mt-1";
-      updateTimelineStep("watching_ad", "loading", "", "Time elapsed: " + currentWatchTime + "s");
-
-      if (timeLeft > 0) {
-        timeLeft--;
-        currentWatchTime = requiredSeconds - timeLeft;
-        timerBox.innerText = timeLeft;
-        
-        const pct = Math.min(100, Math.round(((requiredSeconds - timeLeft) / requiredSeconds) * 100));
-        progressBar.style.width = pct + "%";
-        document.getElementById("progress-percentage").innerText = pct + "% completed";
-        document.getElementById("est-remaining").innerText = "Estimated remaining: " + timeLeft + "s";
-        
-        updateTimelineStep("min_watch_time", "loading", "", "Progress: " + pct + "% (" + timeLeft + "s remaining)");
-      } else {
-        if (!isVerified) {
-          statusText.innerText = "⏳ Watch time complete! Finalizing security verification...";
-          statusText.className = "text-sm text-blue-400 font-bold animate-pulse mt-1";
-          updateTimelineStep("min_watch_time", "success");
+        } catch (err) {
+          console.error("Heartbeat sync error:", err);
         }
-      }
-      refreshDebugPanel();
-    }, 1000);
-
-    // Heartbeat Sending System (Every 5 seconds)
-    const heartbeatInterval = setInterval(async () => {
-      const isHidden = document.hidden || document.visibilityState === "hidden";
-      const isOnline = navigator.onLine;
-      
-      // Keep track of focus loss counts
-      if (isHidden && !isVerified) {
-        focusLossCount++;
-        hiddenTime = focusLossCount * 5;
-      }
-
-      // If disconnected, do not send heartbeats
-      if (!isOnline) {
-        addDebugLog("Skipped heartbeat: client is offline.");
-        return;
-      }
-
-      try {
-        heartbeatsSent++;
-        addDebugLog("Sending heartbeat #" + heartbeatsSent + "...");
-        updateTimelineStep("heartbeats_active", "loading", "", "Sent: " + heartbeatsSent);
-
-        const res = await fetch("/api/video-tasks/heartbeat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token: token,
-            userId: userId,
-            taskId: taskId,
-            documentHidden: isHidden,
-            devToolsDetected: false,
-            automationDetected: false,
-            scriptLoaded: window.scriptLoaded,
-            scriptExecuted: window.scriptExecuted,
-            scriptLoadTime: null,
-            failureReason: window.scriptLoadErrorMsg || ""
-          })
-        });
-        const heartbeatData = await res.json();
-        lastApiResponse = heartbeatData;
-        addDebugLog("Heartbeat response: " + JSON.stringify(heartbeatData));
-        updateTimelineStep("heartbeats_active", "success", "", "Sent: " + heartbeatsSent);
-
-        // Fetch session status to see if completed/verified on backend
-        const statusRes = await fetch("/api/video-tasks/session-status?token=" + token);
-        const statusData = await statusRes.json();
-        lastApiResponse = statusData;
-
-        if (statusData.status === "verified" || statusData.status === "completed" || statusData.status === "claimed") {
-          isVerified = true;
-          clearInterval(timerInterval);
-          clearInterval(heartbeatInterval);
-
-          updateTimelineStep("backend_verified", "success");
-          updateTimelineStep("reward_ready", "success");
-
-          document.getElementById("status-container").innerHTML = 
-            '<div class="w-16 h-16 rounded-full bg-emerald-500/20 border-4 border-emerald-500 flex items-center justify-center mb-3 shadow-lg shadow-emerald-500/10">' +
-              '<i class="fa-solid fa-check text-2xl text-emerald-400"></i>' +
-            '</div>' +
-            '<h2 class="text-lg font-black text-white">✅ Ad Verified Successfully</h2>' +
-            '<p class="text-xs text-slate-400 mt-1 max-w-sm">Your ad session is complete. Return to the RoyShare Mini App to instantly claim your reward.</p>' +
-            '<button onclick="window.close()" class="mt-4 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-xl text-xs tracking-wider uppercase transition-all shadow-lg shadow-emerald-500/20 active:scale-95">' +
-              'Return to RoyShare' +
-            '</button>';
-        } else if (statusData.status === "invalidated") {
-          isVerified = true;
-          clearInterval(timerInterval);
-          clearInterval(heartbeatInterval);
-
-          updateTimelineStep("backend_verified", "failed", statusData.reason || "Verification checks failed");
-
-          document.getElementById("status-container").innerHTML = 
-            '<div class="w-16 h-16 rounded-full bg-red-500/20 border-4 border-red-500 flex items-center justify-center mb-3">' +
-              '<i class="fa-solid fa-triangle-exclamation text-2xl text-red-400"></i>' +
-            '</div>' +
-            '<h2 class="text-base font-extrabold text-white">Session Invalidated</h2>' +
-            '<p class="text-xs text-slate-400 mt-1">' + (statusData.reason || "Verification checks failed. Please try again.") + '</p>';
-        }
-      } catch (err) {
-        addDebugLog("Heartbeat sync error: " + err.message);
-        updateTimelineStep("heartbeats_active", "failed", err.message);
-      }
-      refreshDebugPanel();
-    }, 5000);
-
-    // Initial setup
-    addDebugLog("Diagnostics dashboard initiated. Mode: PRODUCTION SECURE AUDIT.");
-    renderTimeline();
-    refreshDebugPanel();
-    loadAdScript();
+      }, 5000);
+    });
   </script>
 </body>
-</html>
-    `);
-  } catch (e: any) {
-    res.status(500).send("<h1>Server Error</h1><p>" + e.message + "</p>");
+</html>`);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
-
 // USER: Verify and Claim
 app.post("/api/video-tasks/verify", async (req, res) => {
   try {

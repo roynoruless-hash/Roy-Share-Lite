@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script id="ad-data" type="application/json">
+  {"html": "<script src=\"https://js.wpadmngr.com/static/adManager.js\" data-admpid=\"1234\"></script>"}
+</script>
+<div id="ad-container"></div>
+<script>
+  const adHtml = JSON.parse(document.getElementById('ad-data').textContent).html;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(adHtml, 'text/html');
+  const scripts = Array.from(doc.querySelectorAll('script'));
+  
+  scripts.forEach(s => {
+    const newScript = document.createElement('script');
+    Array.from(s.attributes).forEach(attr => {
+      newScript.setAttribute(attr.name, attr.value);
+    });
+    if (s.src) {
+      // newScript.src = s.src; // already set by setAttribute
+    } else {
+      newScript.text = s.textContent;
+    }
+    document.getElementById('ad-container').appendChild(newScript);
+  });
+</script>
+</body>
+</html>
