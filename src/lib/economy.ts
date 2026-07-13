@@ -202,11 +202,11 @@ export async function evaluateReward(
     const completionsSnap = await getDocs(
       query(
         collection(db, "task_completions"),
-        where("userId", "==", String(userId)),
-        where("completedAt", ">=", oneHourAgo)
+        where("userId", "==", String(userId))
       )
     );
-    if (completionsSnap.size >= settings.abnormalTasksHourlyThreshold) {
+    const recentCompletions = completionsSnap.docs.filter(d => (d.data().completedAt || "") >= oneHourAgo).length;
+    if (recentCompletions >= settings.abnormalTasksHourlyThreshold) {
       await updateDoc(userRef, { status: "High Risk", trustScore: 30 });
       await adjustTrustScore(userId, -20, "Abnormal Speed Completions Detected");
     }
@@ -216,11 +216,11 @@ export async function evaluateReward(
     const referralsSnap = await getDocs(
       query(
         collection(db, "users"),
-        where("referredBy", "==", String(userId)),
-        where("createdAt", ">=", oneDayAgo)
+        where("referredBy", "==", String(userId))
       )
     );
-    if (referralsSnap.size >= settings.abnormalReferralsHourlyThreshold) {
+    const recentReferrals = referralsSnap.docs.filter(d => (d.data().createdAt || "") >= oneDayAgo).length;
+    if (recentReferrals >= settings.abnormalReferralsHourlyThreshold) {
       await updateDoc(userRef, { status: "High Risk", trustScore: 30 });
       await adjustTrustScore(userId, -25, "Abnormal Referral Surge Detected");
     }
@@ -229,11 +229,11 @@ export async function evaluateReward(
     const giveawayWinsSnap = await getDocs(
       query(
         collection(db, "upi_giveaway_entries"),
-        where("telegramId", "==", String(userId)),
-        where("isWinner", "==", true)
+        where("telegramId", "==", String(userId))
       )
     );
-    if (giveawayWinsSnap.size >= settings.abnormalGiveawayWinsThreshold) {
+    const recentGiveawayWins = giveawayWinsSnap.docs.filter(d => d.data().isWinner === true).length;
+    if (recentGiveawayWins >= settings.abnormalGiveawayWinsThreshold) {
       await updateDoc(userRef, { status: "High Risk", trustScore: 30 });
       await adjustTrustScore(userId, -15, "Excessive Giveaway Wins Detected");
     }

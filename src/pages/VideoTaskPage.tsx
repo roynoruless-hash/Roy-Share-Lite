@@ -108,11 +108,39 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
     }
   }, [humanVerifyProgress, step]);
 
+  useEffect(() => {
+    const checkExistingSession = async () => {
+      const existingToken = localStorage.getItem(`video_task_session_${taskId}`);
+      if (existingToken) {
+        try {
+          const res = await fetch(`${API_BASE}/api/video-tasks/session-status?token=${existingToken}`);
+          const data = await res.json();
+          if (data.status === "pending" || data.status === "verified") {
+            setSessionToken(existingToken);
+            if (data.status === "verified") {
+              setStep("readyToClaim");
+            } else {
+              setStep("watching");
+            }
+          } else {
+            localStorage.removeItem(`video_task_session_${taskId}`);
+          }
+        } catch (e) {
+          console.error("Error checking existing session:", e);
+        }
+      }
+    };
+    if (userId && taskId) {
+      checkExistingSession();
+    }
+  }, [userId, taskId]);
+
   const handleWatchAds = async () => {
     try {
       setStep("watching");
       setError(null);
       const fingerprint = await generateFingerprint();
+      const existingToken = localStorage.getItem(`video_task_session_${taskId}`) || undefined;
       
       const res = await fetch(`${API_BASE}/api/video-tasks/session`, {
         method: "POST",
@@ -125,7 +153,8 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
           screenResolution: `${screen.width}x${screen.height}`,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           language: navigator.language,
-          chatId: tgUser?.id?.toString() || "Unknown"
+          chatId: tgUser?.id?.toString() || "Unknown",
+          existingToken
         })
       });
       const data = await res.json();
@@ -170,7 +199,7 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
         } catch (e) {
           console.error("Polling status error:", e);
         }
-      }, 3000);
+      }, 1500);
     }
     return () => {
       if (pollInterval) clearInterval(pollInterval);
