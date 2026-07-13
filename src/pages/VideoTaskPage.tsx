@@ -227,8 +227,10 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
       const data = await res.json();
       if (data.success) {
         setStep("claimed");
+        console.log("Reward Credited");
       } else {
         setError(data.error || "Verification failed");
+        console.log("Claim Failed:", data.error || "Verification failed");
       }
     } catch (e: any) {
       setError("Network error while claiming");
