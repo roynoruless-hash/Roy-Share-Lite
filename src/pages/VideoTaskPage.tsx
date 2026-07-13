@@ -111,8 +111,8 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
   const handleWatchAds = async () => {
     try {
       setStep("watching");
+      setError(null);
       const fingerprint = await generateFingerprint();
-      const existingToken = localStorage.getItem(`video_task_session_${taskId}`);
       
       const res = await fetch(`${API_BASE}/api/video-tasks/session`, {
         method: "POST",
@@ -125,8 +125,7 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
           screenResolution: `${screen.width}x${screen.height}`,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           language: navigator.language,
-          chatId: tgUser?.id?.toString() || "Unknown",
-          existingToken
+          chatId: tgUser?.id?.toString() || "Unknown"
         })
       });
       const data = await res.json();
@@ -137,118 +136,64 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
       }
       
       setSessionToken(data.token);
-      setWatchTimeLeft(parseInt(data.countdown) || 0);
       localStorage.setItem(`video_task_session_${taskId}`, data.token);
       
-      // Inject Script safely
-      let scriptLoaded = false;
-      let scriptExecuted = false;
-      if (scriptContainerRef.current && data.script) {
-        scriptContainerRef.current.innerHTML = "";
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(data.script, 'text/html');
-        Array.from(doc.body.childNodes).forEach((node) => {
-          if (node.nodeName.toLowerCase() === 'script') {
-            const scriptEl = document.createElement("script");
-            const oldScript = node as HTMLScriptElement;
-            Array.from(oldScript.attributes).forEach(attr => scriptEl.setAttribute(attr.name, attr.value));
-            scriptEl.text = oldScript.text;
-            scriptEl.onload = () => { scriptLoaded = true; };
-            if (oldScript.text) { scriptLoaded = true; scriptExecuted = true; }
-            scriptContainerRef.current?.appendChild(scriptEl);
-          } else {
-            scriptContainerRef.current?.appendChild(node.cloneNode(true));
-          }
-        });
-        setTimeout(() => { scriptExecuted = true; }, 1000);
+      // Open the dedicated browser watch page in a new window/tab
+      const watchUrl = `${window.location.origin}/watch/${data.token}`;
+      if ((window as any).Telegram?.WebApp?.openLink) {
+        (window as any).Telegram.WebApp.openLink(watchUrl);
+      } else {
+        window.open(watchUrl, "_blank");
       }
-
-      setStep("readyToClaim");
-      (window as any)._videoAdFlags = { scriptLoaded: true, scriptExecuted: true };
-      
-      // Start Heartbeat
-      if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = setInterval(async () => {
-         try {
-            await fetch(`${API_BASE}/api/video-tasks/heartbeat`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                token: data.token,
-                userId,
-                taskId,
-                fingerprint: await generateFingerprint(),
-                documentHidden: document.hidden || document.visibilityState === 'hidden',
-                devToolsDetected: detectDevTools(),
-                automationDetected: automationDetected || (clickCountRef.current > 50)
-              })
-            });
-            clickCountRef.current = 0; // Reset
-         } catch(e) {}
-      }, 5000);
-      
     } catch (e: any) {
       setError("Failed to start ad session.");
       setStep("readyToWatch");
     }
   };
 
-  
-  // Active watch timer (pauses when hidden)
+  // Poll session status in backend to verify completion
   useEffect(() => {
-    let timer: any;
-    if (step === "readyToClaim" && watchTimeLeft > 0) {
-      timer = setInterval(() => {
-        if (!document.hidden && document.visibilityState !== 'hidden') {
-          setWatchTimeLeft(prev => prev > 0 ? prev - 1 : 0);
+    let pollInterval: any;
+    if (step === "watching" && sessionToken) {
+      pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/video-tasks/session-status?token=${sessionToken}`);
+          const data = await res.json();
+          if (data.status === "verified" || data.status === "completed" || data.status === "claimed") {
+            setStep("readyToClaim");
+            clearInterval(pollInterval);
+          } else if (data.status === "invalidated") {
+            setError(data.reason || "Ad session was invalidated due to security check.");
+            setStep("readyToWatch");
+            clearInterval(pollInterval);
+          }
+        } catch (e) {
+          console.error("Polling status error:", e);
         }
-      }, 1000);
+      }, 3000);
     }
-    return () => clearInterval(timer);
-  }, [step, watchTimeLeft]);
-
-  useEffect(() => {
     return () => {
-      if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+      if (pollInterval) clearInterval(pollInterval);
     };
-  }, []);
-
-  // Automation Detection
-  useEffect(() => {
-    const clickHandler = () => {
-      clickCountRef.current += 1;
-      const now = Date.now();
-      if (now - lastInteractionTimeRef.current < 50) {
-        // Super fast click, might be bot
-        if (clickCountRef.current > 10) setAutomationDetected(true);
-      }
-      lastInteractionTimeRef.current = now;
-    };
-    document.addEventListener('click', clickHandler);
-    return () => document.removeEventListener('click', clickHandler);
-  }, []);
-
-  // Claim Delay Hook
-  useEffect(() => {
-    if (step === "readyToClaim" && timeLeft <= 0 && !claimDelay) {
-      setClaimDelay(true);
-      const delay = Math.floor(Math.random() * 3000) + 2000; // 2-5s delay
-      setTimeout(() => setClaimDelay(false), delay);
-    }
-  }, [step, timeLeft]);
-
-
-
+  }, [step, sessionToken]);
 
   const handleClaim = async () => {
     if (!sessionToken) return;
     setClaiming(true);
     setError(null);
     try {
+      const fp = await generateFingerprint();
       const res = await fetch(`${API_BASE}/api/video-tasks/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, taskId, token: sessionToken })
+        body: JSON.stringify({ 
+          userId, 
+          taskId, 
+          token: sessionToken,
+          fingerprint: fp,
+          scriptLoaded: true,
+          scriptExecuted: true
+        })
       });
       const data = await res.json();
       if (data.success) {
@@ -381,18 +326,36 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
             )}
             
             {step === "watching" && (
-
               <div className="space-y-6">
                 <div className="flex flex-col items-center">
-                  <Loader2 className="w-12 h-12 text-amber-500 animate-spin mb-4" />
-                  <h3 className="text-lg font-bold text-white mb-2">Watching Advertisement...</h3>
-                  <p className="text-amber-400 text-sm">Please watch the ad completely. Do not close this page.</p>
+                  <div className="w-16 h-16 rounded-full bg-amber-500/10 border-4 border-amber-500 flex items-center justify-center mb-4">
+                    <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
+                  </div>
+                  <h3 className="text-lg font-black text-white">Ad Opened in New Window</h3>
+                  <p className="text-slate-400 text-xs px-4 mt-1 leading-relaxed">
+                    Please keep this page open. Watch the video advertisement completely in the newly opened tab.
+                  </p>
+                  <p className="text-amber-400 text-xs mt-3 font-semibold bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl">
+                    ⏱️ Claim button will automatically activate here when done.
+                  </p>
                 </div>
                 
-                {/* Ad Container */}
-                <div ref={scriptContainerRef} className="min-h-[100px] bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center flex-col relative z-20">
-                  <span className="text-slate-600 text-xs my-8">Advertisement Loading...</span>
-                </div>
+                {/* Reopen Helper button */}
+                <button 
+                  onClick={() => {
+                    if (sessionToken) {
+                      const url = `${window.location.origin}/watch/${sessionToken}`;
+                      if ((window as any).Telegram?.WebApp?.openLink) {
+                        (window as any).Telegram.WebApp.openLink(url);
+                      } else {
+                        window.open(url, "_blank");
+                      }
+                    }
+                  }}
+                  className="w-full py-3 rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-900/60 text-slate-300 font-bold text-xs transition-all active:scale-[0.98]"
+                >
+                  🌐 Reopen Advertisement Page
+                </button>
               </div>
             )}
 
