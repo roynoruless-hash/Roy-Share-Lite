@@ -5,6 +5,9 @@ import { motion, AnimatePresence } from "motion/react";
 import { db } from "../lib/firebase";
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, where, deleteDoc, writeBatch, orderBy } from "firebase/firestore";
 import { StatCard, HealthItem } from "../components/AdminComponents";
+import ClickAdillaAdminView from "../components/ClickAdillaAdminView";
+import VideoAdsAdminView from "../components/VideoAdsAdminView";
+import { EconomyAdminView } from "../components/EconomyAdminView";
 import {
   Zap,
   Play,
@@ -20,6 +23,7 @@ import {
   AlertCircle,
   Info,
   Smartphone,
+  Shield,
   MousePointer2,
   ClipboardCheck,
   Sparkles,
@@ -72,6 +76,7 @@ import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
 import TelegramBroadcastCenter from "../components/TelegramBroadcastCenter";
 import UpiGiveawayAdminManager from "../components/UpiGiveawayAdminManager";
+import { FraudInvestigationCenter } from "../components/FraudInvestigationCenter";
 import buildInfo from "../build-info.json";
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -4692,6 +4697,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "📢 Telegram Broadcast Center",
               "💰 Verified Tasks",
               "🛡 Security Center",
+              "🛡️ Economy Protection",
+              "🛡 Fraud Investigation Center",
               "📜 Activity Logs",
               "📥 Backup & Restore",
               "🚀 Referral System",
@@ -4707,6 +4714,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🎁 Gift Link Generator",
               "📊 Gift Claims History",
               "💸 UPI Giveaway",
+              "📊 ClickAdilla API",
+              "🎥 Video Ads",
             ].map((btn) => (
               <button
                 key={btn}
@@ -7981,6 +7990,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                         </span>
                                       </span>
                                     </div>
+                                    <div className="flex items-center gap-1.5 mt-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-2 py-0.5 w-fit">
+                                      <Shield size={10} className="text-indigo-400" />
+                                      <span className="text-[10px] text-indigo-400 font-black">
+                                        Trust: {u.trustScore !== undefined ? u.trustScore : 50}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                               </td>
@@ -10090,6 +10105,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           )}
           {activeTab === "📢 Telegram Broadcast Center" && (
             <TelegramBroadcastCenter onOpenSettings={() => setActiveTab("📱 Telegram Settings")} />
+          )}
+          {activeTab === "🛡 Fraud Investigation Center" && (
+            <FraudInvestigationCenter />
           )}
           {activeTab === "🛡 Security Center" && (
             <div className="space-y-6">
@@ -13987,6 +14005,20 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 </div>
               )}
             </div>
+          )}
+
+          {activeTab === "🎥 Video Ads" && (
+            <VideoAdsAdminView />
+          )}
+
+          {activeTab === "📊 ClickAdilla API" && (
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto">
+              <ClickAdillaAdminView />
+            </motion.div>
+          )}
+
+          {activeTab === "🛡️ Economy Protection" && (
+            <EconomyAdminView />
           )}
 
           {activeTab === "💸 UPI Giveaway" && (

@@ -29,13 +29,79 @@ export default function UserDetailsModal({ user, onClose, onAction }: { user: an
         </div>
 
         {activeTab === "Details" && (
-            <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4 text-sm bg-slate-950 p-4 rounded-2xl border border-slate-800">
                 <div><label className="text-slate-500 font-bold uppercase text-[10px]">Name</label><p>{user.firstName} {user.lastName}</p></div>
-                <div><label className="text-slate-500 font-bold uppercase text-[10px]">Telegram Username</label><p className="flex items-center gap-1"><AtSign size={14}/> {user.username}</p></div>
+                <div><label className="text-slate-500 font-bold uppercase text-[10px]">Telegram Username</label><p className="flex items-center gap-1"><AtSign size={14}/> {user.username || "N/A"}</p></div>
                 <div><label className="text-slate-500 font-bold uppercase text-[10px]">Telegram ID</label><p className="font-mono text-indigo-400">{user.id}</p></div>
                 <div><label className="text-slate-500 font-bold uppercase text-[10px]">Phone</label><p className="flex items-center gap-1"><Phone size={14}/> {user.phoneNumber || "N/A"}</p></div>
                 <div><label className="text-slate-500 font-bold uppercase text-[10px]">Registered</label><p className="flex items-center gap-1"><Calendar size={14}/> {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "N/A"}</p></div>
+                <div><label className="text-slate-500 font-bold uppercase text-[10px]">Account Age</label><p>{user.createdAt ? `${Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24))} Days` : "N/A"}</p></div>
+                <div className="col-span-2"><label className="text-slate-500 font-bold uppercase text-[10px]">Last Active</label><p>{user.lastActive ? new Date(user.lastActive).toLocaleString() : "N/A"}</p></div>
             </div>
+
+            <div className="border-t border-slate-800 pt-4">
+              <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">🛡️ Trust Score & Security Metrics</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <span className="text-slate-500 font-medium text-[10px] uppercase">Trust Score</span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-xl font-bold text-indigo-400">{user.trustScore !== undefined ? user.trustScore : 50}</span>
+                    <span className="text-slate-500 text-xs">/100</span>
+                  </div>
+                  <span className={`text-[10px] font-bold mt-1 ${
+                    (user.trustScore ?? 50) >= 80 ? "text-emerald-400" :
+                    (user.trustScore ?? 50) >= 60 ? "text-blue-400" :
+                    (user.trustScore ?? 50) >= 40 ? "text-amber-400" :
+                    (user.trustScore ?? 50) >= 20 ? "text-orange-400" : "text-red-400"
+                  }`}>
+                    {(user.trustScore ?? 50) >= 80 ? "🟢 Trusted" :
+                     (user.trustScore ?? 50) >= 60 ? "🟡 Verified" :
+                     (user.trustScore ?? 50) >= 40 ? "🟠 Watchlist" :
+                     (user.trustScore ?? 50) >= 20 ? "🔴 High Risk" : "⚫ Restricted"}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <span className="text-slate-500 font-medium text-[10px] uppercase">Fraud Score</span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className={`text-xl font-bold ${(user.fraudScore ?? 0) >= 50 ? "text-red-400" : "text-emerald-400"}`}>{user.fraudScore ?? 0}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1">Suspicion Index</span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <span className="text-slate-500 font-medium text-[10px] uppercase">Success Rate</span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-xl font-bold text-emerald-400">{user.successRate !== undefined ? `${user.successRate}%` : "100%"}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1">Withdrawal payout</span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+                  <span className="text-slate-500 font-medium text-[10px] uppercase">Task Completion</span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-xl font-bold text-emerald-400">{user.taskCompletionRate !== undefined ? `${user.taskCompletionRate}%` : "100%"}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1">Verified campaigns</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-800 pt-4">
+              <h4 className="text-sm font-semibold text-white mb-3">💰 Earnings Summary</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-slate-500 font-medium text-[10px] uppercase">Lifetime Earnings</span>
+                  <p className="text-lg font-bold text-emerald-400">₹{user.totalEarnings || user.earnings || 0}</p>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-slate-500 font-medium text-[10px] uppercase">Lifetime Withdrawals</span>
+                  <p className="text-lg font-bold text-red-400">₹{user.withdrawnAmount || 0}</p>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {activeTab === "Wallet" && (

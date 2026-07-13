@@ -1,3 +1,5 @@
+import VideoTaskPage from "./VideoTaskPage";
+import { Video } from "lucide-react";
 import React, { useState, useEffect, lazy, Suspense } from "react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { motion, AnimatePresence } from "motion/react";
@@ -45,6 +47,10 @@ import { WalletPage } from "./WalletPage";
 import DailyBonusPage from "./DailyBonusPage";
 import DashboardPage from "./DashboardPage";
 import RewardTasksPage from "./RewardTasksPage";
+
+
+
+
 import { API_BASE } from "../config/api";
 import { MyLinksPage } from "./MyLinksPage";
 import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
@@ -574,7 +580,12 @@ export const MiniAppHome: React.FC = () => {
   const [gpTasks, setGpTasks] = useState<any[]>([]);
   const [loadingGpTasks, setLoadingGpTasks] = useState(false);
   const [completedGpTaskIds, setCompletedGpTaskIds] = useState<string[]>([]);
-  const [userRewardTab, setUserRewardTab] = useState<"standard" | "gp">("standard");
+  
+  const [videoTasks, setVideoTasks] = useState<any[]>([]);
+  const [loadingVideoTasks, setLoadingVideoTasks] = useState(false);
+  const [activeVideoTaskId, setActiveVideoTaskId] = useState<string | null>(null);
+  const [videoCompletions, setVideoCompletions] = useState<Record<string, number>>({});
+  const [userRewardTab, setUserRewardTab] = useState<"standard" | "gp" | "video">("standard");
 
   // Copy Feedback State
   const [copiedCode, setCopiedCode] = useState(false);
@@ -660,8 +671,22 @@ export const MiniAppHome: React.FC = () => {
         .catch((err) => console.error("Error loading tasks:", err))
         .finally(() => setLoadingTasks(false));
 
-      // Fetch GP Links Tasks and user completions
-      setLoadingGpTasks(true);
+      // Fetch Video Ads Tasks
+      setLoadingVideoTasks(true);
+      fetch(`${API_BASE}/api/video-tasks`)
+        .then(res => res.json())
+        .then(data => {
+          setVideoTasks(Array.isArray(data) ? data : []);
+          if (activeUser?.id) {
+            fetch(`${API_BASE}/api/video-tasks/user-completions?userId=${activeUser.id}`)
+              .then(r => r.json())
+              .then(cData => {
+                if (cData.counts) setVideoCompletions(cData.counts);
+              });
+          }
+        })
+        .finally(() => setLoadingVideoTasks(false));
+
       fetch(`${API_BASE}/api/gplinks-tasks`)
         .then((res) => res.json())
         .then((data) => {
@@ -1271,7 +1296,7 @@ export const MiniAppHome: React.FC = () => {
               </div>
 
               {/* Tab Selector */}
-              <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <div className="grid grid-cols-3 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
                 <button
                   onClick={() => setUserRewardTab("standard")}
                   className={`py-2 text-xs font-bold rounded-lg transition-all ${userRewardTab === "standard" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
@@ -1283,6 +1308,12 @@ export const MiniAppHome: React.FC = () => {
                   className={`py-2 text-xs font-bold rounded-lg transition-all ${userRewardTab === "gp" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
                 >
                   🔗 Shortener Tasks ({gpTasks.length})
+                </button>
+                <button
+                  onClick={() => setUserRewardTab("video")}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all ${userRewardTab === "video" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+                >
+                  🎥 Video Ads ({videoTasks.length})
                 </button>
               </div>
 

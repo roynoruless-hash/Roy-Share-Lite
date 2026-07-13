@@ -90,7 +90,7 @@ export default function AnnouncementsPage({ onBack }: { onBack: () => void }) {
                   {ann.title}
                 </h3>
                 
-                <div className="prose prose-invert prose-sm max-w-none text-slate-400 leading-relaxed">
+                <div className="prose prose-invert prose-sm max-w-none text-slate-400 leading-relaxed whitespace-pre-line">
                   {ann.message}
                 </div>
 

@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import { getStorage } from "firebase-admin/storage";
 import { db } from "../lib/firebase";
+import { adjustTrustScore } from "../lib/trustScore";
+import { evaluateReward } from "../lib/economy";
 import { 
   collection, 
   doc, 
@@ -256,6 +258,10 @@ router.post("/submit-entry", async (req: any, res: any) => {
       }
     }
 
+    const userDocRef = doc(db, "users", String(telegramId));
+    const userDoc = await getDoc(userDocRef);
+    const isSb = userDoc.exists() && userDoc.data()?.shadowBanned === true;
+
     // Store entry
     const entryId = `${giveawayId}_${telegramId}`;
     const entryData = {
@@ -270,10 +276,14 @@ router.post("/submit-entry", async (req: any, res: any) => {
       status: "Pending", // Pending, Winner, Not Selected, Rejected
       rewardAmount: 0,
       paymentStatus: "Pending", // Pending, Paid, Rejected
-      isDuplicateUpi
+      isDuplicateUpi,
+      shadow_banned: isSb
     };
 
     await setDoc(doc(db, "upi_giveaway_entries", entryId), entryData);
+
+    // Increase Trust Score for Giveaway Participation (+5)
+    adjustTrustScore(String(telegramId), 5, "Giveaway Participation").catch(() => {});
 
     // Audit Log
     await writeAuditLog(giveawayId, giveaway.title, "Entry Submitted", {
@@ -648,11 +658,41 @@ router.post("/mark-as-paid", async (req: any, res: any) => {
       return res.status(400).json({ success: false, error: "This winner has already been marked as paid." });
     }
 
+    const rawRewardAmount = Number(entry.rewardAmount) || 0;
+
+    // Evaluate Giveaway Reward via Economy Protection & Smart Reward Engine
+    const economyEval = await evaluateReward(String(entry.telegramId), rawRewardAmount, "giveaway");
+    if (!economyEval.allowed) {
+      return res.status(400).json({ success: false, error: economyEval.message || "Daily budget limit reached. Cannot approve payment." });
+    }
+
+    const finalRewardAmount = economyEval.finalAmount;
+    const isPendingGiveaway = economyEval.isPending;
+
     // Update payment status
     await updateDoc(entryRef, {
-      paymentStatus: "Paid",
+      paymentStatus: isPendingGiveaway ? "Pending Review" : "Paid",
+      rewardAmount: finalRewardAmount,
       paidAt: new Date().toISOString()
     });
+
+    if (isPendingGiveaway) {
+      return res.json({
+        success: true,
+        message: "⏳ This payment has been placed in Pending Review under the Economy Protection check pipeline."
+      });
+    }
+
+    const isSb = entry.shadow_banned === true;
+    if (isSb) {
+      await addDoc(collection(db, "shadow_blocked_rewards"), {
+        userId: String(entry.telegramId),
+        username: entry.username || entry.firstName || "no_username",
+        amount: Number(entry.rewardAmount),
+        type: "upi_giveaway_reward",
+        createdAt: new Date().toISOString()
+      });
+    }
 
     const giveawaySnap = await getDoc(doc(db, "upi_giveaways", entry.giveawayId));
     const giveawayTitle = giveawaySnap.exists() ? giveawaySnap.data()?.title : "UPI Giveaway";

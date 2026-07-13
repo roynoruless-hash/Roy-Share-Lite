@@ -1,10 +1,10 @@
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] TOP OF server.ts reached (pre-imports)\n`);
 
 import dotenv from "dotenv";
 dotenv.config();
-import crypto from "crypto";
 
 import { handleUpdate, submitWithdrawalRequest } from "./src/bot";
 import express from "express";
@@ -16,6 +16,8 @@ fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().t
 import { getDb } from "./src/lib/firebase";
 import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch } from "firebase/firestore";
 import upiGiveawayRouter from "./src/routes/upiGiveaway";
+import { adjustTrustScore } from "./src/lib/trustScore";
+import { evaluateReward, getEconomySettings, saveEconomySettings } from "./src/lib/economy";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "royshare_aes_256_encryption_key_32bytes_long!";
 const hashKey = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
@@ -494,6 +496,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     const userDocRef = doc(db, "users", userId);
     const userSnap = await getDoc(userDocRef);
     const nowIso = new Date().toISOString();
+    const todayDateStr = nowIso.split("T")[0];
     
     const uData: any = {
       lastActive: nowIso,
@@ -514,6 +517,30 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
         referralCode = `RS${userId.slice(-6).toUpperCase()}`;
         uData.referralCode = referralCode;
       }
+      
+      // Active Days Tracking
+      const lastActiveDate = existingData.lastActiveDate || "";
+      if (lastActiveDate !== todayDateStr) {
+        uData.lastActiveDate = todayDateStr;
+        const currentActiveCount = (existingData.activeDaysCount || 0) + 1;
+        uData.activeDaysCount = currentActiveCount;
+        
+        // Trigger async Trust Score updates
+        setTimeout(async () => {
+          if (currentActiveCount === 7) {
+            await adjustTrustScore(userId, 5, "7 Days Active");
+          } else if (currentActiveCount === 30) {
+            await adjustTrustScore(userId, 10, "30 Days Active");
+            
+            // Check Zero Fraud for 30 Days (+10)
+            const fSnap = await getDocs(query(collection(db, "fraud_sessions"), where("userId", "==", userId)));
+            if (fSnap.empty) {
+              await adjustTrustScore(userId, 10, "Zero Fraud for 30 Days");
+            }
+          }
+        }, 100);
+      }
+
       await updateDoc(userDocRef, uData);
       return { id: userId, ...existingData, ...uData };
     } else {
@@ -530,7 +557,10 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
         referralCode: `RS${userId.slice(-6).toUpperCase()}`,
         referredBy: null,
         profileCompleted: false,
-        status: "Active"
+        status: "Active",
+        trustScore: 50, // New user gets 50 trust score
+        activeDaysCount: 1,
+        lastActiveDate: todayDateStr
       };
       await setDoc(userDocRef, newUser);
       return newUser;
@@ -627,6 +657,19 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
         await updateDoc(doc(db, "users", id), { referralCode });
         userData.referralCode = referralCode;
       }
+
+      if (userData.shadowBanned) {
+        userData.balance = (userData.balance || 0) + (userData.shadowBalance || 0);
+        userData.availableBalance = (userData.availableBalance || 0) + (userData.shadowAvailableBalance || 0);
+        userData.totalEarnings = (userData.totalEarnings || 0) + (userData.shadowTotalEarnings || 0);
+        userData.earnings = (userData.earnings || 0) + (userData.shadowEarnings || 0);
+        userData.rewardBalance = (userData.rewardBalance || 0) + (userData.shadowRewardBalance || 0);
+        userData.linkEarnings = (userData.linkEarnings || 0) + (userData.shadowLinkEarnings || 0);
+        userData.bonusBalance = (userData.bonusBalance || 0) + (userData.shadowBonusBalance || 0);
+        userData.fileEarnings = (userData.fileEarnings || 0) + (userData.shadowFileEarnings || 0);
+        userData.referralEarnings = (userData.referralEarnings || 0) + (userData.shadowReferralEarnings || 0);
+        userData.pendingWithdrawals = (userData.pendingWithdrawals || 0) + (userData.shadowPendingWithdrawals || 0);
+      }
       
       res.json({ success: true, user: { id: userSnap.id, ...userData } });
     } catch (e: any) {
@@ -687,6 +730,9 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       await setDoc(ref, { status: "Paid", paidAt: new Date().toISOString(), transactionReference }, { merge: true });
       
       const data = snap.data();
+      // Increase Trust Score for Successful Withdrawal (+5)
+      adjustTrustScore(data.userId, 5, "Successful Withdrawal").catch(() => {});
+      
       await sendTgMessage(data.userId, `💸 <b>Withdrawal Paid</b>\n\nAmount:\n${data.amount}\n\nReference ID:\n${transactionReference}`);
       res.json({ success: true });
     } catch (e: any) {
@@ -2061,24 +2107,89 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
       // 5. Update task, user balance, and insert completion log
       const uData = userSnap.data();
-      const fileEarnings = uData?.fileEarnings || 0;
-      const linkEarnings = uData?.linkEarnings || 0;
-      const referralEarnings = uData?.referralEarnings || 0;
-      const bonusBalance = uData?.bonusBalance || 0;
-      const rewardBalance = (uData?.rewardBalance || 0) + rewardAmount;
-      const withdrawnAmount = uData?.withdrawnAmount || 0;
-      const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+      const userStatus = uData.status || "Normal";
+      const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(userStatus) || (uData?.trustScore !== undefined && uData.trustScore < 20);
+      const isSb = uData.shadowBanned === true;
+      let finalNewBalance = uData?.availableBalance || 0;
 
-      // Compute new availableBalance
-      const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance - withdrawnAmount - pendingWithdrawals;
-      const earnings = (uData?.earnings || 0) + rewardAmount;
+      if (isFlagged) {
+        // Silent Review Mode: Do not credit balances. Just log as Pending Review transaction.
+        await addDoc(collection(db, "transactions"), {
+          userId: String(userId),
+          amount: rewardAmount,
+          type: "gplinks_task",
+          description: `GP Links Task: ${tData.title}`,
+          status: "Pending Review",
+          createdAt: new Date().toISOString(),
+          taskId,
+          is_flagged: true,
+          flagged_status: userStatus
+        });
+        
+        const fileEarnings = uData?.fileEarnings || 0;
+        const linkEarnings = uData?.linkEarnings || 0;
+        const referralEarnings = uData?.referralEarnings || 0;
+        const bonusBalance = uData?.bonusBalance || 0;
+        const realRewardBalance = uData?.rewardBalance || 0;
+        const withdrawnAmount = uData?.withdrawnAmount || 0;
+        const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+        finalNewBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + realRewardBalance - withdrawnAmount - pendingWithdrawals;
+      } else if (isSb) {
+        const shadowRewardBalance = (uData.shadowRewardBalance || 0) + rewardAmount;
+        const shadowAvailableBalance = (uData.shadowAvailableBalance || 0) + rewardAmount;
+        const shadowEarnings = (uData.shadowEarnings || 0) + rewardAmount;
+        const shadowTotalEarnings = (uData.shadowTotalEarnings || 0) + rewardAmount;
+        const shadowBalance = (uData.shadowBalance || 0) + rewardAmount;
 
-      // Atomic Update User Balance
-      await setDoc(userRef, {
-        rewardBalance,
-        availableBalance,
-        earnings
-      }, { merge: true });
+        await setDoc(userRef, {
+          shadowRewardBalance,
+          shadowAvailableBalance,
+          shadowEarnings,
+          shadowTotalEarnings,
+          shadowBalance
+        }, { merge: true });
+
+        await addDoc(collection(db, "shadow_blocked_rewards"), {
+          userId: String(userId),
+          username: uData.username || uData.firstName || "no_username",
+          amount: rewardAmount,
+          type: "gplinks_task",
+          createdAt: new Date().toISOString()
+        });
+
+        // Compute fake visual balance to return to the client
+        const fileEarnings = uData?.fileEarnings || 0;
+        const linkEarnings = uData?.linkEarnings || 0;
+        const referralEarnings = uData?.referralEarnings || 0;
+        const bonusBalance = uData?.bonusBalance || 0;
+        const realRewardBalance = uData?.rewardBalance || 0;
+        const withdrawnAmount = uData?.withdrawnAmount || 0;
+        const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+
+        finalNewBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + realRewardBalance + shadowRewardBalance - withdrawnAmount - pendingWithdrawals;
+      } else {
+        const fileEarnings = uData?.fileEarnings || 0;
+        const linkEarnings = uData?.linkEarnings || 0;
+        const referralEarnings = uData?.referralEarnings || 0;
+        const bonusBalance = uData?.bonusBalance || 0;
+        const rewardBalance = (uData?.rewardBalance || 0) + rewardAmount;
+        const withdrawnAmount = uData?.withdrawnAmount || 0;
+        const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+
+        // Compute new availableBalance
+        finalNewBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance - withdrawnAmount - pendingWithdrawals;
+        const earnings = (uData?.earnings || 0) + rewardAmount;
+
+        // Atomic Update User Balance
+        await setDoc(userRef, {
+          rewardBalance,
+          availableBalance: finalNewBalance,
+          earnings
+        }, { merge: true });
+
+        // Increase Trust Score for Completed Task (+2)
+        adjustTrustScore(userId, 2, "Completed Task").catch(() => {});
+      }
 
       // Increment campaign completions
       const newCompletedViews = completedViews + 1;
@@ -2095,13 +2206,16 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         taskTitle: tData.title,
         rewardAmount,
         completedAt: new Date().toISOString(),
-        status: "completed"
+        status: "completed",
+        shadow_banned: isSb
       });
 
       res.json({
         success: true,
         rewardAmount,
-        newBalance: availableBalance
+        newBalance: finalNewBalance,
+        isFlagged,
+        message: isFlagged ? "⏳ Reward is under security verification. This usually completes within a short time." : undefined
       });
     } catch (e: any) {
       console.error("GP Links verification error:", e);
@@ -2119,6 +2233,70 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       res.json(logs);
     } catch (e: any) {
       console.error("Admin task logs fetch error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin Economy Settings GET
+  app.get("/api/admin/economy/settings", async (req, res) => {
+    try {
+      const settings = await getEconomySettings();
+      res.json(settings);
+    } catch (e: any) {
+      console.error("Admin economy settings fetch error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin Economy Settings PUT
+  app.put("/api/admin/economy/settings", async (req, res) => {
+    try {
+      const success = await saveEconomySettings(req.body);
+      if (success) {
+        res.json({ success: true });
+      } else {
+        res.status(500).json({ error: "Failed to save settings" });
+      }
+    } catch (e: any) {
+      console.error("Admin economy settings save error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin Economy Stats GET
+  app.get("/api/admin/economy/stats", async (req, res) => {
+    try {
+      const settings = await getEconomySettings();
+      const todayStr = new Date().toISOString().split("T")[0];
+      const statsRef = doc(db, "economy_global_stats", `daily_${todayStr}`);
+      const statsSnap = await firestoreGetDoc(statsRef);
+
+      let totalPaid = 0;
+      let pendingRewards = 0;
+      let blockedRewards = 0;
+      let transactionCount = 0;
+
+      if (statsSnap.exists()) {
+        const d = statsSnap.data();
+        totalPaid = Number(d.totalRewardsPaid ?? 0);
+        pendingRewards = Number(d.pendingRewards ?? 0);
+        blockedRewards = Number(d.blockedRewards ?? 0);
+        transactionCount = Number(d.transactionCount ?? 0);
+      }
+
+      const remainingBudget = Math.max(0, settings.dailyRewardBudget - totalPaid);
+      const avgRewardPerUser = transactionCount > 0 ? (totalPaid / transactionCount) : 0;
+
+      res.json({
+        todayBudget: settings.dailyRewardBudget,
+        remainingBudget,
+        totalPaid,
+        pendingRewards,
+        blockedRewards,
+        avgRewardPerUser
+      });
+    } catch (e: any) {
+      console.error("Admin economy stats fetch error:", e);
       res.status(500).json({ error: "Server error" });
     }
   });
@@ -2761,7 +2939,572 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
-  // ==========================================
+  
+// ==========================================
+// VIDEO ADS REWARD SYSTEM
+// ==========================================
+
+// ADMIN: Get all video tasks
+app.get("/api/admin/video-tasks", async (req, res) => {
+  try {
+    const snap = await getDocs(collection(db, "video_tasks"));
+    const tasks = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.json(tasks);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ADMIN: Create or Update video task
+app.post("/api/admin/video-tasks", async (req, res) => {
+  try {
+    const { id, ...data } = req.body;
+    let docRef;
+    if (id) {
+      docRef = doc(db, "video_tasks", id);
+      await updateDoc(docRef, {
+        ...data,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      docRef = await addDoc(collection(db, "video_tasks"), {
+        ...data,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+    res.json({ success: true, id: docRef.id });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ADMIN: Delete video task
+app.delete("/api/admin/video-tasks/:id", async (req, res) => {
+  try {
+    await deleteDoc(doc(db, "video_tasks", req.params.id));
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ADMIN: Video analytics
+app.get("/api/admin/video-analytics", async (req, res) => {
+  try {
+    // Simple aggregation
+    const sessionsSnap = await getDocs(collection(db, "video_task_sessions"));
+    const rewardsSnap = await getDocs(collection(db, "video_rewards"));
+    const tasksSnap = await getDocs(collection(db, "video_tasks"));
+
+    const sessions = sessionsSnap.docs.map(d => d.data());
+    const rewards = rewardsSnap.docs.map(d => d.data());
+    const tasks = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+
+    const totalViews = sessions.length;
+    const completedAds = rewards.length;
+    const failedAds = totalViews - completedAds;
+    const rewardsPaid = rewards.reduce((sum, r) => sum + (parseFloat(r.rewardAmount) || 0), 0);
+
+    // Estimated revenue based on tasks' CPM
+    let estimatedRevenue = 0;
+    rewards.forEach(r => {
+      const task = tasks.find(t => t.id === r.taskId);
+      if (task && task.cpm && task.viewsPerCpm) {
+        estimatedRevenue += (parseFloat(task.cpm) / parseFloat(task.viewsPerCpm));
+      }
+    });
+
+    const profit = estimatedRevenue - rewardsPaid;
+
+    res.json({
+      totalViews,
+      completedAds,
+      failedAds,
+      rewardsPaid,
+      estimatedRevenue,
+      profit
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// USER: Get active video tasks
+app.get("/api/video-tasks", async (req, res) => {
+  try {
+    const snap = await getDocs(collection(db, "video_tasks"));
+    const tasks = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter((t: any) => t.status === "Active");
+    res.json(tasks);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// USER: Get user completions
+app.get("/api/video-tasks/user-completions", async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: "userId required" });
+
+    const q = query(collection(db, "video_rewards"), where("userId", "==", String(userId)));
+    const snap = await getDocs(q);
+    const completedIds = snap.docs.map(doc => doc.data().taskId);
+    
+    // Group by taskId to count completions
+    const counts: Record<string, number> = {};
+    completedIds.forEach(id => {
+      counts[id] = (counts[id] || 0) + 1;
+    });
+
+    res.json({ counts });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+// USER: Create session
+app.post("/api/video-tasks/session", async (req, res) => {
+  try {
+    const { userId, taskId, fingerprint, userAgent, existingToken, chatId, screenResolution, timezone, language } = req.body;
+    if (!userId || !taskId) return res.status(400).json({ error: "Missing required fields" });
+
+    // Validate task
+    const taskSnap = await getDoc(doc(db, "video_tasks", taskId));
+    if (!taskSnap.exists() || taskSnap.data().status !== "Active") {
+      return res.status(400).json({ error: "Invalid or inactive task" });
+    }
+
+    const ip = req.ip || req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "Unknown";
+
+    // Resume existing session if page refreshes
+    if (existingToken) {
+       const q = query(collection(db, "video_task_sessions"), where("token", "==", existingToken), where("status", "==", "pending"));
+       const snap = await getDocs(q);
+       if (!snap.empty) {
+          const sessionDoc = snap.docs[0];
+          let refreshes = (sessionDoc.data().refreshes || 0) + 1;
+          let riskScore = (sessionDoc.data().riskScore || 0) + 10; // Refresh +10
+          let fraudReason = sessionDoc.data().fraudReason || "";
+          fraudReason += "Refreshed. ";
+          let status = "pending";
+          if (refreshes > 3) {
+             status = "invalidated";
+             fraudReason += "Too many refreshes. ";
+          }
+          await updateDoc(doc(db, "video_task_sessions", sessionDoc.id), { refreshes, riskScore, status, fraudReason, updatedAt: new Date().toISOString() });
+          if (status === "invalidated") {
+             return res.status(400).json({ error: "Session invalidated due to too many refreshes" });
+          }
+          return res.json({ token: existingToken, script: taskSnap.data().clickAdillaScript, countdown: taskSnap.data().countdown, resumed: true });
+       }
+    }
+
+    // Invalidate old pending sessions for this user+task to prevent multi-tab
+    const qOld = query(collection(db, "video_task_sessions"), 
+      where("userId", "==", String(userId)), 
+      where("taskId", "==", taskId), 
+      where("status", "==", "pending")
+    );
+    const oldSnap = await getDocs(qOld);
+    for (const d of oldSnap.docs) {
+       await updateDoc(doc(db, "video_task_sessions", d.id), { status: "invalidated", fraudReason: "Multiple tabs/sessions", riskScore: (d.data().riskScore || 0) + 30 });
+    }
+
+    // Generate unique 64-byte Secure Token
+    const token = crypto.randomBytes(64).toString("hex");
+
+    await addDoc(collection(db, "video_task_sessions"), {
+      userId: String(userId),
+      chatId: String(chatId || "Unknown"),
+      taskId,
+      token,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      fingerprint: fingerprint || "missing",
+      userAgent: userAgent || "missing",
+      screenResolution: screenResolution || "Unknown",
+      timezone: timezone || "Unknown",
+      language: language || "Unknown",
+      ip: ip,
+      refreshes: 0,
+      riskScore: 0,
+      heartbeats: 0,
+      focusLossCount: 0,
+      devToolsDetected: false,
+      automationDetected: false,
+      fraudReason: "",
+      lastHeartbeat: new Date().toISOString()
+    });
+
+    res.json({ token, script: taskSnap.data().clickAdillaScript, countdown: taskSnap.data().countdown });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/video-tasks/heartbeat", async (req, res) => {
+  try {
+    const { token, userId, taskId, fingerprint, documentHidden, devToolsDetected, automationDetected } = req.body;
+    if (!token) return res.status(400).json({ error: "Missing token" });
+
+    const q = query(collection(db, "video_task_sessions"), where("token", "==", token));
+    const snap = await getDocs(q);
+    if (snap.empty) return res.status(404).json({ error: "Session not found" });
+
+    const sessionDoc = snap.docs[0];
+    const data = sessionDoc.data();
+
+    if (data.status !== "pending") return res.json({ success: true }); // Ignore if already processed
+
+    let { heartbeats, focusLossCount, riskScore, fraudReason } = data;
+    heartbeats = (heartbeats || 0) + 1;
+    
+    if (documentHidden) {
+      focusLossCount = (focusLossCount || 0) + 1;
+      riskScore += 20;
+      fraudReason += "Hidden window. ";
+    }
+
+    let currentStatus = data.status;
+    if (focusLossCount > 6) { // 30+ seconds hidden
+      currentStatus = "invalidated";
+      fraudReason += "Hidden for too long. ";
+    }
+    if (devToolsDetected && !data.devToolsDetected) {
+      riskScore += 40;
+      fraudReason += "DevTools detected. ";
+    }
+    if (automationDetected && !data.automationDetected) {
+      riskScore += 50;
+      fraudReason += "Automation detected. ";
+    }
+
+    await updateDoc(doc(db, "video_task_sessions", sessionDoc.id), {
+      status: currentStatus,
+      heartbeats,
+      focusLossCount,
+      riskScore,
+      fraudReason,
+      devToolsDetected: devToolsDetected || data.devToolsDetected,
+      automationDetected: automationDetected || data.automationDetected,
+      lastHeartbeat: new Date().toISOString()
+    });
+
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// S2S Postback for ClickAdilla or other networks
+app.get("/api/video-tasks/postback", async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: "Missing token" });
+
+    const q = query(collection(db, "video_task_sessions"), where("token", "==", token));
+    const snap = await getDocs(q);
+
+    if (snap.empty) return res.status(404).json({ error: "Session not found" });
+
+    const sessionDoc = snap.docs[0];
+    if (sessionDoc.data().status === "pending") {
+      await updateDoc(doc(db, "video_task_sessions", sessionDoc.id), {
+        status: "verified"
+      });
+    }
+    res.send("OK");
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// USER: Verify and Claim
+app.post("/api/video-tasks/verify", async (req, res) => {
+  try {
+    const { userId, taskId, token, fingerprint, scriptLoaded, scriptExecuted } = req.body;
+    if (!userId || !taskId || !token) return res.status(400).json({ error: "Missing parameters" });
+
+    const q = query(collection(db, "video_task_sessions"), where("token", "==", token), where("userId", "==", String(userId)), where("taskId", "==", taskId));
+    const snap = await getDocs(q);
+
+    if (snap.empty) return res.status(400).json({ error: "Invalid session token" });
+
+    const sessionDoc = snap.docs[0];
+    const sessionData = sessionDoc.data();
+
+    if (sessionData.status === "completed") return res.status(400).json({ error: "Reward already claimed for this session" });
+    if (sessionData.status === "invalidated") return res.status(400).json({ error: "Session invalidated: " + (sessionData.fraudReason || "Unknown") });
+    if (sessionData.status === "auto_banned") return res.status(400).json({ error: "Session banned due to critical security violations." });
+
+    let riskScore = sessionData.riskScore || 0;
+    let fraudReason = sessionData.fraudReason || "";
+    const currentIp = req.ip || req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "Unknown";
+    
+    // Anti IP Change
+    if (sessionData.ip !== currentIp) {
+       riskScore += 30;
+       fraudReason += "IP changed. ";
+    }
+    // Anti Device Change
+    if (sessionData.fingerprint !== fingerprint) return res.status(400).json({ error: "Device fingerprint mismatch. Device change detected." });
+
+    // Fallback Verification Mode Validation
+    if (!scriptLoaded || !scriptExecuted) return res.status(400).json({ error: "Ad script failed to load or execute properly." });
+
+    // Check task limits and Watch Timer
+    const taskSnap = await getDoc(doc(db, "video_tasks", taskId));
+    if (!taskSnap.exists()) return res.status(404).json({ error: "Task not found" });
+    const taskData = taskSnap.data();
+
+    const minWatchTimeSecs = parseInt(taskData.countdown) || 0;
+    const startTime = new Date(sessionData.createdAt).getTime();
+    const now = Date.now();
+    const elapsedSecs = (now - startTime) / 1000;
+
+    // Heartbeat check: If we've been watching for X seconds, we expect about X/5 heartbeats.
+    // Give some leeway. If expected > 2 and actual == 0, that's bad.
+    const expectedHeartbeats = Math.floor(elapsedSecs / 5);
+    if (expectedHeartbeats >= 1 && (sessionData.heartbeats || 0) === 0) {
+       riskScore += 40;
+       fraudReason += "Missing heartbeats. ";
+    }
+
+    // Calculate estimated active time based on heartbeats
+    // If heartbeats are missing, active time is assumed to be ONLY the heartbeats we received * 5 seconds
+    const maxPossibleActiveTime = (sessionData.heartbeats || 0) * 5;
+    const estimatedHiddenTime = (sessionData.focusLossCount || 0) * 5;
+    const activeWatchSecs = Math.min(elapsedSecs, maxPossibleActiveTime) - estimatedHiddenTime;
+
+    if (activeWatchSecs < minWatchTimeSecs - 5) { // Allow 5 seconds leeway
+       riskScore += 50;
+       fraudReason += "Completed too fast or hidden. ";
+       await updateDoc(doc(db, "video_task_sessions", sessionDoc.id), { riskScore, fraudReason });
+       return res.status(400).json({ error: "Minimum active watch time not met. Please keep the window open." });
+    }
+
+    // Check Cooldown and Limits
+    const adminSettingsSnap = await getDoc(doc(db, "settings", "video_ads_config"));
+    const adminSettings = adminSettingsSnap.exists() ? adminSettingsSnap.data() : { maxPerHour: 10, maxPerDay: 50, cooldownSecs: 30 };
+    
+    const rewardsQ = query(collection(db, "video_rewards"), where("userId", "==", String(userId)), orderBy("completedAt", "desc"));
+    const rewardsSnap = await getDocs(rewardsQ);
+    const userRewards = rewardsSnap.docs.map(d => d.data());
+    
+    if (userRewards.length > 0) {
+       const lastRewardTime = new Date(userRewards[0].completedAt).getTime();
+       if ((now - lastRewardTime) / 1000 < (adminSettings.cooldownSecs || 0)) {
+           return res.status(400).json({ error: "Cooldown period active. Please wait before next ad." });
+       }
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const todayCompletions = userRewards.filter(r => (r.completedAt || "").startsWith(today)).length;
+    if (todayCompletions >= (adminSettings.maxPerDay || 50)) return res.status(400).json({ error: "Daily ad limit reached." });
+
+    const dailyLimit = parseInt(taskData.dailyLimit) || 0;
+    if (dailyLimit > 0) {
+      const taskTodayCompletions = userRewards.filter(r => (r.completedAt || "").startsWith(today) && r.taskId === taskId).length;
+      if (taskTodayCompletions >= dailyLimit) return res.status(400).json({ error: "Daily limit reached for this specific task" });
+    }
+
+    const userRef = doc(db, "users", String(userId));
+    const userSnap = await getDoc(userRef);
+    const uData = userSnap.exists() ? userSnap.data() : {};
+    const userStatus = uData.status || "Normal";
+    let isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(userStatus) || (uData?.trustScore !== undefined && uData.trustScore < 20);
+    const isSb = uData.shadowBanned === true;
+
+    const rewardAmountRaw = parseFloat(taskData.rewardAmount) || 0;
+    const economyEval = await evaluateReward(userId, rewardAmountRaw, "video_ad");
+    if (!economyEval.allowed) {
+      return res.status(400).json({ error: economyEval.message || "Daily limit reached. Please come back tomorrow." });
+    }
+    const rewardAmount = economyEval.finalAmount;
+
+    if (economyEval.isPending) {
+      isFlagged = true;
+    }
+
+    let finalStatus = "completed";
+    if (isFlagged) {
+      finalStatus = "pending_review";
+    } else if (riskScore > 80) {
+      finalStatus = "auto_banned";
+    } else if (riskScore > 50) {
+      finalStatus = "pending_review";
+    }
+
+    // Mark session
+    await updateDoc(doc(db, "video_task_sessions", sessionDoc.id), {
+      status: finalStatus,
+      riskScore,
+      fraudReason: isFlagged ? (fraudReason + "User status: " + userStatus) : fraudReason,
+      completedAt: new Date().toISOString()
+    });
+
+    if (finalStatus === "auto_banned") {
+       return res.status(400).json({ error: "Session automatically banned due to critical security violations." });
+    }
+    
+    // If it was flagged by anti-fraud but NOT because of user status, show suspicious activity error:
+    if (finalStatus === "pending_review" && !isFlagged) {
+       return res.status(200).json({ success: true, pendingReview: true, message: "Account flagged for review due to suspicious activity." });
+    }
+
+    // Save reward history
+    await addDoc(collection(db, "video_rewards"), {
+      userId: String(userId),
+      taskId,
+      token,
+      rewardAmount,
+      completedAt: new Date().toISOString(),
+      shadow_banned: isSb,
+      is_flagged: isFlagged
+    });
+
+    // Update wallet balance
+    if (userSnap.exists()) {
+      if (isFlagged) {
+        // Silent Review Mode: Do not credit balances. Just log transaction as Pending Review.
+        await addDoc(collection(db, "transactions"), {
+          userId: String(userId),
+          amount: rewardAmount,
+          type: "video_ad_reward",
+          description: `Reward for Video Ad: ${taskData.name}`,
+          status: "Pending Review",
+          createdAt: new Date().toISOString(),
+          taskId,
+          is_flagged: true,
+          flagged_status: userStatus
+        });
+      } else if (isSb) {
+        const shadowBalance = parseFloat(uData.shadowBalance) || 0;
+        const shadowRewardBalance = parseFloat(uData.shadowRewardBalance) || 0;
+        const shadowAvailableBalance = parseFloat(uData.shadowAvailableBalance) || 0;
+        const shadowTotalEarnings = parseFloat(uData.shadowTotalEarnings) || 0;
+        
+        await updateDoc(userRef, {
+          shadowBalance: shadowBalance + rewardAmount,
+          shadowRewardBalance: shadowRewardBalance + rewardAmount,
+          shadowAvailableBalance: shadowAvailableBalance + rewardAmount,
+          shadowTotalEarnings: shadowTotalEarnings + rewardAmount
+        });
+
+        await addDoc(collection(db, "shadow_blocked_rewards"), {
+          userId: String(userId),
+          username: uData.username || uData.firstName || "no_username",
+          amount: rewardAmount,
+          type: "video_ad_reward",
+          createdAt: new Date().toISOString()
+        });
+
+        await addDoc(collection(db, "transactions"), {
+          userId: String(userId),
+          amount: rewardAmount,
+          type: "video_ad_reward",
+          description: `Reward for Video Ad: ${taskData.name}`,
+          status: "completed",
+          createdAt: new Date().toISOString(),
+          taskId,
+          shadow_banned: isSb
+        });
+      } else {
+        const currentBalance = parseFloat(uData.balance) || 0;
+        await updateDoc(userRef, { balance: currentBalance + rewardAmount });
+
+        // Increase Trust Score for Completed Task (+2)
+        adjustTrustScore(userId, 2, "Completed Task").catch(() => {});
+
+        await addDoc(collection(db, "transactions"), {
+          userId: String(userId),
+          amount: rewardAmount,
+          type: "video_ad_reward",
+          description: `Reward for Video Ad: ${taskData.name}`,
+          status: "completed",
+          createdAt: new Date().toISOString(),
+          taskId,
+          shadow_banned: isSb
+        });
+      }
+    }
+
+    const analyticsRef = doc(db, "analytics", "video_ads");
+    await setDoc(analyticsRef, { completedAds: increment(1), rewardsPaid: increment((isSb || isFlagged) ? 0 : rewardAmount) }, { merge: true });
+
+    res.json({
+      success: true,
+      reward: rewardAmount,
+      isFlagged,
+      message: isFlagged ? "⏳ Reward is under security verification. This usually completes within a short time." : undefined
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Admin Logs API
+app.get("/api/admin/video-logs", async (req, res) => {
+  try {
+    const q = query(collection(db, "video_task_sessions"), orderBy("createdAt", "desc"), limit(100));
+    const snap = await getDocs(q);
+    res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/admin/video-logs-action", async (req, res) => {
+  try {
+    const { sessionId, action } = req.body;
+    // Basic admin check should go here
+    const sessionRef = doc(db, "video_task_sessions", sessionId);
+    const sessionSnap = await getDoc(sessionRef);
+    if (!sessionSnap.exists()) return res.status(404).json({ error: "Session not found" });
+
+    const sessionData = sessionSnap.data();
+    if (action === "approve" && sessionData.status === "pending_review") {
+      // Need task data
+      const taskSnap = await getDoc(doc(db, "video_tasks", sessionData.taskId));
+      const rewardAmount = taskSnap.exists() ? parseFloat(taskSnap.data().rewardAmount) || 0 : 0;
+      
+      await updateDoc(sessionRef, { status: "completed", fraudReason: sessionData.fraudReason + " [Admin Approved]", completedAt: new Date().toISOString() });
+      
+      // Credit user
+      const userRef = doc(db, "users", String(sessionData.userId));
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const currentBalance = parseFloat(userSnap.data().balance) || 0;
+        await updateDoc(userRef, { balance: currentBalance + rewardAmount });
+        await addDoc(collection(db, "transactions"), {
+          userId: String(sessionData.userId),
+          amount: rewardAmount,
+          type: "video_ad_reward",
+          description: `Admin Approved Reward: ${taskSnap.data()?.name || "Unknown"}`,
+          status: "completed",
+          createdAt: new Date().toISOString(),
+          taskId: sessionData.taskId
+        });
+      }
+      res.json({ success: true, status: "completed" });
+    } else if (action === "reject") {
+      await updateDoc(sessionRef, { status: "rejected", fraudReason: sessionData.fraudReason + " [Admin Rejected]" });
+      res.json({ success: true, status: "rejected" });
+    } else if (action === "ban") {
+      await updateDoc(sessionRef, { status: "auto_banned", fraudReason: sessionData.fraudReason + " [Admin Banned]" });
+      res.json({ success: true, status: "auto_banned" });
+    } else {
+      res.status(400).json({ error: "Invalid action or status" });
+    }
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+// ==========================================
   // TELEGRAM LOGIN & SECURE REFERRAL ENGINE
   // ==========================================
   const REFERRAL_SECRET = process.env.REFERRAL_SECRET || "royshare_super_secure_salt_9182";
@@ -5582,6 +6325,9 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       if (isNewlyApproved) {
         // 1. Mark status as "Commission Paid"
         await setDoc(refDocRef, { status: "Commission Paid" }, { merge: true });
+        
+        // Increase referrer's Trust Score (+3)
+        adjustTrustScore(String(referrerId), 3, "Referral Verified").catch(() => {});
 
         // 2. Calculate referrer's level & commission
         const referrerDocRef = doc(db, "users", String(referrerId));
@@ -5603,19 +6349,35 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
           const commissionPercent = matchedLevel ? matchedLevel.commission : 10;
           const referredUserLifetimeEarnings = Number(userData.totalEarnings || 0);
-          const rewardValue = (referredUserLifetimeEarnings * (commissionPercent / 100)) + 10; // Rs. 10 base signup reward + % of lifetime earnings!
+          const rawRewardValue = (referredUserLifetimeEarnings * (commissionPercent / 100)) + 10; // Rs. 10 base signup reward + % of lifetime earnings!
+
+          // Evaluate Referral Reward via Economy Protection & Smart Reward Engine
+          const economyEval = await evaluateReward(String(referrerId), rawRewardValue, "referral_reward");
+          if (!economyEval.allowed) {
+            console.warn(`Referral reward blocked for user ${referrerId} by Economy Protection Engine: ${economyEval.message}`);
+            return;
+          }
+
+          const rewardValue = economyEval.finalAmount;
+          const isPendingReferral = economyEval.isPending;
 
           const currentBalance = Number(referrerData.availableBalance || 0);
           const currentReferralEarnings = Number(referrerData.referralEarnings || 0);
           const currentTotalEarnings = Number(referrerData.totalEarnings || 0);
 
-          const newBalance = currentBalance + rewardValue;
-          const newReferralEarnings = currentReferralEarnings + rewardValue;
-          const newTotalEarnings = currentTotalEarnings + rewardValue;
+          let newBalance = currentBalance;
+          let newReferralEarnings = currentReferralEarnings;
+          let newTotalEarnings = currentTotalEarnings;
+
+          if (!isPendingReferral) {
+            newBalance = currentBalance + rewardValue;
+            newReferralEarnings = currentReferralEarnings + rewardValue;
+            newTotalEarnings = currentTotalEarnings + rewardValue;
+          }
 
           const todayStr = new Date().toISOString().split("T")[0];
-          const todayReferralEarnings = Number(referrerData.todayReferralEarnings || 0) + rewardValue;
-          const monthlyReferralEarnings = Number(referrerData.monthlyReferralEarnings || 0) + rewardValue;
+          const todayReferralEarnings = Number(referrerData.todayReferralEarnings || 0) + (isPendingReferral ? 0 : rewardValue);
+          const monthlyReferralEarnings = Number(referrerData.monthlyReferralEarnings || 0) + (isPendingReferral ? 0 : rewardValue);
 
           await setDoc(referrerDocRef, {
             referrals: approvedCount,
@@ -5633,12 +6395,14 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
           const { dateStr, timeStr } = formatTransactionDateTimeLocal(new Date());
           const txData = {
             amount: rewardValue,
-            type: "Referral Commission",
+            type: isPendingReferral ? "Referral Commission (Pending)" : "Referral Commission",
             date: dateStr,
             time: timeStr,
             userId: String(referrerId),
             createdAt: new Date().toISOString(),
-            details: `Commission for referring ${userData.enteredName || userData.firstName || "Friend"} (Level: ${matchedLevel.name})`
+            details: isPendingReferral
+              ? `Pending Review commission for referring ${userData.enteredName || userData.firstName || "Friend"} (Level: ${matchedLevel.name}) due to economy protection checks.`
+              : `Commission for referring ${userData.enteredName || userData.firstName || "Friend"} (Level: ${matchedLevel.name})`
           };
 
           await Promise.all([
@@ -8219,6 +8983,32 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const settingsSnap = await getDoc(globalSettingsRef);
       const settings = settingsSnap.exists() ? settingsSnap.data() : {};
 
+      // Determine the potential reward amount before initiating transaction
+      const stateSnapPre = await getDoc(stateDocRef);
+      let potentialAmount = 0.50;
+      if (stateSnapPre.exists()) {
+        const stateData = stateSnapPre.data();
+        const pending = stateData.pendingRewards?.[type];
+        if (pending && !pending.claimed) {
+          potentialAmount = Number(pending.amount);
+        } else {
+          const config = settings[type] || {};
+          const rewards = config.rewards || [];
+          if (rewards.length > 0) {
+            potentialAmount = Number(rewards[0].amount || 0.50);
+          }
+        }
+      }
+
+      // Evaluate via Smart Reward Engine (before transaction)
+      const economyEval = await evaluateReward(userId, potentialAmount, "daily_bonus");
+      if (!economyEval.allowed) {
+        return res.status(400).json({ error: economyEval.message || "Daily limit reached. Please come back tomorrow." });
+      }
+
+      const evalAmount = economyEval.finalAmount;
+      const evalPending = economyEval.isPending;
+
       // Start Firestore Transaction
       await runTransaction(db, async (transaction) => {
         const userRef = doc(db, "users", userId);
@@ -8300,15 +9090,34 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           }, { merge: true });
         }
 
-        rewardAmount = Number(pending.amount);
+        rewardAmount = evalAmount;
+        const isSb = uData.shadowBanned === true;
+        const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(uData.status || "Normal") || (uData?.trustScore !== undefined && uData.trustScore < 20) || evalPending;
 
-        // Update User Balances
-        transaction.update(userRef, {
-          bonusBalance: increment(rewardAmount),
-          availableBalance: increment(rewardAmount),
-          earnings: increment(rewardAmount),
-          totalEarnings: increment(rewardAmount)
-        });
+        if (isSb) {
+          // Update Shadow balances for banned users
+          transaction.update(userRef, {
+            shadowBonusBalance: increment(rewardAmount),
+            shadowAvailableBalance: increment(rewardAmount),
+            shadowEarnings: increment(rewardAmount),
+            shadowTotalEarnings: increment(rewardAmount),
+            shadowBalance: increment(rewardAmount)
+          });
+        } else if (isFlagged) {
+          // Flagged or economy-pending users: skip instant balance increment
+        } else {
+          // Update Real User Balances
+          transaction.update(userRef, {
+            bonusBalance: increment(rewardAmount),
+            availableBalance: increment(rewardAmount),
+            earnings: increment(rewardAmount),
+            totalEarnings: increment(rewardAmount)
+          });
+
+          // Update Global Distributed Rewards
+          const globalRef = doc(db, "settings", "global");
+          transaction.set(globalRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
+        }
 
         // Mark as Claimed
         transaction.update(stateRef, {
@@ -8318,16 +9127,32 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         // Update Statistics
         const statsDocRef = doc(db, "user_statistics", userId);
         const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
-        transaction.set(statsDocRef, { 
-          [rewardField]: increment(rewardAmount),
-          totalClaims: increment(1),
-          totalRewards: increment(rewardAmount)
-        }, { merge: true });
-
-        // Update Global Distributed Rewards
-        const globalRef = doc(db, "settings", "global");
-        transaction.set(globalRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
+        
+        if (isSb) {
+          const shadowRewardField = type === "wheel" ? "shadowWheelRewards" : type === "box" ? "shadowBoxRewards" : "shadowScratchRewards";
+          transaction.set(statsDocRef, { 
+            [shadowRewardField]: increment(rewardAmount),
+            shadowTotalClaims: increment(1),
+            shadowTotalRewards: increment(rewardAmount)
+          }, { merge: true });
+        } else {
+          transaction.set(statsDocRef, { 
+            [rewardField]: increment(rewardAmount),
+            totalClaims: increment(1),
+            totalRewards: increment(rewardAmount)
+          }, { merge: true });
+        }
       });
+
+      const userSnapCheck = await getDoc(doc(db, "users", userId));
+      const uDataCheck = userSnapCheck.exists() ? userSnapCheck.data() : {};
+      const isSb = uDataCheck?.shadowBanned === true;
+      const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(uDataCheck?.status || "Normal") || (uDataCheck?.trustScore !== undefined && uDataCheck.trustScore < 20) || evalPending;
+
+      // Increase Trust Score for Daily Bonus Claim (+3) only if not flagged/pending
+      if (!isFlagged) {
+        adjustTrustScore(userId, 3, "Daily Bonus Claim").catch(() => {});
+      }
 
       // After transaction success, Add to history
       await addDoc(collection(db, "claimHistory"), {
@@ -8336,8 +9161,20 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         amount: rewardAmount,
         type,
         date: new Date().toISOString(),
-        adStatus: "Verified"
+        adStatus: isFlagged ? "Pending Review" : "Verified",
+        shadow_banned: isSb,
+        is_flagged: isFlagged
       });
+
+      if (isSb) {
+        await addDoc(collection(db, "shadow_blocked_rewards"), {
+          userId: String(userId),
+          username: userName,
+          amount: rewardAmount,
+          type: `daily_bonus_${type}`,
+          createdAt: new Date().toISOString()
+        });
+      }
 
       // Send Telegram Notification
       try {
@@ -8809,24 +9646,87 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       const uData = userDoc.data();
-      const fileEarnings = uData?.fileEarnings || 0;
-      const linkEarnings = uData?.linkEarnings || 0;
-      const referralEarnings = uData?.referralEarnings || 0;
-      const bonusBalance = uData?.bonusBalance || 0;
-      const rewardBalance = (uData?.rewardBalance || 0) + amount;
-      const withdrawnAmount = uData?.withdrawnAmount || 0;
-      const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+      
+      // Evaluate Reward via Economy Protection & Smart Reward Engine
+      const economyEval = await evaluateReward(userId, amount, "shortener_task");
+      if (!economyEval.allowed) {
+        return res.status(400).json({ error: economyEval.message || "Daily limit reached. Please come back tomorrow." });
+      }
+      amount = economyEval.finalAmount;
 
-      // New availableBalance calculation (integrating rewardBalance!)
-      const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance - withdrawnAmount - pendingWithdrawals;
-      const earnings = (uData?.earnings || 0) + amount;
+      const userStatus = uData.status || "Normal";
+      let isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(userStatus) || (uData?.trustScore !== undefined && uData.trustScore < 20);
+      if (economyEval.isPending) {
+        isFlagged = true;
+      }
+      const isSb = uData.shadowBanned === true;
+      let finalNewBalance = uData?.availableBalance || 0;
 
-      // Update user doc in Firestore
-      await setDoc(userDocRef, {
-        rewardBalance,
-        availableBalance,
-        earnings
-      }, { merge: true });
+      if (isFlagged) {
+        const fileEarnings = uData?.fileEarnings || 0;
+        const linkEarnings = uData?.linkEarnings || 0;
+        const referralEarnings = uData?.referralEarnings || 0;
+        const bonusBalance = uData?.bonusBalance || 0;
+        const realRewardBalance = uData?.rewardBalance || 0;
+        const withdrawnAmount = uData?.withdrawnAmount || 0;
+        const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+
+        finalNewBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + realRewardBalance - withdrawnAmount - pendingWithdrawals;
+      } else if (isSb) {
+        const shadowRewardBalance = (uData.shadowRewardBalance || 0) + amount;
+        const shadowAvailableBalance = (uData.shadowAvailableBalance || 0) + amount;
+        const shadowEarnings = (uData.shadowEarnings || 0) + amount;
+        const shadowTotalEarnings = (uData.shadowTotalEarnings || 0) + amount;
+        const shadowBalance = (uData.shadowBalance || 0) + amount;
+
+        await setDoc(userDocRef, {
+          shadowRewardBalance,
+          shadowAvailableBalance,
+          shadowEarnings,
+          shadowTotalEarnings,
+          shadowBalance
+        }, { merge: true });
+
+        await addDoc(collection(db, "shadow_blocked_rewards"), {
+          userId: String(userId),
+          username: uData.username || uData.firstName || "no_username",
+          amount,
+          type: "task_reward",
+          createdAt: new Date().toISOString()
+        });
+
+        const fileEarnings = uData?.fileEarnings || 0;
+        const linkEarnings = uData?.linkEarnings || 0;
+        const referralEarnings = uData?.referralEarnings || 0;
+        const bonusBalance = uData?.bonusBalance || 0;
+        const realRewardBalance = uData?.rewardBalance || 0;
+        const withdrawnAmount = uData?.withdrawnAmount || 0;
+        const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+
+        finalNewBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + realRewardBalance + shadowRewardBalance - withdrawnAmount - pendingWithdrawals;
+      } else {
+        const fileEarnings = uData?.fileEarnings || 0;
+        const linkEarnings = uData?.linkEarnings || 0;
+        const referralEarnings = uData?.referralEarnings || 0;
+        const bonusBalance = uData?.bonusBalance || 0;
+        const rewardBalance = (uData?.rewardBalance || 0) + amount;
+        const withdrawnAmount = uData?.withdrawnAmount || 0;
+        const pendingWithdrawals = uData?.pendingWithdrawals || 0;
+
+        // New availableBalance calculation (integrating rewardBalance!)
+        finalNewBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance - withdrawnAmount - pendingWithdrawals;
+        const earnings = (uData?.earnings || 0) + amount;
+
+        // Update user doc in Firestore
+        await setDoc(userDocRef, {
+          rewardBalance,
+          availableBalance: finalNewBalance,
+          earnings
+        }, { merge: true });
+
+        // Increase Trust Score for Completed Task (+2)
+        adjustTrustScore(userId, 2, "Completed Task").catch(() => {});
+      }
 
       // Store in Firestore exactly what was requested:
       // userId, taskId, rewardAmount, status, completedPages, completedAt
@@ -8835,11 +9735,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         userId,
         taskId,
         rewardAmount: amount,
-        status: "completed",
+        status: isFlagged ? "pending_review" : "completed",
         taskCompleted: true,
-        rewardGranted: true,
+        rewardGranted: !isFlagged,
         completedPages: 3,
-        completedAt
+        completedAt,
+        shadow_banned: isSb,
+        is_flagged: isFlagged
       });
 
       // Format transaction date & time
@@ -8853,7 +9755,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         date: dateStr,
         time: timeStr,
         userId,
-        createdAt: now.toISOString()
+        createdAt: now.toISOString(),
+        shadow_banned: isSb,
+        status: isFlagged ? "Pending Review" : "Completed",
+        is_flagged: isFlagged
       };
 
       await Promise.all([
@@ -8882,7 +9787,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         // 💰 Reward:
         // ₹{rewardAmount}
         // Added to Reward Balance.
-        const messageText = `✅ Reward Credited\n\n💰 Reward:\n${formattedAmt}\n\nAdded to Reward Balance.`;
+        const messageText = isFlagged 
+          ? `⏳ Reward is under security verification.\n\nYour reward of ${formattedAmt} is being verified by security. This usually completes within a short time.`
+          : `✅ Reward Credited\n\n💰 Reward:\n${formattedAmt}\n\nAdded to Reward Balance.`;
 
         await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
@@ -8894,7 +9801,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         });
       }
 
-      return res.json({ ok: true, rewardAmount: amount, currency });
+      return res.json({ ok: true, rewardAmount: amount, currency, isFlagged, message: isFlagged ? "⏳ Reward is under security verification. This usually completes within a short time." : undefined });
     } catch (e: any) {
       console.error("Error in /api/earn-rewards/complete:", e);
       res.status(500).json({ error: e.message || "Server error" });
@@ -8902,6 +9809,169 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   });
 
   // ========================================
+  
+  // ========================================
+  
+  
+  const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-encryption-key-32-chars-!'; // Must be 32 bytes
+  const IV_LENGTH = 16;
+
+  function encryptToken(text) {
+    if (!text) return text;
+    try {
+      let iv = crypto.randomBytes(IV_LENGTH);
+      let cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)), iv);
+      let encrypted = cipher.update(text);
+      encrypted = Buffer.concat([encrypted, cipher.final()]);
+      return iv.toString('hex') + ':' + encrypted.toString('hex');
+    } catch(e) {
+      return text;
+    }
+  }
+
+  function decryptToken(text) {
+    if (!text || !text.includes(':')) return text;
+    try {
+      let textParts = text.split(':');
+      let iv = Buffer.from(textParts.shift(), 'hex');
+      let encryptedText = Buffer.from(textParts.join(':'), 'hex');
+      let decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)), iv);
+      let decrypted = decipher.update(encryptedText);
+      decrypted = Buffer.concat([decrypted, decipher.final()]);
+      return decrypted.toString();
+    } catch(e) {
+      return text;
+    }
+  }
+
+  // CLICKADILLA PUBLISHER API
+  // ========================================
+
+  app.get("/api/admin/clickadilla/settings", async (req, res) => {
+    try {
+      const snap = await getDoc(doc(db, "clickadilla_settings", "config"));
+      if (snap.exists()) {
+        const data = snap.data();
+        res.json({ apiToken: data.api_token ? "********" : "", connected: data.connected });
+      } else {
+        res.json({ apiToken: "", connected: false });
+      }
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/clickadilla/settings", async (req, res) => {
+    try {
+      const { apiToken, connected } = req.body;
+      const cleanToken = apiToken?.trim() || "";
+      const encryptedToken = encryptToken(cleanToken);
+      await setDoc(doc(db, "clickadilla_settings", "config"), {
+        api_token: encryptedToken,
+        connected: !!connected,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  
+  const fetchClickAdilla = async (url, token) => {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'X-AUTH-TOKEN': token
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || `ClickAdilla API error: ${res.status}`);
+      }
+      return data;
+    } catch (e) {
+      throw e;
+    }
+  };
+
+  app.post("/api/admin/clickadilla/test", async (req, res) => {
+    try {
+      let { apiToken } = req.body;
+      if (!apiToken) return res.status(400).json({ error: "No API token provided" });
+      
+      if (apiToken === "********") {
+        const snap = await getDoc(doc(db, "clickadilla_settings", "config"));
+        const config = snap?.data();
+        if (config && config.api_token) {
+          apiToken = decryptToken(config.api_token);
+        } else {
+          return res.status(400).json({ error: "No stored API token to test" });
+        }
+      }
+
+      const data = await fetchClickAdilla(`https://publishers.clickadilla.com/backend/api/public/user-spots?token=${apiToken}`, apiToken);
+      res.json({ success: true, message: "Connected Successfully", data });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/clickadilla/spots", async (req, res) => {
+    try {
+      const snap = await getDoc(doc(db, "clickadilla_settings", "config"));
+      const config = snap?.data();
+      if (!config || !config.api_token) {
+        return res.status(400).json({ error: "ClickAdilla API not configured" });
+      }
+
+      const actualToken = decryptToken(config.api_token);
+      const data = await fetchClickAdilla(`https://publishers.clickadilla.com/backend/api/public/user-spots?token=${actualToken}`, actualToken);
+      console.log("[CLICKADILLA RAW SPOTS] ", JSON.stringify(data, null, 2));
+      
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/clickadilla/stats/:type", async (req, res) => {
+    try {
+      const snap = await getDoc(doc(db, "clickadilla_settings", "config"));
+      const config = snap?.data();
+      if (!config || !config.api_token) {
+        return res.status(400).json({ error: "ClickAdilla API not configured" });
+      }
+
+      const actualToken = decryptToken(config.api_token);
+      const type = req.params.type;
+      
+      const getToday = () => new Date().toISOString().split('T')[0];
+      const getLast30 = () => {
+        const d = new Date();
+        d.setDate(d.getDate() - 30);
+        return d.toISOString().split('T')[0];
+      };
+
+      let url = "";
+      if (type === "today") {
+        url = `https://publishers.clickadilla.com/backend/api/public/stats?token=${actualToken}&date1=${getToday()}&date2=${getToday()}&fields=date,impressions,clicks,money&orderBy=-date&limit=500&offset=0`;
+      } else if (type === "last30") {
+        url = `https://publishers.clickadilla.com/backend/api/public/stats?token=${actualToken}&date1=${getLast30()}&date2=${getToday()}&fields=date,impressions,clicks,money&orderBy=-date&limit=500&offset=0`;
+      } else if (type === "adformat") {
+        url = `https://publishers.clickadilla.com/backend/api/public/stats?token=${actualToken}&date1=${getToday()}&date2=${getToday()}&fields=adformat,impressions,clicks,money&orderBy=-adformat&limit=500&offset=0`;
+      } else {
+        return res.status(400).json({ error: "Invalid stats type" });
+      }
+
+      const data = await fetchClickAdilla(url, actualToken);
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
   // MONETAG SERVER-SIDE POSTBACK SYSTEM
   // ========================================
 
@@ -9993,6 +11063,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       const userData = userSnap.data();
+      const isSb = userData.shadowBanned === true;
+
       const userBalance = Number(userData.balance || 0);
       const fileEarnings = Number(userData.fileEarnings || 0);
       const linkEarnings = Number(userData.linkEarnings || 0);
@@ -10002,7 +11074,27 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const withdrawnAmount = userData.withdrawnAmount !== undefined ? Number(userData.withdrawnAmount) : Number(userData.totalWithdrawn || 0);
       const pendingWithdrawals = Number(userData.pendingWithdrawals || 0);
 
-      const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + userBalance - withdrawnAmount - pendingWithdrawals;
+      let availableBalance = 0;
+      if (isSb) {
+        const shadowBalance = Number(userData.shadowBalance || 0);
+        const shadowRewardBalance = Number(userData.shadowRewardBalance || 0);
+        const shadowLinkEarnings = Number(userData.shadowLinkEarnings || 0);
+        const shadowBonusBalance = Number(userData.shadowBonusBalance || 0);
+        const shadowFileEarnings = Number(userData.shadowFileEarnings || 0);
+        const shadowReferralEarnings = Number(userData.shadowReferralEarnings || 0);
+        const shadowPendingWithdrawals = Number(userData.shadowPendingWithdrawals || 0);
+
+        availableBalance = (fileEarnings + shadowFileEarnings) +
+                           (linkEarnings + shadowLinkEarnings) +
+                           (referralEarnings + shadowReferralEarnings) +
+                           (bonusBalance + shadowBonusBalance) +
+                           (rewardBalance + shadowRewardBalance) +
+                           (userBalance + shadowBalance) -
+                           withdrawnAmount -
+                           (pendingWithdrawals + shadowPendingWithdrawals);
+      } else {
+        availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + userBalance - withdrawnAmount - pendingWithdrawals;
+      }
 
       // Calculate amount in INR
       const requestedAmount = Number(amount);
@@ -10051,6 +11143,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Format current date & time
       const now = new Date();
       const currentDateTime = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+      
+      const userStatus = userData.status || "Normal";
+      const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(userStatus) || (userData?.trustScore !== undefined && userData.trustScore < 20);
+      const withdrawalStatus = isFlagged ? "Security Review" : "Pending";
 
       const withdrawalDocData: any = {
         id: withdrawalId,
@@ -10062,10 +11158,12 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         mobile: userData.mobile || userData.phone || "",
         amount: requestedAmount,
         method,
-        status: "Pending",
+        status: withdrawalStatus,
         processingFee: Number(processingFee || 0),
         receiveAmount: Number(receiveAmount || 0),
-        createdAt: now.toISOString()
+        createdAt: now.toISOString(),
+        shadow_banned: isSb,
+        is_flagged: isFlagged
       };
 
       if (method === "UPI ID") {
@@ -10086,9 +11184,15 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // 2. Deduct available balance immediately by adding it to pendingWithdrawals on the user doc
       // Also save details on user profile so it acts as "Saved Account details"
       const userUpdateData: any = {
-        pendingWithdrawals: pendingWithdrawals + requestedAmountInINR,
         updatedAt: now.toISOString()
       };
+
+      if (isSb) {
+        const shadowPendingWithdrawals = Number(userData.shadowPendingWithdrawals || 0);
+        userUpdateData.shadowPendingWithdrawals = shadowPendingWithdrawals + requestedAmountInINR;
+      } else {
+        userUpdateData.pendingWithdrawals = pendingWithdrawals + requestedAmountInINR;
+      }
 
       if (method === "UPI ID" && upiId) {
         userUpdateData.upiId = upiId.trim();
@@ -10108,16 +11212,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // 3. Immediately send Telegram Bot notification
       let tgMsg = "";
       if (method === "USDT (TRC20)") {
-        tgMsg = `💸 <b>USDT Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ${requestedAmount} USDT (≈ ₹${requestedAmountInINR.toFixed(2)})\n<b>Fee:</b> ${processingFee} USDT\n<b>Receive Amount:</b> <b>${receiveAmount} USDT</b>\n<b>Wallet:</b> <code>${walletAddress.trim()}</code>\n<b>Network:</b> TRC20 (Fixed)\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> Pending\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+        tgMsg = `💸 <b>USDT Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ${requestedAmount} USDT (≈ ₹${requestedAmountInINR.toFixed(2)})\n<b>Fee:</b> ${processingFee} USDT\n<b>Receive Amount:</b> <b>${receiveAmount} USDT</b>\n<b>Wallet:</b> <code>${walletAddress.trim()}</code>\n<b>Network:</b> TRC20 (Fixed)\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
       } else if (method === "Bank Account") {
-        tgMsg = `💸 <b>Bank Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>Bank Name:</b> ${bankName.trim()}\n<b>A/C No:</b> <code>${accountNumber.trim()}</code>\n<b>Holder:</b> ${accountHolderName.trim()}\n<b>IFSC:</b> <code>${ifscCode.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> Pending\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+        tgMsg = `💸 <b>Bank Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>Bank Name:</b> ${bankName.trim()}\n<b>A/C No:</b> <code>${accountNumber.trim()}</code>\n<b>Holder:</b> ${accountHolderName.trim()}\n<b>IFSC:</b> <code>${ifscCode.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
       } else {
-        tgMsg = `💸 <b>UPI Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>UPI ID:</b> <code>${upiId.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> Pending\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+        tgMsg = `💸 <b>UPI Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>UPI ID:</b> <code>${upiId.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
       }
 
       await sendTgMessage(String(userId), tgMsg);
 
-      res.json({ success: true, withdrawalId });
+      res.json({ success: true, withdrawalId, status: withdrawalStatus });
     } catch (e: any) {
       console.error("Error submitting withdrawal:", e);
       res.status(500).json({ success: false, message: "Internal server error." });
@@ -10904,24 +12008,73 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
             const userSnap = await getDoc(userRef);
             if (userSnap.exists()) {
               const userData = userSnap.data();
-              const currentLinkEarnings = Number(userData.linkEarnings || 0);
-              const currentBalance = Number(userData.balance || 0);
-              const currentTotalEarned = Number(userData.totalEarned || 0);
+              const userStatus = userData.status || "Normal";
+              const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(userStatus) || (userData?.trustScore !== undefined && userData.trustScore < 20);
+              const isSb = userData.shadowBanned === true;
               
-              await updateDoc(userRef, {
-                linkEarnings: currentLinkEarnings + clickReward,
-                balance: currentBalance + clickReward,
-                totalEarned: currentTotalEarned + clickReward
-              });
+              if (isFlagged) {
+                // Silent Review Mode: Do not credit balances. Just log transaction as Pending Review.
+                await addDoc(collection(db, "transactions"), {
+                  userId: String(itemData.userId),
+                  type: "Credit",
+                  amount: clickReward,
+                  description: `Earnings from short link redirect completion: ${itemData.alias || itemData.id || "N/A"}`,
+                  createdAt: new Date().toISOString(),
+                  status: "Pending Review",
+                  is_flagged: true,
+                  flagged_status: userStatus
+                });
+              } else if (isSb) {
+                const shadowLinkEarnings = Number(userData.shadowLinkEarnings || 0);
+                const shadowBalance = Number(userData.shadowBalance || 0);
+                const shadowTotalEarned = Number(userData.shadowTotalEarned || 0);
+                const shadowAvailableBalance = Number(userData.shadowAvailableBalance || 0);
 
-              await addDoc(collection(db, "transactions"), {
-                userId: String(itemData.userId),
-                type: "Credit",
-                amount: clickReward,
-                description: `Earnings from short link redirect completion: ${itemData.alias || itemData.id || "N/A"}`,
-                createdAt: new Date().toISOString(),
-                status: "Completed"
-              });
+                await updateDoc(userRef, {
+                  shadowLinkEarnings: shadowLinkEarnings + clickReward,
+                  shadowBalance: shadowBalance + clickReward,
+                  shadowTotalEarned: shadowTotalEarned + clickReward,
+                  shadowAvailableBalance: shadowAvailableBalance + clickReward
+                });
+
+                await addDoc(collection(db, "shadow_blocked_rewards"), {
+                  userId: String(itemData.userId),
+                  username: userData.username || userData.firstName || "no_username",
+                  amount: clickReward,
+                  type: "shortener_link",
+                  createdAt: new Date().toISOString()
+                });
+
+                await addDoc(collection(db, "transactions"), {
+                  userId: String(itemData.userId),
+                  type: "Credit",
+                  amount: clickReward,
+                  description: `Earnings from short link redirect completion: ${itemData.alias || itemData.id || "N/A"}`,
+                  createdAt: new Date().toISOString(),
+                  status: "Completed",
+                  shadow_banned: isSb
+                });
+              } else {
+                const currentLinkEarnings = Number(userData.linkEarnings || 0);
+                const currentBalance = Number(userData.balance || 0);
+                const currentTotalEarned = Number(userData.totalEarned || 0);
+                
+                await updateDoc(userRef, {
+                  linkEarnings: currentLinkEarnings + clickReward,
+                  balance: currentBalance + clickReward,
+                  totalEarned: currentTotalEarned + clickReward
+                });
+
+                await addDoc(collection(db, "transactions"), {
+                  userId: String(itemData.userId),
+                  type: "Credit",
+                  amount: clickReward,
+                  description: `Earnings from short link redirect completion: ${itemData.alias || itemData.id || "N/A"}`,
+                  createdAt: new Date().toISOString(),
+                  status: "Completed",
+                  shadow_banned: isSb
+                });
+              }
             }
           } catch (e) {
             console.error("Error crediting user wallet for link click:", e);
@@ -10964,21 +12117,71 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
             const userRef = doc(db, "users", String(itemData.userId));
             const userSnap = await getDoc(userRef);
             if (userSnap.exists()) {
-              const currentBalance = Number(userSnap.data().balance || 0);
-              const currentTotalEarnings = Number(userSnap.data().totalEarnings || 0);
-              await updateDoc(userRef, {
-                balance: currentBalance + earningsPerDownload,
-                totalEarnings: currentTotalEarnings + earningsPerDownload
-              });
-              
-              await addDoc(collection(db, "transactions"), {
-                userId: String(itemData.userId),
-                type: "Credit",
-                amount: earningsPerDownload,
-                description: `Earnings from download of file: ${itemData.fileName || "N/A"}`,
-                createdAt: new Date().toISOString(),
-                status: "Completed"
-              });
+              const userData = userSnap.data();
+              const userStatus = userData.status || "Normal";
+              const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(userStatus) || (userData?.trustScore !== undefined && userData.trustScore < 20);
+              const isSb = userData.shadowBanned === true;
+
+              if (isFlagged) {
+                // Silent Review Mode: Do not credit balances. Just log transaction as Pending Review.
+                await addDoc(collection(db, "transactions"), {
+                  userId: String(itemData.userId),
+                  type: "Credit",
+                  amount: earningsPerDownload,
+                  description: `Earnings from download of file: ${itemData.fileName || "N/A"}`,
+                  createdAt: new Date().toISOString(),
+                  status: "Pending Review",
+                  is_flagged: true,
+                  flagged_status: userStatus
+                });
+              } else if (isSb) {
+                const shadowBalance = Number(userData.shadowBalance || 0);
+                const shadowTotalEarnings = Number(userData.shadowTotalEarnings || 0);
+                const shadowFileEarnings = Number(userData.shadowFileEarnings || 0);
+                const shadowAvailableBalance = Number(userData.shadowAvailableBalance || 0);
+
+                await updateDoc(userRef, {
+                  shadowBalance: shadowBalance + earningsPerDownload,
+                  shadowTotalEarnings: shadowTotalEarnings + earningsPerDownload,
+                  shadowFileEarnings: shadowFileEarnings + earningsPerDownload,
+                  shadowAvailableBalance: shadowAvailableBalance + earningsPerDownload
+                });
+
+                await addDoc(collection(db, "shadow_blocked_rewards"), {
+                  userId: String(itemData.userId),
+                  username: userData.username || userData.firstName || "no_username",
+                  amount: earningsPerDownload,
+                  type: "file_download",
+                  createdAt: new Date().toISOString()
+                });
+
+                await addDoc(collection(db, "transactions"), {
+                  userId: String(itemData.userId),
+                  type: "Credit",
+                  amount: earningsPerDownload,
+                  description: `Earnings from download of file: ${itemData.fileName || "N/A"}`,
+                  createdAt: new Date().toISOString(),
+                  status: "Completed",
+                  shadow_banned: isSb
+                });
+              } else {
+                const currentBalance = Number(userData.balance || 0);
+                const currentTotalEarnings = Number(userData.totalEarnings || 0);
+                await updateDoc(userRef, {
+                  balance: currentBalance + earningsPerDownload,
+                  totalEarnings: currentTotalEarnings + earningsPerDownload
+                });
+
+                await addDoc(collection(db, "transactions"), {
+                  userId: String(itemData.userId),
+                  type: "Credit",
+                  amount: earningsPerDownload,
+                  description: `Earnings from download of file: ${itemData.fileName || "N/A"}`,
+                  createdAt: new Date().toISOString(),
+                  status: "Completed",
+                  shadow_banned: isSb
+                });
+              }
             }
           } catch (e) {
             console.error("Error crediting uploader wallet:", e);
@@ -12112,6 +13315,515 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       res.json({ success: true });
     } catch (e: any) {
       console.error("Error disconnecting Google Drive account:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ==========================================
+  // UNIFIED FRAUD INVESTIGATION CENTER APIs
+  // ==========================================
+
+  // Helper function to calculate fraud score and log/evaluate session
+  const trackFraudSession = async (req: any, params: {
+    userId: string;
+    type: string; // "video_ad" | "url_shortener" | "giveaway" | "reward" | "withdrawal"
+    taskId?: string;
+    token?: string;
+    fingerprint?: string;
+    browserFingerprint?: string;
+    userAgent?: string;
+    screenResolution?: string;
+    timezone?: string;
+    language?: string;
+    rewardAmount?: number;
+    transactionId?: string;
+    refreshes?: number;
+    multipleTabs?: boolean;
+    fastCompletion?: boolean;
+    vpnDetected?: boolean;
+    proxyDetected?: boolean;
+    ipChanged?: boolean;
+    fingerprintChanged?: boolean;
+    heartbeatMissing?: boolean;
+    focusLostCount?: number;
+    devToolsDetected?: boolean;
+    automationDetected?: boolean;
+    emulatorDetected?: boolean;
+    rootJailbreakDetected?: boolean;
+    watchStartTime?: string;
+    totalWatchTime?: number;
+  }) => {
+    try {
+      const userId = String(params.userId);
+      const ip = req.ip || req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "Unknown";
+
+      // 1. Fetch user data
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      const uData = userSnap.exists() ? userSnap.data() : {};
+
+      // 2. Fetch Geo IP info using fetch
+      let country = "Unknown";
+      let region = "Unknown";
+      let city = "Unknown";
+      let isp = "Unknown";
+      let vpnDetected = !!params.vpnDetected;
+      let proxyDetected = !!params.proxyDetected;
+
+      if (ip && ip !== "127.0.0.1" && ip !== "::1" && ip !== "Unknown") {
+        try {
+          const geoRes = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,isp,hosting`);
+          const geoData: any = await geoRes.json();
+          if (geoData && geoData.status === "success") {
+             country = geoData.country || "Unknown";
+             region = geoData.regionName || "Unknown";
+             city = geoData.city || "Unknown";
+             isp = geoData.isp || "Unknown";
+             if (geoData.hosting) {
+               vpnDetected = true;
+               proxyDetected = true;
+             }
+          }
+        } catch (err) {
+          console.error("Geo lookup error in trackFraudSession:", err);
+        }
+      }
+
+      // Update IP history and device history
+      const ipHistory = uData.ipHistory || [];
+      if (ip !== "Unknown" && !ipHistory.includes(ip)) {
+        ipHistory.push(ip);
+        await updateDoc(userRef, { ipHistory }).catch(() => {});
+      }
+
+      const deviceHistory = uData.deviceHistory || [];
+      if (params.fingerprint && !deviceHistory.includes(params.fingerprint)) {
+        deviceHistory.push(params.fingerprint);
+        await updateDoc(userRef, { deviceHistory }).catch(() => {});
+      }
+
+      // 3. Compute Fraud Score based on rules
+      let fraudScore = 0;
+      const fraudReasons: string[] = [];
+      const penaltyReasons: { amount: number, reason: string }[] = [];
+
+      if (params.refreshes && params.refreshes > 2) {
+        fraudScore += 10;
+        fraudReasons.push("Refresh Abuse (+10)");
+        penaltyReasons.push({ amount: -10, reason: "Refresh Abuse" });
+      }
+      if (params.multipleTabs) {
+        fraudScore += 30;
+        fraudReasons.push("Multiple Tabs (+30)");
+        penaltyReasons.push({ amount: -15, reason: "Multiple Tabs" });
+      }
+      if (params.fastCompletion) {
+        fraudScore += 50;
+        fraudReasons.push("Fast Completion (+50)");
+        penaltyReasons.push({ amount: -40, reason: "Fast Completion" });
+      }
+      if (vpnDetected) {
+        fraudScore += 20;
+        fraudReasons.push("VPN (+20)");
+        penaltyReasons.push({ amount: -20, reason: "VPN Detected" });
+      }
+      if (proxyDetected) {
+        fraudScore += 20;
+        fraudReasons.push("Proxy (+20)");
+        penaltyReasons.push({ amount: -20, reason: "Proxy Detected" });
+      }
+      if (params.ipChanged) {
+        fraudScore += 30;
+        fraudReasons.push("IP Change (+30)");
+      }
+      if (params.fingerprintChanged) {
+        fraudScore += 40;
+        fraudReasons.push("Fingerprint Change (+40)");
+        penaltyReasons.push({ amount: -30, reason: "Fingerprint Changed" });
+      }
+      if (params.heartbeatMissing) {
+        fraudScore += 40;
+        fraudReasons.push("Heartbeat Missing (+40)");
+      }
+      if (params.focusLostCount && params.focusLostCount > 3) {
+        fraudScore += 20;
+        fraudReasons.push("Focus Lost Repeatedly (+20)");
+      }
+      if (params.devToolsDetected) {
+        fraudScore += 40;
+        fraudReasons.push("Developer Tools (+40)");
+      }
+      if (params.automationDetected) {
+        fraudScore += 50;
+        fraudReasons.push("Automation Pattern (+50)");
+        penaltyReasons.push({ amount: -50, reason: "Automation Detected" });
+      }
+      if (params.emulatorDetected) {
+        fraudScore += 30;
+        fraudReasons.push("Emulator Detected (+30)");
+      }
+      if (params.rootJailbreakDetected) {
+        fraudScore += 30;
+        fraudReasons.push("Root/Jailbreak Detected (+30)");
+      }
+
+      // Apply Trust Score penalties asynchronously
+      if (penaltyReasons.length > 0) {
+        setTimeout(async () => {
+          for (const item of penaltyReasons) {
+            await adjustTrustScore(userId, item.amount, item.reason);
+          }
+        }, 50);
+      }
+
+      // Auto Actions Threshold
+      let status = "Normal";
+      if (fraudScore >= 100) {
+        status = "Banned";
+      } else if (fraudScore >= 80) {
+        status = "Suspended";
+      } else if (fraudScore >= 50) {
+        status = "Pending Review";
+      }
+
+      // Apply Action to User doc
+      if (status === "Banned") {
+        await updateDoc(userRef, { status: "Banned", banReason: `Auto Ban: Fraud Score too high (${fraudScore}) - ${fraudReasons.join(", ")}` }).catch(() => {});
+      } else if (status === "Suspended") {
+        await updateDoc(userRef, { status: "Suspended", suspensionReason: `Suspended: Fraud Score too high (${fraudScore}) - ${fraudReasons.join(", ")}` }).catch(() => {});
+      }
+
+      // 4. Admin Telegram Notification if score exceeds 80
+      if (fraudScore >= 80) {
+        try {
+          const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+          const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
+          const adminChatId = telegramSettingsSnap.exists() ? (telegramSettingsSnap.data()?.adminChatId || telegramSettingsSnap.data()?.chatId) : null;
+          if (botToken && adminChatId) {
+            const alertMsg = `🚨 <b>Fraud Attempt Detected</b>\n\n` +
+              `👤 <b>User:</b> @${uData.username || "Unknown"}\n` +
+              `🆔 <b>Telegram ID:</b> <code>${userId}</code>\n` +
+              `📊 <b>Fraud Score:</b> <b>${fraudScore}</b>\n` +
+              `🔎 <b>Reasons:</b> ${fraudReasons.join(", ") || "None"}\n` +
+              `🛠 <b>Task Type:</b> ${params.type}\n\n` +
+              `<i>Check the RoyShare Fraud Investigation Center in your Admin Panel to review this session.</i>`;
+
+            await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: String(adminChatId),
+                text: alertMsg,
+                parse_mode: "HTML"
+              })
+            });
+          }
+        } catch (tgErr) {
+          console.error("Failed to send bot alert:", tgErr);
+        }
+      }
+
+      // 5. Store session log (Immutable)
+      const sessionToken = params.token || crypto.randomBytes(32).toString("hex");
+      const fraudDoc = {
+        userId,
+        username: uData.username || uData.telegramUsername || "Unknown",
+        firstName: uData.firstName || uData.first_name || "Unknown",
+        lastName: uData.lastName || uData.last_name || "Unknown",
+        phone: uData.phone || uData.phoneNumber || "N/A",
+        ip,
+        country,
+        region,
+        city,
+        isp,
+        fingerprint: params.fingerprint || "missing",
+        browserFingerprint: params.browserFingerprint || "missing",
+        userAgent: params.userAgent || req.headers["user-agent"] || "missing",
+        screenResolution: params.screenResolution || "Unknown",
+        timezone: params.timezone || "Unknown",
+        language: params.language || "Unknown",
+        sessionToken,
+        type: params.type,
+        taskId: params.taskId || "N/A",
+        createdAt: new Date().toISOString(),
+        watchStartTime: params.watchStartTime || new Date().toISOString(),
+        watchEndTime: new Date().toISOString(),
+        totalWatchTime: params.totalWatchTime || 0,
+        refreshes: params.refreshes || 0,
+        multipleTabCount: params.multipleTabs ? 1 : 0,
+        focusLostCount: params.focusLostCount || 0,
+        visibilityHiddenCount: params.focusLostCount || 0,
+        heartbeatLogs: params.heartbeatMissing ? ["Missing heartbeats"] : ["Valid heartbeats received"],
+        vpnDetected,
+        proxyDetected,
+        emulatorDetected: !!params.emulatorDetected,
+        rootJailbreakDetected: !!params.rootJailbreakDetected,
+        fraudScore,
+        fraudReasons,
+        status,
+        rewardAmount: params.rewardAmount || 0,
+        transactionId: params.transactionId || "N/A",
+        notes: []
+      };
+
+      await addDoc(collection(db, "fraud_sessions"), fraudDoc);
+      return fraudDoc;
+    } catch (err) {
+      console.error("Error in trackFraudSession:", err);
+    }
+  };
+
+  // Exposed API to trigger evaluation/recording from client or web hooks
+  app.post("/api/fraud/evaluate", async (req, res) => {
+    try {
+      const { userId, type, ...rest } = req.body;
+      if (!userId || !type) return res.status(400).json({ error: "Missing required fields userId or type" });
+      const record = await trackFraudSession(req, { userId, type, ...rest });
+      res.json({ success: true, record });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Admin GET: Fetch all Fraud logs
+  app.get("/api/admin/fraud/logs", async (req, res) => {
+    try {
+      const q = query(collection(db, "fraud_sessions"), orderBy("createdAt", "desc"), limit(500));
+      const snap = await getDocs(q);
+      const logs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+
+      const userIds = Array.from(new Set(logs.map(l => String(l.userId)).filter(Boolean)));
+      const shadowMap: Record<string, boolean> = {};
+      const statusMap: Record<string, string> = {};
+      for (const uid of userIds) {
+        const uDoc = await getDoc(doc(db, "users", uid));
+        if (uDoc.exists()) {
+          const uData = uDoc.data();
+          shadowMap[uid] = uData?.shadowBanned === true;
+          statusMap[uid] = uData?.status || "Normal";
+        }
+      }
+
+      const logsWithShadow = logs.map(l => ({
+        ...l,
+        shadowBanned: shadowMap[String(l.userId)] || false,
+        userStatus: statusMap[String(l.userId)] || "Normal"
+      }));
+
+      res.json({ success: true, logs: logsWithShadow });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Admin GET: Fraud Analytics and Stats
+  app.get("/api/admin/fraud/stats", async (req, res) => {
+    try {
+      const q = query(collection(db, "fraud_sessions"));
+      const snap = await getDocs(q);
+      const sessions = snap.docs.map(doc => doc.data());
+
+      let normalCount = 0;
+      let pendingCount = 0;
+      let suspendedCount = 0;
+      let bannedCount = 0;
+      let todayAttempts = 0;
+      let lifetimeAttempts = sessions.length;
+
+      const todayStr = new Date().toISOString().split("T")[0];
+
+      sessions.forEach(s => {
+        if (s.status === "Normal") normalCount++;
+        else if (s.status === "Pending Review") pendingCount++;
+        else if (s.status === "Suspended") suspendedCount++;
+        else if (s.status === "Banned") bannedCount++;
+
+        if (s.createdAt && s.createdAt.startsWith(todayStr)) {
+          todayAttempts++;
+        }
+      });
+
+      // Top reasons counting
+      const reasonsCount: Record<string, number> = {};
+      const devicesCount: Record<string, number> = {};
+      const countriesCount: Record<string, number> = {};
+      const vpnCount: Record<string, number> = {};
+
+      sessions.forEach(s => {
+        if (s.fraudReasons && Array.isArray(s.fraudReasons)) {
+          s.fraudReasons.forEach((r: string) => {
+            reasonsCount[r] = (reasonsCount[r] || 0) + 1;
+          });
+        }
+        if (s.fingerprint && s.fingerprint !== "missing") {
+          devicesCount[s.fingerprint] = (devicesCount[s.fingerprint] || 0) + 1;
+        }
+        if (s.country && s.country !== "Unknown") {
+          countriesCount[s.country] = (countriesCount[s.country] || 0) + 1;
+        }
+        if (s.vpnDetected && s.isp && s.isp !== "Unknown") {
+          vpnCount[s.isp] = (vpnCount[s.isp] || 0) + 1;
+        }
+      });
+
+      const shadowUsersSnap = await getDocs(query(collection(db, "users"), where("shadowBanned", "==", true)));
+      const shadowBannedCount = shadowUsersSnap.size;
+
+      res.json({
+        success: true,
+        stats: {
+          normalCount,
+          pendingCount,
+          suspendedCount,
+          bannedCount,
+          shadowBannedCount,
+          todayAttempts,
+          lifetimeAttempts,
+          reasonsCount,
+          devicesCount,
+          countriesCount,
+          vpnCount
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Admin POST: Trigger Investigation Action
+  app.post("/api/admin/fraud/action", async (req, res) => {
+    try {
+      const { id, action, userId, noteText, fingerprint } = req.body;
+      if (!id || !action) return res.status(400).json({ error: "Missing id or action" });
+
+      const docRef = doc(db, "fraud_sessions", id);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return res.status(404).json({ error: "Log record not found" });
+
+      const logData = snap.data();
+      const targetUserId = userId || logData.userId;
+
+      if (action === "approve") {
+        await updateDoc(docRef, { status: "Normal", approvedAt: new Date().toISOString() });
+        // Send notification
+        if (targetUserId) {
+          await sendTgMessage(targetUserId, `✅ <b>Session Approved</b>\n\nYour session was manually verified and approved by the RoyShare Security team. Thank you!`);
+        }
+      } else if (action === "reject") {
+        await updateDoc(docRef, { status: "Rejected", rejectedAt: new Date().toISOString() });
+        if (targetUserId) {
+          await sendTgMessage(targetUserId, `❌ <b>Session Rejected</b>\n\nYour session was manually reviewed and rejected due to security discrepancies.`);
+        }
+      } else if (action === "suspend_user") {
+        if (targetUserId) {
+          await updateDoc(doc(db, "users", String(targetUserId)), { status: "Suspended", suspensionReason: "Manually suspended from Fraud investigation" });
+          await adjustTrustScore(String(targetUserId), -100, "Confirmed Fraud").catch(() => {});
+          await sendTgMessage(targetUserId, `⚠️ <b>Account Suspended</b>\n\nYour account has been suspended due to suspected fraudulent activities.`);
+        }
+      } else if (action === "ban_user") {
+        if (targetUserId) {
+          await updateDoc(doc(db, "users", String(targetUserId)), { status: "Banned", banReason: "Manually banned from Fraud investigation" });
+          await adjustTrustScore(String(targetUserId), -100, "Confirmed Fraud").catch(() => {});
+          await sendTgMessage(targetUserId, `🚫 <b>Account Banned</b>\n\nYour account has been permanently banned due to severe policy violations.`);
+        }
+      } else if (action === "ban_device" || action === "ban_fingerprint") {
+        const fpToBan = fingerprint || logData.fingerprint;
+        if (fpToBan && fpToBan !== "missing") {
+          await setDoc(doc(db, "banned_fingerprints", fpToBan), {
+            fingerprint: fpToBan,
+            bannedAt: new Date().toISOString(),
+            reason: `Banned from Log ID: ${id}`
+          });
+        }
+      } else if (action === "whitelist") {
+        if (targetUserId) {
+          await updateDoc(doc(db, "users", String(targetUserId)), { isWhitelisted: true });
+          await sendTgMessage(targetUserId, `🛡 <b>Account Whitelisted</b>\n\nYour account has been whitelisted on the RoyShare platform.`);
+        }
+      } else if (action === "blacklist") {
+        if (targetUserId) {
+          await updateDoc(doc(db, "users", String(targetUserId)), { isBlacklisted: true, status: "Banned", banReason: "Blacklisted from Fraud investigation" });
+          await adjustTrustScore(String(targetUserId), -100, "Confirmed Fraud").catch(() => {});
+          await sendTgMessage(targetUserId, `🚫 <b>Account Blacklisted</b>\n\nYour account has been blacklisted on the RoyShare platform.`);
+        }
+      } else if (action === "update_user_status") {
+        const { status } = req.body;
+        if (targetUserId && status) {
+          await updateDoc(doc(db, "users", String(targetUserId)), { status });
+          await sendTgMessage(targetUserId, `🛡 <b>Security Status Updated</b>\n\nYour account security status has been updated to: <b>${status}</b>.`);
+        }
+      } else if (action === "shadow_ban") {
+        if (targetUserId) {
+          await updateDoc(doc(db, "users", String(targetUserId)), {
+            shadowBanned: true,
+            shadowBanDate: new Date().toISOString(),
+            shadowBanReason: noteText || "Suspicious or automated traffic detected"
+          });
+        }
+      } else if (action === "remove_shadow_ban") {
+        if (targetUserId) {
+          await updateDoc(doc(db, "users", String(targetUserId)), {
+            shadowBanned: false,
+            shadowBanRemovedAt: new Date().toISOString()
+          });
+        }
+      } else if (action === "add_notes") {
+        if (!noteText) return res.status(400).json({ error: "Missing note text" });
+        const notes = logData.notes || [];
+        notes.push({
+          text: noteText,
+          timestamp: new Date().toISOString()
+        });
+        await updateDoc(docRef, { notes });
+      }
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Admin POST: Clear all fraud logs (Only authorized Super Admin)
+  app.post("/api/admin/fraud/clear", async (req, res) => {
+    try {
+      const snap = await getDocs(collection(db, "fraud_sessions"));
+      for (const d of snap.docs) {
+        await deleteDoc(doc(db, "fraud_sessions", d.id));
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Admin GET: Shadow Ban Analytics Dashboard
+  app.get("/api/admin/shadow-ban/dashboard", async (req, res) => {
+    try {
+      const usersSnap = await getDocs(query(collection(db, "users"), where("shadowBanned", "==", true)));
+      const shadowUsers = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      const blockedRewardAmount = shadowUsers.reduce((sum, u: any) => sum + Number(u.shadowBalance || 0), 0);
+
+      const todayStr = new Date().toISOString().split("T")[0];
+      const blockedSnap = await getDocs(query(collection(db, "shadow_blocked_rewards")));
+      const blockedRewardsList = blockedSnap.docs.map(doc => doc.data());
+      const todayShadowRewards = blockedRewardsList
+        .filter((r: any) => (r.createdAt || "").startsWith(todayStr))
+        .reduce((sum, r: any) => sum + Number(r.amount || 0), 0);
+
+      const withdrawalsSnap = await getDocs(query(collection(db, "withdrawals"), where("shadow_banned", "==", true)));
+      const blockedWithdrawalsList = withdrawalsSnap.docs.map(doc => doc.data());
+      const blockedWithdrawalAmount = blockedWithdrawalsList.reduce((sum, w: any) => sum + Number(w.amount || 0), 0);
+
+      res.json({
+        success: true,
+        shadowUsers,
+        todayShadowRewards,
+        blockedRewardAmount,
+        blockedWithdrawalAmount,
+        blockedWithdrawalsCount: blockedWithdrawalsList.length
+      });
+    } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
