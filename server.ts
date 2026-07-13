@@ -3323,6 +3323,7 @@ app.get("/watch/:token", async (req, res) => {
     const estimatedHiddenTimeSecs = (sessionData.focusLossCount || 0) * 5;
     const elapsedActiveSecs = Math.max(0, (sessionData.heartbeats || 0) * 5 - estimatedHiddenTimeSecs);
 
+    const escapeHTML = (str: any) => (str || "").toString().replace(/&/g, "\&amp;").replace(/</g, "\&lt;").replace(/>/g, "\&gt;").replace(/"/g, "\&quot;").replace(/'/g, "\&#39;");
     res.send(`
 <!DOCTYPE html>
 <html lang="en">
@@ -3360,8 +3361,8 @@ app.get("/watch/:token", async (req, res) => {
       
       <div class="flex justify-between items-start gap-4">
         <div class="min-w-0 flex-1">
-          <h1 class="text-lg md:text-xl font-extrabold text-white leading-snug truncate">${taskData.name}</h1>
-          <p class="text-xs text-slate-400 mt-1">${taskData.description || "Watch this short video advertisement to earn your reward."}</p>
+          <h1 class="text-lg md:text-xl font-extrabold text-white leading-snug truncate">${escapeHTML(taskData.name)}</h1>
+          <p class="text-xs text-slate-400 mt-1">${escapeHTML(taskData.description) || "Watch this short video advertisement to earn your reward."}</p>
         </div>
         <div class="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-4 py-1.5 rounded-2xl text-right shrink-0 shadow-inner">
           <p class="text-[9px] uppercase tracking-widest font-black">REWARD</p>
@@ -3593,7 +3594,7 @@ app.get("/watch/:token", async (req, res) => {
       adContainer.innerHTML = "";
 
       try {
-        const scriptHtml = ${JSON.stringify(clickAdillaScript)};
+        const scriptHtml = ${JSON.stringify(clickAdillaScript).replace(/<\//g, '<\\/')};
         if (!scriptHtml || scriptHtml.trim() === "") {
           const errMsg = "Advertisement script is blank or not configured.";
           addDebugLog("Error: " + errMsg);
@@ -4059,7 +4060,7 @@ app.post("/api/video-tasks/verify", async (req, res) => {
           userId: String(userId),
           amount: rewardAmount,
           type: "video_ad_reward",
-          description: `Reward for Video Ad: ${taskData.name}`,
+          description: `Reward for Video Ad: ${escapeHTML(taskData.name)}`,
           status: "Pending Review",
           createdAt: new Date().toISOString(),
           taskId,
@@ -4091,7 +4092,7 @@ app.post("/api/video-tasks/verify", async (req, res) => {
           userId: String(userId),
           amount: rewardAmount,
           type: "video_ad_reward",
-          description: `Reward for Video Ad: ${taskData.name}`,
+          description: `Reward for Video Ad: ${escapeHTML(taskData.name)}`,
           status: "completed",
           createdAt: new Date().toISOString(),
           taskId,
@@ -4108,7 +4109,7 @@ app.post("/api/video-tasks/verify", async (req, res) => {
           userId: String(userId),
           amount: rewardAmount,
           type: "video_ad_reward",
-          description: `Reward for Video Ad: ${taskData.name}`,
+          description: `Reward for Video Ad: ${escapeHTML(taskData.name)}`,
           status: "completed",
           createdAt: new Date().toISOString(),
           taskId,
