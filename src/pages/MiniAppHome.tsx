@@ -463,32 +463,7 @@ export const MiniAppHome: React.FC = () => {
   const queryUserId = searchParams?.get("userId");
   const isMiniApp = !!(tg?.initData || queryUserId);
 
-  const mockUser = {
-    id: "12345678",
-    telegramId: 12345678,
-    username: "rohit_sharma",
-    firstName: "Rohit",
-    lastName: "Sharma",
-    photoUrl: "",
-    languageCode: "en",
-    isPremium: false,
-    enteredName: "Rohit Sharma",
-    balance: 1250,
-    availableBalance: 1250,
-    totalEarnings: 1250,
-    todayEarnings: 0,
-    level: "Bronze" as const,
-    referralCode: "RS123456",
-    referredBy: null,
-    profileCompleted: true,
-    createdAt: "2023-10-01T00:00:00.000Z",
-    updatedAt: "2023-10-01T00:00:00.000Z",
-    lastActive: "2023-10-01T00:00:00.000Z",
-    status: "Active" as const
-  };
-
-  const activeUser: any = user || (!isMiniApp ? mockUser : null);
-
+  const activeUser: any = user || null;
   const [isPhoneVerified, setIsPhoneVerified] = useState<boolean>(!isMiniApp);
 
   const prevViewRef = React.useRef<string>(currentView);
@@ -913,7 +888,8 @@ export const MiniAppHome: React.FC = () => {
     );
   }
 
-  const referralLink = `https://t.me/Roysharearn_bot?start=ref_${activeUser.id}`;
+  const cleanBotUser = tgSettings?.botUsername ? tgSettings.botUsername.replace(/^@/, '') : "Roysharearn_bot";
+  const referralLink = `https://t.me/${cleanBotUser}?start=ref_${activeUser.id}`;
 
   const actionButtons = [
     { id: "self-earning", label: "Self Earning", icon: Star, color: "bg-blue-500", shadow: "shadow-blue-500/20" },

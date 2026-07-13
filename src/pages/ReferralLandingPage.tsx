@@ -124,10 +124,15 @@ export default function ReferralLandingPage() {
   };
 
   const handleOpenTelegram = () => {
-    const botUser = telegramConfig?.botUsername || "Roysharearn_bot";
-    const codeParam = inviteToken || "none";
-    const deepLink = `https://t.me/${botUser}?start=${codeParam}`;
-    window.location.href = deepLink;
+    let botUser = telegramConfig?.botUsername || "Roysharearn_bot";
+    botUser = botUser.replace(/^@/, '');
+    const cleanToken = inviteToken.startsWith("ref_") ? inviteToken.substring(4) : inviteToken;
+    const codeParam = cleanToken ? `ref_${cleanToken}` : "none";
+    const webLink = `https://t.me/${botUser}?start=${codeParam}`;
+    
+    // The t.me link automatically attempts to open the Telegram app if installed,
+    // and falls back to the browser preview page if not.
+    window.location.href = webLink;
   };
 
   const handleSimulatedTestLogin = () => {
@@ -136,8 +141,10 @@ export default function ReferralLandingPage() {
   };
 
   const getBotDeepLink = () => {
-    const botUser = telegramConfig?.botUsername || "Roysharearn_bot";
-    const codeParam = inviteToken || "none";
+    let botUser = telegramConfig?.botUsername || "Roysharearn_bot";
+    botUser = botUser.replace(/^@/, '');
+    const cleanToken = inviteToken.startsWith("ref_") ? inviteToken.substring(4) : inviteToken;
+    const codeParam = cleanToken ? `ref_${cleanToken}` : "none";
     return `https://t.me/${botUser}?start=${codeParam}`;
   };
 

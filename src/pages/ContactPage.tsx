@@ -70,8 +70,6 @@ const ContactPage = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // UI only for now
-    alert("Message sent! This is a UI-only demonstration.");
   };
 
   return (

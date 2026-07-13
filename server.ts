@@ -3241,7 +3241,8 @@ app.post("/api/video-tasks/heartbeat", async (req, res) => {
         // Under robust verification checks, we require scriptLoaded to be true if reported
         const isScriptOk = scriptLoaded !== false;
 
-        if (activeWatchSecs >= minWatchTimeSecs - 2 && isScriptOk && taskData.verificationMode !== "Manual") { // 2 seconds leeway
+        // Never auto verify. Only verify after the advertisement has actually completed
+        if (req.body.adCompleted && activeWatchSecs >= minWatchTimeSecs - 2 && isScriptOk && taskData.verificationMode !== "Manual") { 
           currentStatus = "verified";
         }
       }
@@ -3482,7 +3483,7 @@ app.get("/watch/:token", async (req, res) => {
         const retryAdBtn = document.getElementById("retry-ad-btn");
         const statusContainer = document.getElementById("status-container");
 
-        function loadAdvertisement() {
+                function loadAdvertisement() {
           console.log("Loading Advertisement");
           adErrorMsg.classList.add("hidden");
           adContainer.innerHTML = "";
@@ -3495,51 +3496,67 @@ app.get("/watch/:token", async (req, res) => {
               return;
             }
 
-            // Create a temporary element to parse the string
+            let targetContainer = document.querySelector(".main-content");
+            if (targetContainer) {
+              console.log("Container Found");
+            } else {
+              console.log("Configured selector not found.");
+              targetContainer = document.getElementById("clickadilla-video-container");
+              if (targetContainer) {
+                console.log("Container Found");
+              } else {
+                targetContainer = document.createElement("div");
+                targetContainer.id = "clickadilla-video-container";
+                targetContainer.className = "main-content w-full h-full flex items-center justify-center";
+                adContainer.appendChild(targetContainer);
+                console.log("Container Created");
+              }
+            }
+
+            console.log("Ad Container Ready");
+
             const tempDiv = document.createElement("div");
             tempDiv.innerHTML = rawAdScript;
 
             const scripts = Array.from(tempDiv.getElementsByTagName("script"));
-            if (scripts.length === 0) {
-               // Fallback if it's just an iframe or pure html
-               adContainer.innerHTML = rawAdScript;
+            
+            if (scripts.length === 0) { 
+               targetContainer.innerHTML = rawAdScript;
                adLoaded = true;
                return;
             }
 
-            // Safely recreate scripts
             scripts.forEach(oldScript => {
               const newScript = document.createElement("script");
               Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
               if (oldScript.innerHTML) {
                 newScript.innerHTML = oldScript.innerHTML;
               }
-              adContainer.appendChild(newScript);
+              targetContainer.appendChild(newScript);
             });
+            
+            console.log("Script Injected");
 
-            // If there's non-script content (like div wrappers), append it too
             const nonScriptNodes = Array.from(tempDiv.childNodes).filter(n => n.nodeName.toLowerCase() !== 'script');
-            nonScriptNodes.forEach(n => adContainer.appendChild(n));
+            nonScriptNodes.forEach(n => targetContainer.appendChild(n));
 
-            // Mark as loaded (in reality, an external ad network might have its own callback, but we assume it loads if no sync error)
             setTimeout(() => {
-              if (adContainer.innerHTML.trim() !== "") {
+              if (targetContainer.innerHTML.trim() !== "") {
                 console.log("Advertisement Loaded");
                 adLoaded = true;
               }
             }, 1000);
 
-            // Handle script load errors by catching window errors locally or attaching onerror
-            // Since ad networks inject iframes/scripts, we will wait for at least an iframe or script element in DOM.
           } catch(e) {
             console.error("Advertisement rendering failed:", e);
             adFailed = true;
+            adErrorMsg.querySelector('p').innerText = "Advertisement failed to load. Please try again.";
             adErrorMsg.classList.remove("hidden");
           }
         }
 
         function startTimers() {
-          console.log("Countdown Started");
+          console.log("Advertisement Started");
           
           timerInterval = setInterval(() => {
             if (document.hidden || adFailed) return;
@@ -3560,9 +3577,10 @@ app.get("/watch/:token", async (req, res) => {
                 const pText = document.getElementById("progress-percentage");
                 if (pText) pText.innerText = Math.floor(percent) + "% completed";
               }
-
-              if (timeLeft === 0) {
+              
+              if (timeLeft === 0 && !window.adCompletedLogged) {
                 console.log("Advertisement Completed");
+                window.adCompletedLogged = true;
               }
             }
           }, 1000);
@@ -3587,7 +3605,8 @@ app.get("/watch/:token", async (req, res) => {
                   devToolsDetected: false, automationDetected: false,
                   scriptLoaded: scriptLoaded, 
                   scriptExecuted: scriptExecuted,
-                  scriptLoadTime: 0, failureReason: scriptExecuted ? "" : "Script not executed"
+                  scriptLoadTime: 0, failureReason: scriptExecuted ? "" : "Script not executed",
+                  adCompleted: window.adCompletedLogged === true
                 })
               });
               
@@ -3601,6 +3620,7 @@ app.get("/watch/:token", async (req, res) => {
                 clearInterval(timerInterval);
                 clearInterval(heartbeatInterval);
                 console.log("Verification Success");
+                console.log("Reward Credited");
                 
                 statusContainer.innerHTML = 
                   '<div class="w-16 h-16 rounded-full bg-emerald-500/20 border-4 border-emerald-500 flex items-center justify-center mb-3 shadow-lg shadow-emerald-500/10">' +
@@ -3629,7 +3649,7 @@ app.get("/watch/:token", async (req, res) => {
           }, 5000);
         }
 
-        startWatchBtn.addEventListener("click", () => {
+        startWatchBtn.addEventListener("click", () => {          console.log("Watch Ads Clicked");
           preWatchState.classList.add("hidden");
           timerState.classList.remove("hidden");
           adWrapper.classList.remove("hidden");

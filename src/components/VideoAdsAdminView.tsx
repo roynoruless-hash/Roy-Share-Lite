@@ -339,27 +339,27 @@ export default function VideoAdsAdminView() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                 <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl text-center">
                   <p className="text-slate-400 text-sm font-bold mb-2">Total Views</p>
-                  <p className="text-3xl font-black text-white">{analytics.totalViews}</p>
+                  <p className="text-3xl font-black text-white">{analytics.totalViews || 0}</p>
                 </div>
                 <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl text-center">
                   <p className="text-slate-400 text-sm font-bold mb-2">Completed Ads</p>
-                  <p className="text-3xl font-black text-emerald-400">{analytics.completedAds}</p>
+                  <p className="text-3xl font-black text-emerald-400">{analytics.completedAds || 0}</p>
                 </div>
                 <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl text-center">
-                  <p className="text-slate-400 text-sm font-bold mb-2">Failed/Incomplete</p>
-                  <p className="text-3xl font-black text-red-400">{analytics.failedAds}</p>
+                  <p className="text-slate-400 text-sm font-bold mb-2">Failed Ads</p>
+                  <p className="text-3xl font-black text-red-400">{analytics.failedAds || 0}</p>
                 </div>
                 <div className="bg-blue-900/20 border border-blue-500/30 p-6 rounded-2xl text-center">
                   <p className="text-blue-400 text-sm font-bold mb-2">Rewards Paid</p>
-                  <p className="text-3xl font-black text-white">₹{parseFloat(analytics.rewardsPaid).toFixed(4)}</p>
+                  <p className="text-3xl font-black text-white">₹{parseFloat(analytics.rewardsPaid || 0).toFixed(2)}</p>
                 </div>
                 <div className="bg-blue-900/20 border border-blue-500/30 p-6 rounded-2xl text-center">
                   <p className="text-blue-400 text-sm font-bold mb-2">Estimated Revenue</p>
-                  <p className="text-3xl font-black text-white">₹{parseFloat(analytics.estimatedRevenue).toFixed(4)}</p>
+                  <p className="text-3xl font-black text-white">₹{parseFloat(analytics.estimatedRevenue || 0).toFixed(2)}</p>
                 </div>
                 <div className="bg-emerald-900/20 border border-emerald-500/30 p-6 rounded-2xl text-center">
-                  <p className="text-emerald-400 text-sm font-bold mb-2">Est. Profit</p>
-                  <p className="text-3xl font-black text-emerald-400">₹{parseFloat(analytics.profit).toFixed(4)}</p>
+                  <p className="text-emerald-400 text-sm font-bold mb-2">Estimated Profit</p>
+                  <p className="text-3xl font-black text-emerald-400">₹{parseFloat(analytics.profit || 0).toFixed(2)}</p>
                 </div>
               </div>
             ) : (

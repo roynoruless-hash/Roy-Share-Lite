@@ -803,6 +803,15 @@ async function findReferrerByCode(db: any, code: string): Promise<any> {
     // 4. Try to find if code starts with ref_ and strip it
     if (cleanCode.startsWith("ref_")) {
         const stripped = cleanCode.substring(4);
+        
+        // Try to find by referralCode field first
+        const q2 = query(collection(db, "users"), where("referralCode", "==", stripped));
+        const snap2 = await getDocs(q2);
+        if (!snap2.empty) {
+            return { id: snap2.docs[0].id, data: snap2.docs[0].data() };
+        }
+        
+        // Fallback to finding by Telegram ID directly
         const refDoc = await getDoc(doc(db, "users", stripped));
         if (refDoc.exists()) {
             return { id: refDoc.id, data: refDoc.data() };
@@ -5650,7 +5659,7 @@ https://youtube.com`;
             } catch (e) {
                 console.error("Error getting bot username inside copy callback:", e);
             }
-            const referralLink = `https://t.me/${botUsername}?start=${code}`;
+            const referralLink = `https://t.me/${botUsername}?start=ref_${code}`;
             
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
