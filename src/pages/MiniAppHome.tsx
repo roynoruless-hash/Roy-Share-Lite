@@ -47,6 +47,9 @@ import { WalletPage } from "./WalletPage";
 import DailyBonusPage from "./DailyBonusPage";
 import DashboardPage from "./DashboardPage";
 import RewardTasksPage from "./RewardTasksPage";
+import { StandardTaskCard } from "../components/StandardTaskCard";
+import { ShortenerTaskCard } from "../components/ShortenerTaskCard";
+import { VideoTaskCard } from "../components/VideoTaskCard";
 
 
 
@@ -676,7 +679,12 @@ export const MiniAppHome: React.FC = () => {
       fetch(`${API_BASE}/api/video-tasks`)
         .then(res => res.json())
         .then(data => {
-          setVideoTasks(Array.isArray(data) ? data : []);
+          const list = Array.isArray(data) ? data : [];
+          const normalized = list.map((t: any) => ({
+            ...t,
+            type: t.type || "video"
+          }));
+          setVideoTasks(normalized);
           if (activeUser?.id) {
             fetch(`${API_BASE}/api/video-tasks/user-completions?userId=${activeUser.id}`)
               .then(r => r.json())
@@ -891,6 +899,16 @@ export const MiniAppHome: React.FC = () => {
         userIdProp={activeUser.id} 
         taskIdProp={activeTaskId} 
         onBack={() => setActiveTaskId(null)} 
+      />
+    );
+  }
+
+  if (activeVideoTaskId) {
+    return (
+      <VideoTaskPage
+        userId={activeUser.id}
+        taskId={activeVideoTaskId}
+        onBack={() => setActiveVideoTaskId(null)}
       />
     );
   }
@@ -1330,32 +1348,16 @@ export const MiniAppHome: React.FC = () => {
                   ) : (
                     <div className="space-y-4">
                       {tasks.map((task) => (
-                        <div 
+                        <StandardTaskCard 
                           key={task.id} 
-                          className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-3 hover:border-slate-700 transition-colors"
-                        >
-                          <div className="flex justify-between items-start gap-4">
-                            <div>
-                              <h4 className="font-bold text-sm text-white">{task.name}</h4>
-                              <p className="text-xs text-slate-400 mt-1">{task.description}</p>
-                            </div>
-                            <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 px-3 py-1 rounded-xl text-right shrink-0">
-                              <p className="text-[9px] uppercase tracking-wider font-bold">REWARD</p>
-                              <p className="font-bold text-sm">₹{task.amount}</p>
-                            </div>
-                          </div>
-                          <button 
-                            onClick={() => setActiveTaskId(task.id)}
-                            className="w-full py-3 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
-                          >
-                            <PlayCircle className="w-4 h-4" /> Start Task
-                          </button>
-                        </div>
+                          task={task} 
+                          onStart={(id) => setActiveTaskId(id)} 
+                        />
                       ))}
                     </div>
                   )}
                 </>
-              ) : (
+              ) : userRewardTab === "gp" ? (
                 <>
                   {loadingGpTasks ? (
                     <div className="flex justify-center py-12">
@@ -1369,56 +1371,43 @@ export const MiniAppHome: React.FC = () => {
                     <div className="space-y-4">
                       {gpTasks.map((task) => {
                         const isCompleted = completedGpTaskIds.includes(task.id);
-                        const rewardPerView = (task.cpmAmount || 0) / 1000;
-                        const url = task.shortenerUrl || task.gpLinksUrl || "";
-                        const startUrl = `${url}${url.includes('?') ? '&' : '?'}userId=${activeUser.id}&taskId=${task.id}`;
-                        
                         return (
-                          <div 
+                          <ShortenerTaskCard 
                             key={task.id} 
-                            className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-3 hover:border-slate-700 transition-colors"
-                          >
-                            <div className="flex justify-between items-start gap-4">
-                              <div className="text-left">
-                                <h4 className="font-bold text-sm text-white flex items-center gap-1.5 flex-wrap">
-                                  <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded text-[9px] font-black uppercase">
-                                    {task.provider || "GPLinks"}
-                                  </span>
-                                  {task.title}
-                                  {isCompleted && (
-                                    <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 rounded-full text-[10px] font-semibold">
-                                      ✓ Claimed
-                                    </span>
-                                  )}
-                                </h4>
-                                <p className="text-[10px] text-indigo-400 font-semibold mt-1 flex items-center gap-1">
-                                  ⏱️ Wait duration: {task.timerDuration || 5} seconds
-                                </p>
-                              </div>
-                              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-3 py-1 rounded-xl text-right shrink-0">
-                                <p className="text-[9px] uppercase tracking-wider font-bold">REWARD</p>
-                                <p className="font-black text-sm">₹{rewardPerView.toFixed(4)}</p>
-                              </div>
-                            </div>
-                            
-                            {isCompleted ? (
-                              <button 
-                                disabled
-                                className="w-full py-3 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-not-allowed"
-                              >
-                                <CheckCircle2 className="w-4 h-4" /> Reward Claimed Successfully
-                              </button>
-                            ) : (
-                              <button 
-                                onClick={() => handleStartTask(task.id, url, "gplink")}
-                                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors text-center"
-                              >
-                                <Zap className="w-4 h-4" /> Start {task.provider || "Shortener"} Task
-                              </button>
-                            )}
-                          </div>
+                            task={task} 
+                            isCompleted={isCompleted} 
+                            onStart={(id, url) => handleStartTask(id, url, "gplink")} 
+                          />
                         );
                       })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {loadingVideoTasks ? (
+                    <div className="flex justify-center py-12">
+                      <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : videoTasks.filter((task) => task.type === "video").length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-sm">
+                      No video tasks available
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {videoTasks
+                        .filter((task) => task.type === "video")
+                        .map((task) => {
+                          const completions = videoCompletions[task.id] || 0;
+                          return (
+                            <VideoTaskCard 
+                              key={task.id} 
+                              task={task} 
+                              completions={completions} 
+                              onStart={(id) => setActiveVideoTaskId(id)} 
+                            />
+                          );
+                        })}
                     </div>
                   )}
                 </>
