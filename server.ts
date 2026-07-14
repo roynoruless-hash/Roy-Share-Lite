@@ -822,19 +822,35 @@ app.post("/api/admin/clickadilla/test-connection", requireAdminDb, async (req, r
         token = snap.exists() ? decryptToken(snap.data().apiKey) : "";
     }
     
-    // Actual API Call (using a placeholder URL structure, user can adjust)
+    const getToday = () => new Date().toISOString().split('T')[0];
+    const today = getToday();
     const start = Date.now();
-    const response = await fetch("https://api.clickadilla.com/v1/account/status", {
-      headers: { "Authorization": `Bearer ${token}` }
-    });
+    
+    // Official ClickAdilla Publisher API stats endpoint used as a lightweight validation check
+    const url = `https://publishers.clickadilla.com/backend/api/public/stats?token=${token}&date1=${today}&date2=${today}&fields=date&limit=1`;
+    const response = await fetch(url);
     const duration = Date.now() - start;
-    const result = await response.json();
+    
+    if (response.status === 401 || response.status === 403) {
+      return res.status(response.status).json({
+        status: "failed",
+        error: "Invalid Publisher API Token"
+      });
+    }
+    
+    let result = null;
+    try {
+      result = await response.json();
+    } catch (err) {
+      // Ignore JSON parse error if any
+    }
     
     res.json({
         status: response.ok ? "connected" : "failed",
         httpStatus: response.status,
         responseTime: `${duration}ms`,
-        rawResponse: result
+        rawResponse: result,
+        error: response.ok ? undefined : (result?.error || "Connection failed")
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
