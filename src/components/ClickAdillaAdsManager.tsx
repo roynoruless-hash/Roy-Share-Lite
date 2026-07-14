@@ -4,7 +4,7 @@ import { Save, Zap, CheckCircle, Code, Terminal, Network, AlertCircle, RefreshCw
 
 export default function ClickAdillaAdsManager() {
   const [settings, setSettings] = useState({ apiKey: "", spotId: "", js: "", html: "", css: "" });
-  const [loading, setLoading] = useState({});
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState("API Connection");
   const [logs, setLogs] = useState<{timestamp: string, type: string, message: string}[]>([]);
   const [rawResponse, setRawResponse] = useState<any>(null);
@@ -56,9 +56,9 @@ export default function ClickAdillaAdsManager() {
       {activeTab === "API Connection" && (
         <div className="space-y-4">
           <input type="password" value={settings.apiKey} onChange={e => setSettings({...settings, apiKey: e.target.value})} placeholder="API Key" className="w-full p-2 bg-slate-800 rounded-lg text-white" />
-          <div className="flex gap-2">
-            <button onClick={() => handleAction("Test Connection", "/api/admin/clickadilla/test-connection", { apiKey: settings.apiKey })} className="flex-1 p-2 bg-indigo-600 rounded-lg font-bold flex items-center justify-center gap-2"><Zap size={16}/>Test Connection</button>
-            <button onClick={() => handleAction("Save Settings", "/api/admin/clickadilla/settings", settings)} className="flex-1 p-2 bg-slate-700 rounded-lg font-bold flex items-center justify-center gap-2"><Save size={16}/>Save</button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button onClick={() => handleAction("Test Connection", "/api/admin/clickadilla/test-connection", { apiKey: settings.apiKey })} disabled={!!loading["Test Connection"]} className="flex-1 p-2 bg-indigo-600 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Zap size={16}/>{loading["Test Connection"] ? "Testing..." : "Test Connection"}</button>
+            <button onClick={() => handleAction("Save Settings", "/api/admin/clickadilla/settings", settings)} disabled={!!loading["Save Settings"]} className="flex-1 p-2 bg-slate-700 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Save size={16}/>{loading["Save Settings"] ? "Saving..." : "Save"}</button>
           </div>
         </div>
       )}
