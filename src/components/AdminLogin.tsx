@@ -37,16 +37,14 @@ export default function AdminLogin({ isOpen, onClose }: { isOpen: boolean; onClo
       return;
     }
     setLoading(true);
-    const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
     
     try {
-      const res = await fetch(`${API_BASE}/api/telegram/send`, {
+      const res = await fetch(`${API_BASE}/api/admin/send-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ botToken: telegramBotToken, chatId: telegramChatId, otp: newOtp })
+        body: JSON.stringify({ mobile, botToken: telegramBotToken, chatId: telegramChatId })
       });
       if (!res.ok) throw new Error("Failed");
-      setGeneratedOtp(newOtp);
       setStep(4);
       setError("");
     } catch (e) {
@@ -56,29 +54,34 @@ export default function AdminLogin({ isOpen, onClose }: { isOpen: boolean; onClo
     }
   };
 
-  const verifyOtp = () => {
+  const verifyOtp = async () => {
     if (attempts >= 5) {
       setIsLocked(true);
       setError("❌ Locked for 10 min.");
       setTimeout(() => { setIsLocked(false); setAttempts(0); }, 600000);
       return;
     }
-    if (otp === generatedOtp) {
-      const now = new Date();
-      const expiry = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour
-
-      localStorage.setItem("isAdminLoggedIn", "true");
-      localStorage.setItem("loginTime", now.toISOString());
-      localStorage.setItem("expiryTime", expiry.toISOString());
-      localStorage.setItem("adminPhoneNumber", mobile);
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mobile, otp })
+      });
+      if (!res.ok) throw new Error("Invalid");
+      const data = await res.json();
+      
+      localStorage.setItem("admin_token", data.token);
       
       console.log("Session Created");
       
       setError("✅ Login Successful");
       setTimeout(() => window.location.href = "/dashboard/admin", 1000);
-    } else {
+    } catch (e) {
       setAttempts(a => a + 1);
       setError(`❌ Invalid OTP (${5 - (attempts + 1)} attempts left)`);
+    } finally {
+      setLoading(false);
     }
   };
 

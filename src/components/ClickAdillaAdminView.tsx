@@ -6,6 +6,15 @@ import {
   MousePointer2, Zap, LayoutDashboard, Settings, Loader2, BarChart2, Calendar
 } from "lucide-react";
 
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("admin_token");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+};
+
 export default function ClickAdillaAdminView() {
   const [activeTab, setActiveTab] = useState("Live Statistics");
   const [apiToken, setApiToken] = useState("");
@@ -35,7 +44,7 @@ export default function ClickAdillaAdminView() {
     try {
       const fetchUrl = `${API_BASE}/api/admin/clickadilla/spots`;
       const res = await fetch(fetchUrl, {
-        headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+        headers: getAuthHeaders()
       });
       const endTime = Date.now();
       const rawText = await res.text();
@@ -86,7 +95,7 @@ export default function ClickAdillaAdminView() {
   const fetchSettings = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/admin/clickadilla/settings`, {
-        headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+        headers: getAuthHeaders()
       });
       const data = await res.json();
       if (data.apiToken) {
@@ -103,10 +112,7 @@ export default function ClickAdillaAdminView() {
     try {
       const res = await fetch(`${API_BASE}/api/admin/clickadilla/settings`, {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("admin_token")}`
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ apiToken, connected })
       });
       if (res.ok) {
@@ -125,10 +131,7 @@ export default function ClickAdillaAdminView() {
     try {
       const res = await fetch(`${API_BASE}/api/admin/clickadilla/test`, {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("admin_token")}`
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ apiToken })
       });
       const data = await res.json();
@@ -150,7 +153,7 @@ export default function ClickAdillaAdminView() {
     setLoadingStats(true);
     try {
       const res = await fetch(`${API_BASE}/api/admin/clickadilla/stats/today`, {
-        headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+        headers: getAuthHeaders()
       });
       const data = await res.json();
       const rows = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []);
@@ -166,10 +169,10 @@ export default function ClickAdillaAdminView() {
     try {
       const [res30, resAd] = await Promise.all([
         fetch(`${API_BASE}/api/admin/clickadilla/stats/last30`, {
-          headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+          headers: getAuthHeaders()
         }),
         fetch(`${API_BASE}/api/admin/clickadilla/stats/adformat`, {
-          headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+          headers: getAuthHeaders()
         })
       ]);
       const data30 = await res30.json();
@@ -187,7 +190,7 @@ export default function ClickAdillaAdminView() {
     setLoadingSpots(true);
     try {
       const res = await fetch(`${API_BASE}/api/admin/clickadilla/spots`, {
-        headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+        headers: getAuthHeaders()
       });
       const data = await res.json();
       setSpots(Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []));

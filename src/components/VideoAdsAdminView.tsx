@@ -3,6 +3,15 @@ import { API_BASE } from "../config/api";
 import { motion } from "motion/react";
 import { Plus, Edit2, Trash2, Video, BarChart3, Save, CheckCircle2, Loader2, PlayCircle, Settings, Calculator, ShieldCheck } from "lucide-react";
 
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("admin_token");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+};
+
 export default function VideoAdsAdminView() {
   const [activeTab, setActiveTab] = useState("Tasks");
   const [tasks, setTasks] = useState<any[]>([]);
@@ -26,7 +35,7 @@ export default function VideoAdsAdminView() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/admin/video-tasks`, {
-        headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+        headers: getAuthHeaders()
       });
       const data = await res.json();
       setTasks(Array.isArray(data) ? data : []);
@@ -40,7 +49,7 @@ export default function VideoAdsAdminView() {
     setLoadingAnalytics(true);
     try {
       const res = await fetch(`${API_BASE}/api/admin/video-analytics`, {
-        headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+        headers: getAuthHeaders()
       });
       const data = await res.json();
       setAnalytics(data);
@@ -54,7 +63,7 @@ export default function VideoAdsAdminView() {
     setLoadingLogs(true);
     try {
       const res = await fetch(`${API_BASE}/api/admin/video-logs`, {
-        headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+        headers: getAuthHeaders()
       });
       const data = await res.json();
       setLogs(Array.isArray(data) ? data : []);
@@ -66,7 +75,7 @@ export default function VideoAdsAdminView() {
     try {
       const res = await fetch(`${API_BASE}/api/admin/video-logs-action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${localStorage.getItem("admin_token")}` },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ sessionId, action })
       });
       const data = await res.json();
@@ -86,10 +95,7 @@ export default function VideoAdsAdminView() {
     try {
       const res = await fetch(`${API_BASE}/api/admin/video-tasks`, {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("admin_token")}`
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify(editingTask)
       });
       if (res.ok) {
@@ -108,7 +114,7 @@ export default function VideoAdsAdminView() {
     try {
       const res = await fetch(`${API_BASE}/api/admin/video-tasks/${id}`, {
         method: "DELETE",
-        headers: { "Authorization": `Bearer ${localStorage.getItem("admin_token")}` }
+        headers: getAuthHeaders()
       });
       if (res.ok) {
         fetchTasks();

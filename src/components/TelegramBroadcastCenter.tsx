@@ -99,7 +99,7 @@ export default function TelegramBroadcastCenter({ onOpenSettings }: TelegramBroa
   const fetchSettings = async () => {
     try {
       setSettingsLoading(true);
-      const res = await fetch(`${API_BASE}/api/admin/telegram-settings`);
+      const res = await authenticatedFetch("/api/admin/telegram-settings");
       const data = await res.json();
       if (data.success && data.settings) {
         setTelegramSettings(data.settings);
@@ -114,7 +114,7 @@ export default function TelegramBroadcastCenter({ onOpenSettings }: TelegramBroa
   const fetchHistory = async () => {
     try {
       setHistoryLoading(true);
-      const res = await fetch(`${API_BASE}/api/admin/telegram-broadcast/list`);
+      const res = await authenticatedFetch("/api/admin/telegram-broadcast/list");
       const data = await res.json();
       if (data.success && data.list) {
         setHistoryList(data.list);

@@ -1,5 +1,6 @@
 
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET || "default_secret_for_dev_only_change_in_prod";
 const ALGORITHM = "aes-256-cbc";
 const IV_LENGTH = 16;
@@ -122,13 +123,18 @@ const db = getDb();
 import { getFirestore as getAdminFirestore, FieldValue } from "firebase-admin/firestore";
 let adminDb: any;
 
-// Middleware to check if Firebase Admin is initialized
+// Middleware to check if Firebase Admin is initialized and user is authorized
 const requireAdminDb = (req: any, res: any, next: any) => {
-  // We no longer block access if adminDb is missing, as many routes use the client SDK (db)
-  if (!adminDb) {
-    debugLog(`[Firebase] Warning: adminDb not initialized for ${req.path}.`);
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
-  next();
+  try {
+    jwt.verify(token, process.env.ADMIN_JWT_SECRET!);
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
 };
 
 // Helper to log to a file we can read
@@ -367,6 +373,33 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       console.error("Admin verified users fetch error:", e);
       res.status(500).json({ error: "Server error" });
     }
+  });
+
+const otpStore = new Map<string, string>(); // Store OTPs by mobile
+
+  app.post("/api/admin/send-otp", async (req, res) => {
+    const { mobile, botToken, chatId } = req.body;
+    if (mobile !== "9027671630") return res.status(403).json({ error: "Unauthorized" });
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    otpStore.set(mobile, otp);
+    try {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, text: `Your Admin OTP is: ${otp}` })
+        });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: "Failed to send OTP" });
+    }
+  });
+
+  app.post("/api/admin/verify-otp", async (req, res) => {
+    const { mobile, otp } = req.body;
+    if (otpStore.get(mobile) !== otp) return res.status(401).json({ error: "Invalid OTP" });
+    otpStore.delete(mobile);
+    const token = jwt.sign({ admin: "9027671630" }, process.env.ADMIN_JWT_SECRET!, { expiresIn: "1h" });
+    res.json({ success: true, token });
   });
 
   app.post("/api/admin/users/update-status", requireAdminDb, async (req, res) => {
@@ -782,8 +815,12 @@ app.post("/api/admin/clickadilla/settings", requireAdminDb, async (req, res) => 
 
 app.post("/api/admin/clickadilla/test-connection", requireAdminDb, async (req, res) => {
   try {
-    const snap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
-    const token = snap.exists() ? decryptToken(snap.data().apiKey) : "";
+    const { apiKey } = req.body;
+    let token = apiKey;
+    if (!token) {
+        const snap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
+        token = snap.exists() ? decryptToken(snap.data().apiKey) : "";
+    }
     
     // Actual API Call (using a placeholder URL structure, user can adjust)
     const start = Date.now();

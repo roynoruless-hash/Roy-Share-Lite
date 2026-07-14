@@ -1,5 +1,6 @@
 import LinkAnalyticsPage from "./LinkAnalyticsPage";
 import { useState, useEffect, useRef } from "react";
+import { authenticatedFetch } from "../lib/api";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { db } from "../lib/firebase";
@@ -433,7 +434,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchTelegramOfficialSettings = async () => {
     setTelegramOfficialLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/telegram-settings`);
+      const res = await authenticatedFetch("/api/admin/telegram-settings");
       const data = await res.json();
       if (data.success && data.settings) {
         setTelegramOfficialSettings({
@@ -458,7 +459,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setTestBotLoading(true);
     setTestBotStatus(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/telegram-settings/test-bot`, {
+      const res = await authenticatedFetch("/api/admin/telegram-settings/test-bot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ botToken: telegramOfficialSettings.botToken })
@@ -481,7 +482,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setVerifyChannelLoading(true);
     setVerifyChannelStatus(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/telegram-settings/verify-channel`, {
+      const res = await authenticatedFetch("/api/admin/telegram-settings/verify-channel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -507,7 +508,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setVerifyGroupLoading(true);
     setVerifyGroupStatus(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/telegram-settings/verify-group`, {
+      const res = await authenticatedFetch("/api/admin/telegram-settings/verify-group", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -562,7 +563,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/telegram-settings`, {
+      const res = await authenticatedFetch("/api/admin/telegram-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedSettings)
@@ -592,7 +593,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setGoogleDriveLoading(true);
     setGoogleDriveError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/google-drive-accounts`);
+      const res = await authenticatedFetch("/api/admin/google-drive-accounts");
       if (!res.ok) throw new Error("Failed to fetch Google Drive accounts");
       const json = await res.json();
       setGoogleDriveAccounts(json);
@@ -696,7 +697,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setTestConnectionLoading(true);
     setTestConnectionStatus("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/support/test-connection`, {
+      const res = await authenticatedFetch("/api/admin/support/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1009,7 +1010,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setAiGeneratingTask(true);
     setAiError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/tasks/generate-ai`, {
+      const res = await authenticatedFetch("/api/admin/tasks/generate-ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1094,7 +1095,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchMonetagStats = async () => {
     setMonetagStatsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/monetag/stats`);
+      const res = await authenticatedFetch("/api/admin/monetag/stats");
       const data = await res.json();
       if (data.success) {
         setMonetagStats(data);
@@ -1112,7 +1113,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     try {
       // Use the first user found or a dummy ID for testing
       const telegramId = data?.topEarners?.[0]?.telegramId || "123456789";
-      const res = await fetch(`${API_BASE}/api/admin/monetag/test-postback`, {
+      const res = await authenticatedFetch("/api/admin/monetag/test-postback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ telegramId }),
@@ -1147,7 +1148,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/dashboard`);
+      const res = await authenticatedFetch("/api/admin/dashboard");
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       const json = await res.json();
       setData(json);
@@ -1162,7 +1163,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setGameRewardSettingsLoading(true);
     setGameRewardSettingsError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/game-reward-settings`);
+      const res = await authenticatedFetch("/api/admin/game-reward-settings");
       const data = await res.json();
       if (data.success && data.settings) {
         setGameRewardSettings(data.settings);
@@ -1184,7 +1185,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setGameRewardSettingsSuccess("");
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/game-reward-settings`, {
+      const res = await authenticatedFetch("/api/admin/game-reward-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(gameRewardSettings)
@@ -1209,7 +1210,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setWithdrawalsLoading(true);
     setWithdrawalsError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/withdrawals`);
+      const res = await authenticatedFetch("/api/admin/withdrawals");
       if (!res.ok) throw new Error("Failed to fetch withdrawals");
       const json = await res.json();
       setWithdrawals(json);
@@ -1224,7 +1225,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setTicketsLoading(true);
     setTicketsError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/tickets`);
+      const res = await authenticatedFetch("/api/admin/tickets");
       if (!res.ok) throw new Error("Failed to fetch tickets");
       const json = await res.json();
       setTickets(json);
@@ -1239,7 +1240,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setAnnouncementsLoading(true);
     setAnnouncementsError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/announcements`);
+      const res = await authenticatedFetch("/api/admin/announcements");
       if (!res.ok) throw new Error("Failed to fetch announcements");
       const json = await res.json();
       setAnnouncements(json);
@@ -1253,7 +1254,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   // GameMonetize Walkthrough Manager Functions
   const fetchWalkthroughSettings = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs/settings`);
+      const res = await authenticatedFetch("/api/admin/gamemonetize/walkthroughs/settings");
       const data = await res.json();
       if (data.success) setWalkthroughSettings(data.settings);
     } catch (err) {
@@ -1264,7 +1265,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const saveWalkthroughSettings = async () => {
     setWalkthroughSettingsSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs/settings`, {
+      const res = await authenticatedFetch("/api/admin/gamemonetize/walkthroughs/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(walkthroughSettings)
@@ -1284,7 +1285,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchWalkthroughs = async () => {
     setWalkthroughsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs`);
+      const res = await authenticatedFetch("/api/admin/gamemonetize/walkthroughs");
       const data = await res.json();
       if (data.success) setWalkthroughs(data.walkthroughs);
     } catch (err) {
@@ -1303,7 +1304,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         ...walkthroughForm, 
         mode: "raw" 
       };
-      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs`, {
+      const res = await authenticatedFetch("/api/admin/gamemonetize/walkthroughs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -1329,7 +1330,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const deleteWalkthrough = async (id: string) => {
     if (!confirm("Are you sure you want to delete this walkthrough?")) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamemonetize/walkthroughs/${id}`, {
+      const res = await authenticatedFetch("/api/admin/gamemonetize/walkthroughs/${id}", {
         method: "DELETE"
       });
       const data = await res.json();
@@ -1355,7 +1356,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setTasksLoading(true);
     setTasksError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/tasks`);
+      const res = await authenticatedFetch("/api/admin/tasks");
       if (!res.ok) throw new Error("Failed to fetch tasks");
       const json = await res.json();
       setTasks(json);
@@ -1370,7 +1371,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setGpTasksLoading(true);
     setGpTasksError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gplinks-tasks`);
+      const res = await authenticatedFetch("/api/admin/gplinks-tasks");
       if (!res.ok) throw new Error("Failed to fetch GP links tasks");
       const json = await res.json();
       setGpTasks(json);
@@ -1419,7 +1420,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const handleDeleteGpTask = async (id: string) => {
     if (!confirm("Are you sure you want to delete this GP links task?")) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gplinks-tasks/${id}`, {
+      const res = await authenticatedFetch("/api/admin/gplinks-tasks/${id}", {
         method: "DELETE"
       });
       if (!res.ok) throw new Error("Failed to delete GP links task");
@@ -1432,7 +1433,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const handleToggleGpTaskStatus = async (task: any) => {
     try {
       const newStatus = task.status === "Active" ? "Paused" : "Active";
-      const res = await fetch(`${API_BASE}/api/admin/gplinks-tasks/${task.id}`, {
+      const res = await authenticatedFetch("/api/admin/gplinks-tasks/${task.id}", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...task, status: newStatus })
@@ -1447,7 +1448,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchTaskLogs = async () => {
     setTaskLogsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/task-logs`);
+      const res = await authenticatedFetch("/api/admin/task-logs");
       if (res.ok) {
         const json = await res.json();
         setTaskLogs(json);
@@ -1601,7 +1602,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchVerifiedTasks = async () => {
     setVerifiedTasksLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/verified-tasks`);
+      const res = await authenticatedFetch("/api/admin/verified-tasks");
       if (res.ok) {
         const json = await res.json();
         setVerifiedTasks(json);
@@ -1616,7 +1617,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchBonusSettings = async () => {
     setBonusSettingsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/settings`);
+      const res = await authenticatedFetch("/api/admin/daily-bonus/settings");
       if (res.ok) {
         const data = await res.json();
         const defaults = {
@@ -1644,7 +1645,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchBonusHistory = async () => {
     setBonusHistoryLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/history`);
+      const res = await authenticatedFetch("/api/admin/daily-bonus/history");
       if (res.ok) setBonusHistory(await res.json());
     } catch (err) {
       console.error(err);
@@ -1656,7 +1657,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchDailyBonusStats = async () => {
     setDailyBonusStatsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/stats`);
+      const res = await authenticatedFetch("/api/admin/daily-bonus/stats");
       if (res.ok) setDailyBonusStats(await res.json());
     } catch (err) {
       console.error(err);
@@ -1669,7 +1670,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     try {
       const { totalSpins, totalRewardsDistributed, ...settingsToSave } =
         newSettings;
-      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/settings`, {
+      const res = await authenticatedFetch("/api/admin/daily-bonus/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settingsToSave),
@@ -1776,7 +1777,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setUsersLoading(true);
     setUsersError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users`);
+      const res = await authenticatedFetch("/api/admin/users");
       if (!res.ok) throw new Error("Failed to fetch users");
       setUsers(await res.json());
     } catch (err: any) {
@@ -1802,7 +1803,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
     setModalLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/delete-all`, {
+      const res = await authenticatedFetch("/api/admin/users/delete-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adminId: "Admin" }),
@@ -1880,7 +1881,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       if (res.ok) {
         alert(data.message || "Action completed successfully");
         // Update users list and the selected user in the modal
-        const updatedUsers = await (await fetch(`${API_BASE}/api/admin/users`)).json();
+        const updatedUsers = await (await authenticatedFetch("/api/admin/users")).json();
         setUsers(updatedUsers);
         if (selectedUser?.id === userId) {
           const updatedSelectedUser = updatedUsers.find((u: any) => u.id === userId);
@@ -1912,7 +1913,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
     setUsersLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/bulk-action`, {
+      const res = await authenticatedFetch("/api/admin/users/bulk-action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1945,7 +1946,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchAdPlacements = async () => {
     setAdPlacementsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/ad-placements`);
+      const res = await authenticatedFetch("/api/admin/ad-placements");
       if (res.ok) setAdPlacements(await res.json());
     } catch (err) {
       console.error(err);
@@ -1956,7 +1957,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
   const saveAdPlacements = async (newPlacements: any) => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/ad-placements`, {
+      const res = await authenticatedFetch("/api/admin/ad-placements", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newPlacements),
@@ -1976,7 +1977,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchSystemSettings = async () => {
     setSystemSettingsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/system-settings`);
+      const res = await authenticatedFetch("/api/admin/system-settings");
       if (res.ok) {
         const data = await res.json();
         const normalizedData = {
@@ -2002,9 +2003,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const saveSystemSettings = async (settingsToSave: any = systemSettings) => {
     setSystemSettingsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/system-settings`, {
+      const res = await authenticatedFetch("/api/admin/system-settings", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settingsToSave),
       });
       if (res.ok) {
@@ -2026,7 +2026,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setAdsTxtError("");
     setAdsTxtSuccess(false);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/ads-txt`);
+      const res = await authenticatedFetch("/api/admin/ads-txt");
       if (res.ok) {
         const data = await res.json();
         setAdsTxtContent(data.content || "");
@@ -2053,7 +2053,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setAdsTxtError("");
     setAdsTxtSuccess(false);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/ads-txt`, {
+      const res = await authenticatedFetch("/api/admin/ads-txt", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: adsTxtContent }),
@@ -2079,7 +2079,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setAdsTxtProvidersLoading(true);
     setProvidersError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/ads-txt-providers`);
+      const res = await authenticatedFetch("/api/admin/ads-txt-providers");
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -2177,7 +2177,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setProvidersError("");
     setProvidersSuccess("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/ads-txt-providers/${id}`, {
+      const res = await authenticatedFetch("/api/admin/ads-txt-providers/${id}", {
         method: "DELETE",
       });
       const data = await res.json();
@@ -2206,7 +2206,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setProvidersSuccess("");
     const newStatus = !currentStatus;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/ads-txt-providers/${id}/toggle`, {
+      const res = await authenticatedFetch("/api/admin/ads-txt-providers/${id}/toggle", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: newStatus }),
@@ -2247,7 +2247,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setImgbbLoading(true);
     setImgbbError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/imgbb/config`);
+      const res = await authenticatedFetch("/api/admin/imgbb/config");
       if (res.ok) {
         const data = await res.json();
         setImgbbApiKey(data.apiKey || "");
@@ -2277,7 +2277,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
     setImgbbSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/imgbb/config`, {
+      const res = await authenticatedFetch("/api/admin/imgbb/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2313,7 +2313,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
     setImgbbVerifying(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/imgbb/verify`, {
+      const res = await authenticatedFetch("/api/admin/imgbb/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: key })
@@ -2355,7 +2355,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       reader.onloadend = async () => {
         const base64String = reader.result as string;
         try {
-          const res = await fetch(`${API_BASE}/api/admin/imgbb/upload`, {
+          const res = await authenticatedFetch("/api/admin/imgbb/upload", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ base64: base64String })
@@ -2416,7 +2416,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setGamePixTestSuccess(null);
     setGamePixTestError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamepix/config`);
+      const res = await authenticatedFetch("/api/admin/gamepix/config");
       if (res.ok) {
         const data = await res.json();
         setGamePixRssUrl(data.rssUrl || "");
@@ -2443,7 +2443,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setGamePixError("");
     setGamePixSuccessMessage("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamepix/sync`, {
+      const res = await authenticatedFetch("/api/admin/gamepix/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" }
       });
@@ -2477,7 +2477,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setGamePixTestSuccess(null);
     setGamePixTestError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamepix/config`, {
+      const res = await authenticatedFetch("/api/admin/gamepix/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rssUrl: gamePixRssUrl }),
@@ -2503,7 +2503,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setGamePixTestSuccess(null);
     setGamePixTestError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamepix/test`, {
+      const res = await authenticatedFetch("/api/admin/gamepix/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rssUrl: gamePixRssUrl }),
@@ -2525,7 +2525,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchCatalogGames = async () => {
     setCatalogLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamepix/catalog`);
+      const res = await authenticatedFetch("/api/admin/gamepix/catalog");
       if (res.ok) {
         const data = await res.json();
         setCatalogGames(data.games || []);
@@ -2539,7 +2539,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
   const addToRoyShare = async (gameId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/gamepix/add-to-royshare`, {
+      const res = await authenticatedFetch("/api/admin/gamepix/add-to-royshare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -2564,7 +2564,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchPublishedGames = async () => {
     setPublishedGamesLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/games`);
+      const res = await authenticatedFetch("/api/admin/games");
       if (res.ok) {
         const data = await res.json();
         setPublishedGames(data.games || []);
@@ -2580,7 +2580,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setCategoriesLoading(true);
     setCategoryError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/game-categories`);
+      const res = await authenticatedFetch("/api/admin/game-categories");
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.categories)) {
@@ -2643,7 +2643,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     if (!window.confirm("Are you sure you want to delete this category?")) return;
     setCategoryError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/game-categories/${id}`, {
+      const res = await authenticatedFetch("/api/admin/game-categories/${id}", {
         method: "DELETE"
       });
       const data = await res.json();
@@ -2689,7 +2689,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         }, 120);
 
         try {
-          const res = await fetch(`${API_BASE}/api/admin/imgbb/upload`, {
+          const res = await authenticatedFetch("/api/admin/imgbb/upload", {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -2737,7 +2737,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setCustomGameSuccess("");
     try {
       // 🛡️ Final URL Validation
-      const valRes = await fetch(`${API_BASE}/api/admin/games/validate-url`, {
+      const valRes = await authenticatedFetch("/api/admin/games/validate-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: customGameUrl })
@@ -2749,7 +2749,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         return;
       }
 
-      const res = await fetch(`${API_BASE}/api/admin/games/custom`, {
+      const res = await authenticatedFetch("/api/admin/games/custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2839,7 +2839,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
   const updatePublishedGameStatus = async (gameId: string, updates: any) => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/games/${gameId}`, {
+      const res = await authenticatedFetch("/api/admin/games/${gameId}", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
@@ -2867,7 +2867,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setEditGameError("");
     setEditGameSuccess("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/games/${editingGame.id}`, {
+      const res = await authenticatedFetch("/api/admin/games/${editingGame.id}", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editingGame)
@@ -2897,7 +2897,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/admin/games/${gameId}`, {
+      const res = await authenticatedFetch("/api/admin/games/${gameId}", {
         method: "DELETE"
       });
       const data = await res.json();
@@ -2916,7 +2916,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchSupportSettings = async () => {
     setSupportSettingsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/support/settings`);
+      const res = await authenticatedFetch("/api/admin/support/settings");
       if (res.ok) {
         const data = await res.json();
         setSupportSettings(data);
@@ -2931,7 +2931,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const saveSupportSettings = async (settingsToSave: any = supportSettings) => {
     setSupportSettingsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/support/settings`, {
+      const res = await authenticatedFetch("/api/admin/support/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settingsToSave),
@@ -2953,7 +2953,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchAnalytics = async () => {
     setAnalyticsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/analytics-full`);
+      const res = await authenticatedFetch("/api/admin/analytics-full");
       if (res.ok) {
         setAnalyticsData(await res.json());
       }
@@ -2967,7 +2967,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchBroadcasts = async () => {
     setBroadcastsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/broadcasts`);
+      const res = await authenticatedFetch("/api/admin/broadcasts");
       if (res.ok) {
         setBroadcasts(await res.json());
       }
@@ -3022,7 +3022,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         setSendStatus("sending");
       }
 
-      const res = await fetch(`${API_BASE}/api/admin/broadcasts`, {
+      const res = await authenticatedFetch("/api/admin/broadcasts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -3087,7 +3087,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setSelfTestError("");
     setSelfTestResults(null);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/broadcasts/self-test`, {
+      const res = await authenticatedFetch("/api/admin/broadcasts/self-test", {
         method: "POST",
       });
       const data = await res.json();
@@ -3122,7 +3122,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setShowAiView(true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/broadcasts/improve`, {
+      const res = await authenticatedFetch("/api/admin/broadcasts/improve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: originalText }),
@@ -3205,7 +3205,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
     setAiAnnouncing(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/announcements/improve`, {
+      const res = await authenticatedFetch("/api/admin/announcements/improve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3234,7 +3234,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchSecurityData = async () => {
     setSecurityLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/security`);
+      const res = await authenticatedFetch("/api/admin/security");
       if (res.ok) {
         const data = await res.json();
         setSecurityLogs(data.logs || []);
@@ -3254,7 +3254,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     reason?: string,
   ) => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/security/action`, {
+      const res = await authenticatedFetch("/api/admin/security/action", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ logId, userId, action, reason }),
@@ -3274,7 +3274,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchActivityLogs = async () => {
     setActivityLogsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/activity-logs`);
+      const res = await authenticatedFetch("/api/admin/activity-logs");
       if (res.ok) {
         const data = await res.json();
         setActivityLogs(data.logs || []);
@@ -3290,9 +3290,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchBackups = async () => {
     setBackupLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/backups`);
+      const res = await authenticatedFetch("/api/admin/backups");
       if (res.ok) setBackups(await res.json());
-      const settingsRes = await fetch(`${API_BASE}/api/admin/backup-settings`);
+      const settingsRes = await authenticatedFetch("/api/admin/backup-settings");
       if (settingsRes.ok) setBackupSettings(await settingsRes.json());
     } catch (err) {
       console.error(err);
@@ -3304,7 +3304,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const handleCreateBackup = async () => {
     setBackupLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/backups`, {
+      const res = await authenticatedFetch("/api/admin/backups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "Manual" }),
@@ -3336,7 +3336,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
     setBackupLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/backups/${id}/restore`, {
+      const res = await authenticatedFetch("/api/admin/backups/${id}/restore", {
         method: "POST",
       });
       if (res.ok) {
@@ -3363,7 +3363,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
     setBackupLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/backups/${id}`, {
+      const res = await authenticatedFetch("/api/admin/backups/${id}", {
         method: "DELETE",
       });
       if (res.ok) {
@@ -3382,7 +3382,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const handleUpdateBackupSettings = async (newSettings: any) => {
     setBackupLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/backup-settings`, {
+      const res = await authenticatedFetch("/api/admin/backup-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newSettings),
@@ -3405,7 +3405,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setSmartLinksLoading(true);
     setSmartLinksError("");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/smart-links`);
+      const res = await authenticatedFetch("/api/admin/smart-links");
       if (res.ok) {
         const data = await res.json();
         setSmartLinks(data || []);
@@ -3422,7 +3422,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const fetchUserShortenerSettings = async () => {
     setUserShortenerSettingsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/user-shortener-settings`);
+      const res = await authenticatedFetch("/api/admin/user-shortener-settings");
       if (res.ok) {
         const data = await res.json();
         setUserShortenerSettings({
@@ -3440,7 +3440,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setUserShortenerSettingsSaving(true);
     try {
       const configToSave = updatedConfig || userShortenerSettings;
-      const res = await fetch(`${API_BASE}/api/admin/user-shortener-settings`, {
+      const res = await authenticatedFetch("/api/admin/user-shortener-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(configToSave),
@@ -3955,7 +3955,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     if (confirm("Are you sure you want to approve this withdrawal request?")) {
                       setModalLoading(true);
                       try {
-                        const res = await fetch(`${API_BASE}/api/admin/withdrawals/${selectedWithdrawal.id}/approve`, {
+                        const res = await authenticatedFetch("/api/admin/withdrawals/${selectedWithdrawal.id}/approve", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" }
                         });
@@ -3990,7 +3990,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       return;
                     }
                     setModalLoading(true);
-                    fetch(`${API_BASE}/api/admin/withdrawals/${selectedWithdrawal.id}/reject`, {
+                    authenticatedFetch("/api/admin/withdrawals/${selectedWithdrawal.id}/reject", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ rejectReason: reason, rejectionType: "normal" })
@@ -4030,7 +4030,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     }
                     setModalLoading(true);
                     try {
-                      const res = await fetch(`${API_BASE}/api/admin/withdrawals/${selectedWithdrawal.id}/paid`, {
+                      const res = await authenticatedFetch("/api/admin/withdrawals/${selectedWithdrawal.id}/paid", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ transactionReference: reference })
@@ -4065,7 +4065,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       return;
                     }
                     setModalLoading(true);
-                    fetch(`${API_BASE}/api/admin/withdrawals/${selectedWithdrawal.id}/reject`, {
+                    authenticatedFetch("/api/admin/withdrawals/${selectedWithdrawal.id}/reject", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ rejectReason: reason, rejectionType: "normal" })
