@@ -58,7 +58,7 @@ import { TelegramAuthGuard } from "./components/TelegramAuthGuard";
 import { ProfileSetup } from "./components/ProfileSetup";
 import { MiniAppHome } from "./pages/MiniAppHome";
 
-const ADMIN_AUTH_ENABLED = false;
+const ADMIN_AUTH_ENABLED = true;
 
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
