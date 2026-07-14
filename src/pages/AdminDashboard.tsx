@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { db } from "../lib/firebase";
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, where, deleteDoc, writeBatch, orderBy } from "firebase/firestore";
 import { StatCard, HealthItem } from "../components/AdminComponents";
-import ClickAdillaAdminView from "../components/ClickAdillaAdminView";
+import ClickAdillaAdsManager from "../components/ClickAdillaAdsManager";
 import VideoAdsAdminView from "../components/VideoAdsAdminView";
 import { EconomyAdminView } from "../components/EconomyAdminView";
 import {
@@ -14013,7 +14013,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
           {activeTab === "📊 ClickAdilla API" && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto">
-              <ClickAdillaAdminView />
+              <ClickAdillaAdsManager />
             </motion.div>
           )}
 

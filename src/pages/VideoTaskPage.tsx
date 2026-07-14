@@ -12,6 +12,7 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
+  const [adsConfig, setAdsConfig] = useState<any>(null);
   
   // Anti-fraud Secure Verification States
   const [isHolding, setIsHolding] = useState(false);
@@ -24,6 +25,37 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
   const clickCountRef = useRef<number>(0);
   const lastInteractionTimeRef = useRef<number>(0);
   const scriptContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/video-tasks/ads-config`)
+      .then(res => res.json())
+      .then(data => setAdsConfig(data))
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (step === "watching" && adsConfig && scriptContainerRef.current) {
+      // Apply CSS
+      const style = document.createElement("style");
+      style.id = "ad-style";
+      style.innerHTML = adsConfig.css;
+      document.head.appendChild(style);
+
+      // Inject HTML
+      scriptContainerRef.current.innerHTML = adsConfig.html;
+
+      // Execute JS
+      const script = document.createElement("script");
+      script.id = "ad-script";
+      script.innerHTML = adsConfig.js;
+      scriptContainerRef.current.appendChild(script);
+
+      return () => {
+        document.head.removeChild(style);
+        scriptContainerRef.current!.innerHTML = "";
+      };
+    }
+  }, [step, adsConfig]);
 
   const tgUser = (window as any).Telegram?.WebApp?.initDataUnsafe?.user || { id: "12345678", username: "test_user" };
 
@@ -358,6 +390,7 @@ export default function VideoTaskPage({ taskId, userId, onBack }: { taskId: stri
             
             {step === "watching" && (
               <div className="space-y-6">
+                <div ref={scriptContainerRef} id="ad-container" className="my-4" />
                 <div className="flex flex-col items-center">
                   <div className="w-16 h-16 rounded-full bg-amber-500/10 border-4 border-amber-500 flex items-center justify-center mb-4">
                     <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
