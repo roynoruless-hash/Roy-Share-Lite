@@ -5,9 +5,13 @@ const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET || "default_secret_for_d
 const ALGORITHM = "aes-256-cbc";
 const IV_LENGTH = 16;
 
+const KEY = crypto.createHash("sha256")
+  .update(ENCRYPTION_SECRET)
+  .digest();
+
 function encryptToken(text: string): string {
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_SECRET.padEnd(32, " ")), iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, KEY, iv);
   let encrypted = cipher.update(text);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString("hex") + ":" + encrypted.toString("hex");
@@ -17,7 +21,7 @@ function decryptToken(text: string): string {
   const parts = text.split(":");
   const iv = Buffer.from(parts.shift()!, "hex");
   const encryptedText = Buffer.from(parts.join(":"), "hex");
-  const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_SECRET.padEnd(32, " ")), iv);
+  const decipher = crypto.createDecipheriv(ALGORITHM, KEY, iv);
   let decrypted = decipher.update(encryptedText);
   decrypted = Buffer.concat([decrypted, decipher.final()]);
   return decrypted.toString();
@@ -822,35 +826,19 @@ app.post("/api/admin/clickadilla/test-connection", requireAdminDb, async (req, r
         token = snap.exists() ? decryptToken(snap.data().apiKey) : "";
     }
     
-    const getToday = () => new Date().toISOString().split('T')[0];
-    const today = getToday();
+    // Actual API Call (using a placeholder URL structure, user can adjust)
     const start = Date.now();
-    
-    // Official ClickAdilla Publisher API stats endpoint used as a lightweight validation check
-    const url = `https://publishers.clickadilla.com/backend/api/public/stats?token=${token}&date1=${today}&date2=${today}&fields=date&limit=1`;
-    const response = await fetch(url);
+    const response = await fetch("https://api.clickadilla.com/v1/account/status", {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
     const duration = Date.now() - start;
-    
-    if (response.status === 401 || response.status === 403) {
-      return res.status(response.status).json({
-        status: "failed",
-        error: "Invalid Publisher API Token"
-      });
-    }
-    
-    let result = null;
-    try {
-      result = await response.json();
-    } catch (err) {
-      // Ignore JSON parse error if any
-    }
+    const result = await response.json();
     
     res.json({
         status: response.ok ? "connected" : "failed",
         httpStatus: response.status,
         responseTime: `${duration}ms`,
-        rawResponse: result,
-        error: response.ok ? undefined : (result?.error || "Connection failed")
+        rawResponse: result
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
