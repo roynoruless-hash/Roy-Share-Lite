@@ -26,7 +26,6 @@ function decryptToken(text: string): string {
   decrypted = Buffer.concat([decrypted, decipher.final()]);
   return decrypted.toString();
 }
-import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] TOP OF server.ts reached (pre-imports)\n`);
@@ -803,15 +802,21 @@ app.get("/api/admin/clickadilla/settings", requireAdminDb, async (req, res) => {
   try {
     const snap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
     const config = snap.exists() ? snap.data() : {};
-    res.json({ ...config, apiKey: config.apiKey ? decryptToken(config.apiKey) : "" });
+    const decryptedKey = config.apiKey ? decryptToken(config.apiKey) : "";
+    res.json({ 
+      ...config, 
+      apiKey: decryptedKey,
+      apiToken: decryptedKey
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/api/admin/clickadilla/settings", requireAdminDb, async (req, res) => {
   try {
-    const { apiKey, spotId, js, html, css } = req.body;
+    const { apiKey, apiToken, spotId, js, html, css } = req.body;
+    const finalToken = apiKey || apiToken;
     await setDoc(doc(db, "settings", "clickadilla_ads_manager"), {
-      apiKey: encryptToken(apiKey), spotId, js, html, css, updatedAt: new Date().toISOString()
+      apiKey: encryptToken(finalToken), spotId, js, html, css, updatedAt: new Date().toISOString()
     }, { merge: true });
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -819,28 +824,92 @@ app.post("/api/admin/clickadilla/settings", requireAdminDb, async (req, res) => 
 
 app.post("/api/admin/clickadilla/test-connection", requireAdminDb, async (req, res) => {
   try {
-    const { apiKey } = req.body;
-    let token = apiKey;
+    const { apiKey, apiToken } = req.body;
+    let token = apiKey || apiToken;
     if (!token) {
         const snap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
         token = snap.exists() ? decryptToken(snap.data().apiKey) : "";
     }
     
-    // Actual API Call (using a placeholder URL structure, user can adjust)
+    if (!token) {
+      return res.json({
+        status: "failed",
+        error: "API key/token is missing"
+      });
+    }
+
     const start = Date.now();
-    const response = await fetch("https://api.clickadilla.com/v1/account/status", {
-      headers: { "Authorization": `Bearer ${token}` }
+    const response = await fetch(`https://publishers.clickadilla.com/backend/api/public/user-spots`, {
+      headers: {
+        "Accept": "application/json",
+        "X-AUTH-TOKEN": token,
+        "Authorization": `Bearer ${token}`
+      }
     });
     const duration = Date.now() - start;
-    const result = await response.json();
     
+    let result = null;
+    try {
+      result = await response.json();
+    } catch (err) {
+      // Ignore JSON parse errors
+    }
+
     res.json({
         status: response.ok ? "connected" : "failed",
         httpStatus: response.status,
         responseTime: `${duration}ms`,
-        rawResponse: result
+        rawResponse: result,
+        error: response.ok ? undefined : (result?.error || `HTTP error ${response.status}`)
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/clickadilla/test", requireAdminDb, async (req, res) => {
+  try {
+    const { apiKey, apiToken } = req.body;
+    let token = apiKey || apiToken;
+    if (!token) {
+        const snap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
+        token = snap.exists() ? decryptToken(snap.data().apiKey) : "";
+    }
+    
+    if (!token) {
+      return res.json({
+        success: false,
+        error: "API key/token is missing"
+      });
+    }
+
+    const response = await fetch(`https://publishers.clickadilla.com/backend/api/public/user-spots`, {
+      headers: {
+        "Accept": "application/json",
+        "X-AUTH-TOKEN": token,
+        "Authorization": `Bearer ${token}`
+      }
+    });
+    
+    let result = null;
+    try {
+      result = await response.json();
+    } catch (err) {
+      // Ignore
+    }
+
+    if (response.ok) {
+      res.json({
+        success: true,
+        data: result
+      });
+    } else {
+      res.json({
+        success: false,
+        error: result?.error || `HTTP error ${response.status}`
+      });
+    }
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 app.post("/api/admin/clickadilla/validate-spot", requireAdminDb, async (req, res) => {
@@ -849,16 +918,76 @@ app.post("/api/admin/clickadilla/validate-spot", requireAdminDb, async (req, res
     const snap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
     const token = snap.exists() ? decryptToken(snap.data().apiKey) : "";
 
-    const response = await fetch(`https://api.clickadilla.com/v1/spots/${spotId}`, {
-      headers: { "Authorization": `Bearer ${token}` }
+    if (!token) {
+      return res.status(400).json({ error: "ClickAdilla API key/token not configured" });
+    }
+
+    const response = await fetch(`https://publishers.clickadilla.com/backend/api/public/user-spots`, {
+      headers: {
+        "Accept": "application/json",
+        "X-AUTH-TOKEN": token,
+        "Authorization": `Bearer ${token}`
+      }
     });
+    
+    if (!response.ok) {
+      return res.status(response.status).json({
+        exists: false,
+        error: `Publisher API returned status ${response.status}`
+      });
+    }
+
     const result = await response.json();
+    let exists = false;
+    let spotData = null;
+
+    const spotsList = Array.isArray(result) ? result : (Array.isArray(result?.data) ? result.data : (Array.isArray(result?.items) ? result.items : []));
+    
+    if (spotsList.length > 0) {
+      spotData = spotsList.find((s: any) => String(s.id) === String(spotId) || String(s.spotId) === String(spotId));
+      if (spotData) {
+        exists = true;
+      }
+    } else if (result && (String(result.id) === String(spotId) || String(result.spotId) === String(spotId))) {
+      exists = true;
+      spotData = result;
+    }
 
     res.json({
-        exists: response.status !== 404,
-        ...result
+        exists,
+        spot: spotData,
+        rawResponse: result
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/admin/clickadilla/spots", requireAdminDb, async (req, res) => {
+  try {
+    const snap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
+    const config = snap.exists() ? snap.data() : {};
+    const token = decryptToken(config.apiKey);
+    
+    if (!token) {
+      return res.status(400).json({ error: "ClickAdilla API key/token not configured" });
+    }
+
+    const response = await fetch(`https://publishers.clickadilla.com/backend/api/public/user-spots`, {
+      headers: {
+        "Accept": "application/json",
+        "X-AUTH-TOKEN": token,
+        "Authorization": `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: `HTTP ${response.status}` });
+    }
+
+    const result = await response.json();
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
   app.post("/api/admin/withdrawals/:id/paid", requireAdminDb, async (req, res) => {
@@ -10526,6 +10655,20 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   }
 
+  async function fetchClickAdilla(url: string, token: string) {
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "X-AUTH-TOKEN": token,
+        "Authorization": `Bearer ${token}`
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`ClickAdilla API error: HTTP ${response.status}`);
+    }
+    return response.json();
+  }
+
   // CLICKADILLA PUBLISHER API
   // ========================================
 
@@ -10545,11 +10688,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       let url = "";
       if (type === "today") {
-        url = `https://publishers.clickadilla.com/backend/api/public/stats?token=${actualToken}&date1=${getToday()}&date2=${getToday()}&fields=date,impressions,clicks,money&orderBy=-date&limit=500&offset=0`;
+        url = `https://publishers.clickadilla.com/backend/api/public/stats?date1=${getToday()}&date2=${getToday()}&fields=date,impressions,clicks,money&orderBy=-date&limit=500&offset=0`;
       } else if (type === "last30") {
-        url = `https://publishers.clickadilla.com/backend/api/public/stats?token=${actualToken}&date1=${getLast30()}&date2=${getToday()}&fields=date,impressions,clicks,money&orderBy=-date&limit=500&offset=0`;
+        url = `https://publishers.clickadilla.com/backend/api/public/stats?date1=${getLast30()}&date2=${getToday()}&fields=date,impressions,clicks,money&orderBy=-date&limit=500&offset=0`;
       } else if (type === "adformat") {
-        url = `https://publishers.clickadilla.com/backend/api/public/stats?token=${actualToken}&date1=${getToday()}&date2=${getToday()}&fields=adformat,impressions,clicks,money&orderBy=-adformat&limit=500&offset=0`;
+        url = `https://publishers.clickadilla.com/backend/api/public/stats?date1=${getToday()}&date2=${getToday()}&fields=adformat,impressions,clicks,money&orderBy=-adformat&limit=500&offset=0`;
       } else {
         return res.status(400).json({ error: "Invalid stats type" });
       }

@@ -433,6 +433,21 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
 
 export const MiniAppHome: React.FC = () => {
   const { user, loading, error, startParam } = useTelegramAuth();
+  const [tgSettings, setTgSettings] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/telegram-settings`);
+        const data = await res.json();
+        if (data.success) setTgSettings(data.settings);
+      } catch (e) {
+        console.error("Failed to load telegram settings:", e);
+      }
+    };
+    fetchSettings();
+  }, []);
+
   const [currentView, setCurrentView] = useState<string>(() => {
     console.log("[MiniAppHome] Initializing view. Pathname:", window.location.pathname, "Search:", window.location.search);
     if (window.location.pathname.startsWith("/game/")) return "game-player";

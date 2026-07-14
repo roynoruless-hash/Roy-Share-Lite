@@ -109,7 +109,7 @@ export default function VideoAdsAdminView() {
       profitPercentage: 30,
       clickAdillaScript: "",
       callbackUrl: "https://your-domain.com/api/video-tasks/postback",
-      apiEndpoint: "https://api.clickadilla.com",
+      apiEndpoint: "https://publishers.clickadilla.com",
       secretKey: "",
       status: "Active",
     });
