@@ -266,7 +266,6 @@ async function startServer() {
     "/api/admin/video-analytics",
     "/api/admin/video-logs",
     "/api/admin/video-logs-action",
-    "/api/admin/clickadilla",
     "/api/gamepix",
     "/api/admin/gamepix",
     "/api/admin/games",
@@ -834,13 +833,37 @@ app.get("/api/admin/clickadilla/settings", requireAdminDb, async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+app.get("/api/public/clickadilla/settings", async (req, res) => {
+  try {
+    const snap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
+    if (snap.exists()) {
+      const data = snap.data();
+      res.json({
+        enabled: !!data.enabled,
+        spotId: data.spotId || "",
+        js: data.js || "",
+        html: data.html || "",
+        css: data.css || ""
+      });
+    } else {
+      res.json({ enabled: false });
+    }
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post("/api/admin/clickadilla/settings", requireAdminDb, async (req, res) => {
   try {
-    const { apiKey, apiToken, spotId, js, html, css } = req.body;
+    const { apiKey, apiToken, spotId, js, html, css, enabled } = req.body;
     const finalToken = apiKey || apiToken;
-    await setDoc(doc(db, "settings", "clickadilla_ads_manager"), {
-      apiKey: encryptToken(finalToken), spotId, js, html, css, updatedAt: new Date().toISOString()
-    }, { merge: true });
+    const updateObj: any = {
+      spotId, js, html, css, enabled: !!enabled, updatedAt: new Date().toISOString()
+    };
+    if (finalToken) {
+      updateObj.apiKey = encryptToken(finalToken);
+    }
+    await setDoc(doc(db, "settings", "clickadilla_ads_manager"), updateObj, { merge: true });
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

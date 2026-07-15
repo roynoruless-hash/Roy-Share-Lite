@@ -7,6 +7,8 @@ import { db } from "../lib/firebase";
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, where, deleteDoc, writeBatch, orderBy } from "firebase/firestore";
 import { StatCard, HealthItem } from "../components/AdminComponents";
 import { EconomyAdminView } from "../components/EconomyAdminView";
+import ClickAdillaSettingsManager from "../components/ClickAdillaSettingsManager";
+import LuckyDrawWinnerManager from "../components/LuckyDrawWinnerManager";
 import {
   Zap,
   Play,
@@ -4693,8 +4695,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🚀 Referral System",
               "⚙️ System Settings",
               "📄 Ads.txt Manager",
+              "📊 ClickAdilla Settings",
               "📱 Telegram Settings",
               "💸 UPI Giveaway",
+              "🎁 Lucky Draw Winner",
             ].map((btn) => (
               <button
                 key={btn}
@@ -13987,6 +13991,14 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
           {activeTab === "💸 UPI Giveaway" && (
             <UpiGiveawayAdminManager />
+          )}
+
+          {activeTab === "📊 ClickAdilla Settings" && (
+            <ClickAdillaSettingsManager />
+          )}
+
+          {activeTab === "🎁 Lucky Draw Winner" && (
+            <LuckyDrawWinnerManager />
           )}
 
           {activeTab === "📄 Ads.txt Manager" && (

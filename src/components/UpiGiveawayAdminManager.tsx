@@ -1589,8 +1589,35 @@ export default function UpiGiveawayAdminManager() {
 
                     <div className="bg-slate-950/60 border border-slate-850 p-6 rounded-2xl space-y-2 relative overflow-hidden">
                       <div className="flex justify-between items-center text-slate-400 text-xs">
-                        <span>Participation Rate</span>
+                        <span>Video Ads Played</span>
                         <TrendingUp className="w-4 h-4 text-amber-500" />
+                      </div>
+                      <span className="text-2xl font-black text-white block">{analyticsData.totalEntries}</span>
+                      <span className="text-[10px] text-slate-500 block">Ads triggered during entry submissions</span>
+                    </div>
+
+                    <div className="bg-slate-950/60 border border-slate-850 p-6 rounded-2xl space-y-2 relative overflow-hidden">
+                      <div className="flex justify-between items-center text-slate-400 text-xs">
+                        <span>Completed Video Ads</span>
+                        <CheckCircle className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <span className="text-2xl font-black text-emerald-400 block">{analyticsData.totalEntries}</span>
+                      <span className="text-[10px] text-slate-500 block">Ads finished playing before entry</span>
+                    </div>
+
+                    <div className="bg-slate-950/60 border border-slate-850 p-6 rounded-2xl space-y-2 relative overflow-hidden">
+                      <div className="flex justify-between items-center text-slate-400 text-xs">
+                        <span>Estimated Ad Revenue</span>
+                        <DollarSign className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <span className="text-2xl font-black text-emerald-400 block">₹{Number(analyticsData.totalEntries * 0.15).toFixed(2)}</span>
+                      <span className="text-[10px] text-slate-500 block">Approx. revenue from completed ads</span>
+                    </div>
+
+                    <div className="bg-slate-950/60 border border-slate-850 p-6 rounded-2xl space-y-2 relative overflow-hidden">
+                      <div className="flex justify-between items-center text-slate-400 text-xs">
+                        <span>Participation Rate</span>
+                        <TrendingUp className="w-4 h-4 text-blue-400" />
                       </div>
                       <span className="text-2xl font-black text-white block">{analyticsData.participationRate}%</span>
                       <span className="text-[10px] text-slate-500 block">Percentage of active Telegram users enrolled</span>

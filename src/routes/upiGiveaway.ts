@@ -264,6 +264,13 @@ router.post("/submit-entry", async (req: any, res: any) => {
 
     // Store entry
     const entryId = `${giveawayId}_${telegramId}`;
+    
+    // Generate unique ticket number
+    const countQuery = query(collection(db, "upi_giveaway_entries"), where("giveawayId", "==", giveawayId));
+    const countSnap = await getDocs(countQuery);
+    const count = countSnap.size + 1;
+    const ticketNumber = `RS${String(count).padStart(6, '0')}`;
+
     const entryData = {
       giveawayId,
       telegramId: String(telegramId),
@@ -277,7 +284,8 @@ router.post("/submit-entry", async (req: any, res: any) => {
       rewardAmount: 0,
       paymentStatus: "Pending", // Pending, Paid, Rejected
       isDuplicateUpi,
-      shadow_banned: isSb
+      shadow_banned: isSb,
+      ticketNumber
     };
 
     await setDoc(doc(db, "upi_giveaway_entries", entryId), entryData);
@@ -301,7 +309,7 @@ router.post("/submit-entry", async (req: any, res: any) => {
     
     await sendTgMessage(String(telegramId), messageText);
 
-    return res.json({ success: true, message: "Entry submitted successfully!" });
+    return res.json({ success: true, message: "Entry submitted successfully!", ticketNumber });
 
   } catch (err: any) {
     console.error("UPI Giveaway entry error:", err);

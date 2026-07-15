@@ -512,6 +512,10 @@ export const MiniAppHome: React.FC = () => {
         console.log(`[MiniAppHome] Deep link detected for upi giveaway: ${giveawayId}`);
         setHasCheckedDeepLink(true);
         setCurrentView(`upi-${giveawayId}`);
+      } else if (!startParam.startsWith("ref_") && !startParam.startsWith("gift_")) {
+        console.log(`[MiniAppHome] Direct deep link detected for giveaway: ${startParam}`);
+        setHasCheckedDeepLink(true);
+        setCurrentView(`upi-${startParam}`);
       }
     }
   }, [activeUser?.membershipVerified, isPhoneVerified, startParam, hasCheckedDeepLink]);
