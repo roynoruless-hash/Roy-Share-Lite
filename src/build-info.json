@@ -1,7 +1,7 @@
 {
   "buildVersion": "0.0.0",
-  "commitSha": "c71789c",
-  "commitMessage": "Fix ClickAdilla Ad Sandbox Preview rendering",
-  "commitDate": "2026-07-15 17:16 UTC",
-  "buildDateTime": "2026-07-15 17:31 UTC"
+  "commitSha": "5382daa",
+  "commitMessage": "Fix ClickAdilla Ad Sandbox Preview rendering of plain text JS",
+  "commitDate": "2026-07-15 17:32 UTC",
+  "buildDateTime": "2026-07-15 17:55 UTC"
 }

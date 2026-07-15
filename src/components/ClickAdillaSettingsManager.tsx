@@ -30,7 +30,7 @@ export default function ClickAdillaSettingsManager() {
   const [testResult, setTestResult] = useState<{ status: string; httpStatus?: number; error?: string } | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [previewKey, setPreviewKey] = useState(0); // to force iframe reload
+  
 
   
 
@@ -123,141 +123,63 @@ export default function ClickAdillaSettingsManager() {
     setTimeout(() => setSuccess(""), 4000);
   };
 
-  const handleReloadPreview = () => {
-    setPreviewKey(prev => prev + 1);
+  const handleOpenLivePreview = () => {
+    const newWin = window.open("", "_blank", "width=800,height=600");
+    if (!newWin) {
+      alert("Popup blocked! Please allow popups to preview the ad.");
+      return;
+    }
+
+    const escapedJs = (js || "").replace(/<\/(script)>/ig, "<\\/$1>");
+
+    newWin.document.open();
+    newWin.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>ClickAdilla Live Preview</title>
+          <style>
+            body {
+              margin: 0;
+              padding: 24px;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              background-color: #f1f5f9;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              min-height: 100vh;
+            }
+            .ad-container {
+              width: 100%;
+              max-width: 800px;
+              background: #fff;
+              border: 1px solid #e2e8f0;
+              padding: 16px;
+              box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            }
+            ${css}
+          </style>
+        </head>
+        <body>
+          <h2 style="color: #0f172a; margin-bottom: 8px;">Live Ad Preview</h2>
+          <p style="color: #64748b; font-size: 14px; margin-bottom: 24px;">This window executes your ad script in a real browser environment.</p>
+          <div class="ad-container" id="ad-container">
+            ${html}
+          </div>
+          <script>
+            try {
+              ${escapedJs}
+            } catch (err) {
+              console.error("Ad Script Error:", err);
+              document.body.innerHTML += '<div style="color:red; margin-top: 20px;">Error executing ad script: ' + err.message + '</div>';
+            }
+          </script>
+        </body>
+      </html>
+    `);
+    newWin.document.close();
   };
-
-  // Instead of using doc.write and triggering cross-origin errors, 
-  // we will construct the document string and use it in srcDoc on the iframe.
-  const previewHtml = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>ClickAdilla Preview</title>
-        <style>
-          body {
-            margin: 0;
-            padding: 12px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: #0b1329;
-            color: #f8fafc;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 120px;
-            text-align: center;
-          }
-          ${css}
-        </style>
-      </head>
-      <body>
-        <div id="preview-container" style="width: 100%; height: 100%;"></div>
-        <script>
-          (function() {
-            const rawHtml = ${JSON.stringify(html || "").replace(/</g, "\\u003c")};
-            const customJs = ${JSON.stringify(js || "").replace(/</g, "\\u003c")};
-            const container = document.getElementById("preview-container");
-
-            if (!rawHtml && !customJs) {
-              container.innerHTML = '<div style="color: #64748b; font-size: 13px;">[Empty HTML Advertisement Body]</div>';
-              return;
-            }
-
-            const parser = new DOMParser();
-            const parsedDoc = parser.parseFromString(rawHtml, "text/html");
-            const scriptsToLoad = [];
-
-            function cloneAndAppend(sourceNode, targetParent) {
-              if (sourceNode.nodeType === 3) {
-                targetParent.appendChild(document.createTextNode(sourceNode.nodeValue));
-              } else if (sourceNode.nodeType === 8) {
-                targetParent.appendChild(document.createComment(sourceNode.nodeValue));
-              } else if (sourceNode.nodeType === 1) {
-                if (sourceNode.tagName.toLowerCase() === 'script') {
-                  scriptsToLoad.push({ node: sourceNode, parent: targetParent });
-                } else {
-                  const newEl = document.createElement(sourceNode.tagName);
-                  for (let i = 0; i < sourceNode.attributes.length; i++) {
-                    const attr = sourceNode.attributes[i];
-                    newEl.setAttribute(attr.name, attr.value);
-                  }
-                  for (let i = 0; i < sourceNode.childNodes.length; i++) {
-                    cloneAndAppend(sourceNode.childNodes[i], newEl);
-                  }
-                  targetParent.appendChild(newEl);
-                }
-              }
-            }
-
-            document.write = function(str) {
-               const doc = parser.parseFromString(str, "text/html");
-               const nodes = Array.from(doc.body.childNodes);
-               for (const node of nodes) {
-                 cloneAndAppend(node, container);
-               }
-            };
-            document.writeln = function(str) {
-               document.write(str + '\n');
-            };
-
-            const bodyNodes = Array.from(parsedDoc.body.childNodes);
-            for (const node of bodyNodes) {
-              cloneAndAppend(node, container);
-            }
-
-            function loadNextScript() {
-              if (scriptsToLoad.length === 0) {
-                if (customJs) {
-                  try {
-                    const scriptEl = document.createElement('script');
-                    scriptEl.textContent = customJs;
-                    document.body.appendChild(scriptEl);
-                  } catch (err) {
-                    console.error("Error in Ad Script:", err);
-                    const errDiv = document.createElement('div');
-                    errDiv.style.color = '#ef4444';
-                    errDiv.style.fontSize = '11px';
-                    errDiv.style.marginTop = '8px';
-                    errDiv.textContent = 'JS Error: ' + err.message;
-                    document.body.appendChild(errDiv);
-                  }
-                }
-                return;
-              }
-
-              const { node, parent } = scriptsToLoad.shift();
-              const scriptEl = document.createElement('script');
-              let isExternal = false;
-
-              for (let i = 0; i < node.attributes.length; i++) {
-                const attr = node.attributes[i];
-                scriptEl.setAttribute(attr.name, attr.value);
-                if (attr.name.toLowerCase() === 'src') {
-                  isExternal = true;
-                }
-              }
-
-              if (node.textContent) {
-                scriptEl.textContent = node.textContent;
-              }
-
-              if (isExternal) {
-                scriptEl.onload = loadNextScript;
-                scriptEl.onerror = loadNextScript;
-                parent.appendChild(scriptEl);
-              } else {
-                parent.appendChild(scriptEl);
-                loadNextScript();
-              }
-            }
-
-            loadNextScript();
-          })();
-        </script>
-      </body>
-    </html>
-  `;
 
   if (loading) {
     return (
@@ -443,15 +365,15 @@ export default function ClickAdillaSettingsManager() {
                 className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 disabled:opacity-50 text-slate-200 font-bold py-2.5 px-4 border border-slate-700 rounded-xl text-xs transition cursor-pointer"
               >
                 {testing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                Test Ad
+                Test Connection
               </button>
 
               <button
-                onClick={handleReloadPreview}
+                onClick={handleOpenLivePreview}
                 className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold py-2.5 px-4 border border-slate-700 rounded-xl text-xs transition cursor-pointer"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Reload Preview
+                <Play className="w-3.5 h-3.5" />
+                Open Live Preview
               </button>
 
               <button
@@ -499,19 +421,23 @@ export default function ClickAdillaSettingsManager() {
                 <Eye className="w-4 h-4 text-blue-400" /> Ad Sandbox Preview
               </h3>
               <span className="text-[10px] bg-slate-950 border border-slate-800 text-slate-500 px-2 py-0.5 rounded font-mono">
-                Isolated Frame
+                External Tab
               </span>
             </div>
 
-            <div className="flex-1 bg-slate-950 border border-slate-850 rounded-xl overflow-hidden relative">
-              <iframe
-                key={previewKey}
-                
-                title="ClickAdilla Sandbox Preview Frame"
-                className="w-full h-full border-none"
-                sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
-                srcDoc={previewHtml}
-              />
+            <div className="flex-1 bg-slate-950 border border-slate-850 rounded-xl overflow-hidden relative flex flex-col items-center justify-center p-6 text-center">
+               <Eye className="w-12 h-12 text-slate-700 mb-3" />
+               <h4 className="text-sm font-bold text-slate-300 mb-1">Preview Requires Real Browser Window</h4>
+               <p className="text-xs text-slate-500 max-w-sm mb-4">
+                 Due to iframe security restrictions (X-Frame-Options, CSP, and Cross-Origin policies), ClickAdilla scripts cannot be reliably executed inside the isolated sandbox.
+               </p>
+               <button
+                 onClick={handleOpenLivePreview}
+                 className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition cursor-pointer"
+               >
+                 <Play className="w-4 h-4" />
+                 Open Ad in New Window
+               </button>
             </div>
           </div>
         </div>
