@@ -3669,11 +3669,17 @@ app.get("/watch/:token", async (req, res) => {
     const taskId = sessionData.taskId;
     const taskSnap = await getDoc(doc(db, "video_tasks", taskId));
     if (!taskSnap.exists()) return res.status(404).send("<h1>Video task not found</h1>");
-    
     const taskData = taskSnap.data();
     
     const minWatchTimeSecs = parseInt(taskData.countdown) || 30;
-    const clickAdillaScript = taskData.clickAdillaScript || "";
+    
+    // Fetch central ClickAdilla configuration
+    const globalConfigSnap = await getDoc(doc(db, "settings", "clickadilla_ads_manager"));
+    const configData = globalConfigSnap.exists() ? globalConfigSnap.data() : {};
+    const globalHtml = configData.html || "";
+    const globalCss = configData.css || "";
+    const globalJs = configData.js || "";
+
     const rules = taskData.rules || "Watch the full advertisement without closing the page.";
     const claimProcess = taskData.claimProcess || "Click 'Claim Reward' after the timer finishes.";
     
@@ -3712,7 +3718,9 @@ app.get("/watch/:token", async (req, res) => {
         data-task-id="${escapeHTML(taskId)}"
         data-required-seconds="${minWatchTimeSecs}"
         data-elapsed-active-secs="${elapsedActiveSecs}"
-        data-clickadilla-script="${escapeHTML(clickAdillaScript)}"
+        data-clickadilla-html="${escapeHTML(globalHtml)}"
+        data-clickadilla-css="${escapeHTML(globalCss)}"
+        data-clickadilla-js="${escapeHTML(globalJs)}"
         class="max-w-2xl mx-auto w-full flex-1 flex flex-col gap-6">
         
     <!-- Top Card: Info & Progress -->
@@ -3776,7 +3784,7 @@ app.get("/watch/:token", async (req, res) => {
          </button>
       </div>
 
-      <div id="ad-container" class="w-full h-full min-h-[180px] flex items-center justify-center relative z-10 overflow-x-auto">
+      <div id="clickadilla-video-ad-container" class="w-full h-full min-h-[180px] flex items-center justify-center relative z-10 overflow-x-auto">
         <!-- Script dynamically inserted here -->
       </div>
     </div>
@@ -3806,7 +3814,9 @@ app.get("/watch/:token", async (req, res) => {
         const taskId = appData.taskId;
         const requiredSeconds = parseInt(appData.requiredSeconds, 10);
         const elapsedActiveSecs = parseInt(appData.elapsedActiveSecs, 10);
-        const rawAdScript = appData.clickadillaScript;
+        const rawHtml = appData.clickadillaHtml || "";
+        const rawCss = appData.clickadillaCss || "";
+        const rawJs = appData.clickadillaJs || "";
 
         console.log("Task Loaded");
 
@@ -3824,79 +3834,92 @@ app.get("/watch/:token", async (req, res) => {
         const preWatchState = document.getElementById("pre-watch-state");
         const timerState = document.getElementById("timer-state");
         const adWrapper = document.getElementById("ad-wrapper");
-        const adContainer = document.getElementById("ad-container");
+        const adContainer = document.getElementById("clickadilla-video-ad-container");
         const adErrorMsg = document.getElementById("ad-error-msg");
         const retryAdBtn = document.getElementById("retry-ad-btn");
         const statusContainer = document.getElementById("status-container");
 
-                function loadAdvertisement() {
+        function loadAdvertisement() {
           console.log("Loading Advertisement");
           adErrorMsg.classList.add("hidden");
           adContainer.innerHTML = "";
           adFailed = false;
 
           try {
-            if (!rawAdScript || rawAdScript.trim() === "") {
+            if ((!rawHtml || rawHtml.trim() === "") && (!rawJs || rawJs.trim() === "")) {
               adContainer.innerHTML = "<p class='text-slate-500 text-sm'>No ad configured.</p>";
               adLoaded = true;
               return;
             }
 
-            let targetContainer = document.querySelector(".main-content");
-            if (targetContainer) {
-              console.log("Container Found");
-            } else {
-              console.log("Configured selector not found.");
-              targetContainer = document.getElementById("clickadilla-video-container");
-              if (targetContainer) {
-                console.log("Container Found");
-              } else {
-                targetContainer = document.createElement("div");
-                targetContainer.id = "clickadilla-video-container";
-                targetContainer.className = "main-content w-full h-full flex items-center justify-center";
-                adContainer.appendChild(targetContainer);
-                console.log("Container Created");
+            // Inject CSS separately
+            if (rawCss && rawCss.trim() !== "") {
+              const styleEl = document.createElement("style");
+              styleEl.textContent = rawCss;
+              document.head.appendChild(styleEl);
+            }
+
+            // Render HTML normally & Parse script tags dynamically
+            if (rawHtml && rawHtml.trim() !== "") {
+              const parser = new DOMParser();
+              const parsedDoc = parser.parseFromString(rawHtml, "text/html");
+
+              // Recursively clone and append elements from parsed doc body to target parent.
+              function cloneAndAppend(sourceNode, targetParent) {
+                if (sourceNode.nodeType === 3) { // Text Node
+                  targetParent.appendChild(document.createTextNode(sourceNode.nodeValue));
+                } else if (sourceNode.nodeType === 8) { // Comment Node
+                  targetParent.appendChild(document.createComment(sourceNode.nodeValue));
+                } else if (sourceNode.nodeType === 1) { // Element Node
+                  if (sourceNode.tagName.toLowerCase() === "script") {
+                    const scriptEl = document.createElement("script");
+                    // Copy all attributes
+                    for (let i = 0; i < sourceNode.attributes.length; i++) {
+                      const attr = sourceNode.attributes[i];
+                      scriptEl.setAttribute(attr.name, attr.value);
+                    }
+                    // Copy inner content for inline scripts
+                    if (sourceNode.textContent) {
+                      scriptEl.textContent = sourceNode.textContent;
+                    }
+                    targetParent.appendChild(scriptEl);
+                  } else {
+                    const newEl = document.createElement(sourceNode.tagName);
+                    // Copy all attributes
+                    for (let i = 0; i < sourceNode.attributes.length; i++) {
+                      const attr = sourceNode.attributes[i];
+                      newEl.setAttribute(attr.name, attr.value);
+                    }
+                    // Recursively append children
+                    for (let i = 0; i < sourceNode.childNodes.length; i++) {
+                      cloneAndAppend(sourceNode.childNodes[i], newEl);
+                    }
+                    targetParent.appendChild(newEl);
+                  }
+                }
+              }
+
+              // Append all top-level child nodes of parsed body to the container
+              const bodyNodes = Array.from(parsedDoc.body.childNodes);
+              for (const node of bodyNodes) {
+                cloneAndAppend(node, adContainer);
               }
             }
 
-            console.log("Ad Container Ready");
-
-            const tempDiv = document.createElement("div");
-            tempDiv.innerHTML = rawAdScript;
-
-            const scripts = Array.from(tempDiv.getElementsByTagName("script"));
-            
-            if (scripts.length === 0) { 
-               targetContainer.innerHTML = rawAdScript;
-               adLoaded = true;
-               return;
+            // Execute custom JS (Never render as text)
+            if (rawJs && rawJs.trim() !== "") {
+              const scriptEl = document.createElement("script");
+              scriptEl.textContent = rawJs;
+              document.body.appendChild(scriptEl);
             }
 
-            scripts.forEach(oldScript => {
-              const newScript = document.createElement("script");
-              Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-              if (oldScript.innerHTML) {
-                newScript.innerHTML = oldScript.innerHTML;
-              }
-              targetContainer.appendChild(newScript);
-            });
-            
-            console.log("Script Injected");
+            console.log("Script Injected & Custom JS Executed");
+            adLoaded = true;
 
-            const nonScriptNodes = Array.from(tempDiv.childNodes).filter(n => n.nodeName.toLowerCase() !== 'script');
-            nonScriptNodes.forEach(n => targetContainer.appendChild(n));
-
-            setTimeout(() => {
-              if (targetContainer.innerHTML.trim() !== "") {
-                console.log("Advertisement Loaded");
-                adLoaded = true;
-              }
-            }, 1000);
-
-          } catch(e) {
+          } catch (e) {
             console.error("Advertisement rendering failed:", e);
             adFailed = true;
-            adErrorMsg.querySelector('p').innerText = "Advertisement failed to load. Please try again.";
+            adErrorMsg.querySelector("p").innerText = "Advertisement failed to load. Please try again.";
             adErrorMsg.classList.remove("hidden");
           }
         }

@@ -152,14 +152,79 @@ export default function ClickAdillaSettingsManager() {
         </style>
       </head>
       <body>
-        ${html || '<div style="color: #64748b; font-size: 13px;">[Empty HTML Advertisement Body]</div>'}
+        <div id="preview-container" style="width: 100%; height: 100%;"></div>
         <script>
-          try {
-            ${js}
-          } catch (err) {
-            console.error("Error in Ad Script:", err);
-            document.body.innerHTML += '<div style="color: #ef4444; font-size: 11px; margin-top: 8px;">JS Error: ' + err.message + '</div>';
-          }
+          (function() {
+            const rawHtml = ${JSON.stringify(html || "")};
+            const customJs = ${JSON.stringify(js || "")};
+            const container = document.getElementById("preview-container");
+
+            if (!rawHtml) {
+              container.innerHTML = '<div style="color: #64748b; font-size: 13px;">[Empty HTML Advertisement Body]</div>';
+            } else {
+              // Parse the raw HTML
+              const parser = new DOMParser();
+              const parsedDoc = parser.parseFromString(rawHtml, "text/html");
+              
+              // Recursively clone and append elements from the parsed doc body to the container.
+              function cloneAndAppend(sourceNode, targetParent) {
+                if (sourceNode.nodeType === 3) { // Text Node
+                  targetParent.appendChild(document.createTextNode(sourceNode.nodeValue));
+                } else if (sourceNode.nodeType === 8) { // Comment Node
+                  targetParent.appendChild(document.createComment(sourceNode.nodeValue));
+                } else if (sourceNode.nodeType === 1) { // Element Node
+                  if (sourceNode.tagName.toLowerCase() === 'script') {
+                    const scriptEl = document.createElement('script');
+                    // Copy all attributes
+                    for (let i = 0; i < sourceNode.attributes.length; i++) {
+                      const attr = sourceNode.attributes[i];
+                      scriptEl.setAttribute(attr.name, attr.value);
+                    }
+                    // Copy inner content for inline scripts
+                    if (sourceNode.textContent) {
+                      scriptEl.textContent = sourceNode.textContent;
+                    }
+                    targetParent.appendChild(scriptEl);
+                  } else {
+                    const newEl = document.createElement(sourceNode.tagName);
+                    // Copy all attributes
+                    for (let i = 0; i < sourceNode.attributes.length; i++) {
+                      const attr = sourceNode.attributes[i];
+                      newEl.setAttribute(attr.name, attr.value);
+                    }
+                    // Recursively append children
+                    for (let i = 0; i < sourceNode.childNodes.length; i++) {
+                      cloneAndAppend(sourceNode.childNodes[i], newEl);
+                    }
+                    targetParent.appendChild(newEl);
+                  }
+                }
+              }
+
+              // Append all top-level child nodes of the parsed body
+              const bodyNodes = Array.from(parsedDoc.body.childNodes);
+              for (const node of bodyNodes) {
+                cloneAndAppend(node, container);
+              }
+            }
+
+            // Run the custom JavaScript after HTML elements and their scripts have been appended
+            if (customJs) {
+              try {
+                const scriptEl = document.createElement('script');
+                scriptEl.textContent = customJs;
+                document.body.appendChild(scriptEl);
+              } catch (err) {
+                console.error("Error in Ad Script:", err);
+                const errDiv = document.createElement('div');
+                errDiv.style.color = '#ef4444';
+                errDiv.style.fontSize = '11px';
+                errDiv.style.marginTop = '8px';
+                errDiv.textContent = 'JS Error: ' + err.message;
+                document.body.appendChild(errDiv);
+              }
+            }
+          })();
         </script>
       </body>
     </html>
