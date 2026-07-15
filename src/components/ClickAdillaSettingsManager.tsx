@@ -155,8 +155,8 @@ export default function ClickAdillaSettingsManager() {
         <div id="preview-container" style="width: 100%; height: 100%;"></div>
         <script>
           (function() {
-            const rawHtml = ${JSON.stringify(html || "")};
-            const customJs = ${JSON.stringify(js || "")};
+            const rawHtml = ${JSON.stringify(html || "").replace(/</g, "\\u003c")};
+            const customJs = ${JSON.stringify(js || "").replace(/</g, "\\u003c")};
             const container = document.getElementById("preview-container");
 
             if (!rawHtml && !customJs) {

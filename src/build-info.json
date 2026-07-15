@@ -1,7 +1,7 @@
 {
   "buildVersion": "0.0.0",
-  "commitSha": "7ebe428",
-  "commitMessage": "Restore latest working Roy Share Lite",
-  "commitDate": "2026-07-15 21:39 UTC",
-  "buildDateTime": "2026-07-15 17:15 UTC"
+  "commitSha": "c71789c",
+  "commitMessage": "Fix ClickAdilla Ad Sandbox Preview rendering",
+  "commitDate": "2026-07-15 17:16 UTC",
+  "buildDateTime": "2026-07-15 17:31 UTC"
 }
