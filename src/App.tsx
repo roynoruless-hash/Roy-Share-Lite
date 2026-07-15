@@ -49,7 +49,6 @@ const ReferralProgramPage = lazy(() => import("./pages/ReferralProgramPage"));
 const EnterpriseSecurityPage = lazy(() => import("./pages/EnterpriseSecurityPage"));
 const FastGlobalDeliveryPage = lazy(() => import("./pages/FastGlobalDeliveryPage"));
 const ReferralLandingPage = lazy(() => import("./pages/ReferralLandingPage"));
-const PublicGiftPage = lazy(() => import("./pages/PublicGiftPage"));
 
 import MoreMenu from "./components/MoreMenu";
 
@@ -111,20 +110,13 @@ export default function App() {
       return <ReferralLandingPage />;
     }
 
-    const giftMatch = path.match(/^\/gift\/([a-zA-Z0-9_-]+)/);
-    if (giftMatch) {
-      const giftId = giftMatch[1];
-      return <PublicGiftPage giftId={giftId} />;
-    }
-
     // Check if we are in Telegram Mini App context
     const searchParams = new URLSearchParams(window.location.search);
     const hasTgParams = searchParams.has("tgWebAppData") || searchParams.has("tgWebAppVersion") || searchParams.has("userId") || searchParams.has("tgWebAppStartParam");
     const isTelegram = !!(window as any).Telegram?.WebApp?.initData || hasTgParams || /Telegram/i.test(navigator.userAgent);
     const isReferralPath = window.location.pathname === "/referral";
-    const isGamePath = window.location.pathname.startsWith("/game/");
 
-    if (isTelegram || isReferralPath || isGamePath) {
+    if (isTelegram || isReferralPath) {
       return (
         <TelegramAuthGuard>
           <MiniAppHome />

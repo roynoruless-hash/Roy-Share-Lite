@@ -1,5 +1,3 @@
-import VideoTaskPage from "./VideoTaskPage";
-import { Video } from "lucide-react";
 import React, { useState, useEffect, lazy, Suspense } from "react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { motion, AnimatePresence } from "motion/react";
@@ -49,7 +47,6 @@ import DashboardPage from "./DashboardPage";
 import RewardTasksPage from "./RewardTasksPage";
 import { StandardTaskCard } from "../components/StandardTaskCard";
 import { ShortenerTaskCard } from "../components/ShortenerTaskCard";
-import { VideoTaskCard } from "../components/VideoTaskCard";
 
 
 
@@ -59,8 +56,6 @@ import { MyLinksPage } from "./MyLinksPage";
 import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
 import { MyContentPage } from "./MyContentPage";
 import ReferralCenter from "./ReferralCenter";
-import { GameCenterPage } from "./GameCenterPage";
-import { GamePlayerPage } from "./GamePlayerPage";
 import { navigate } from "../lib/navigation";
 
 const DriveUploadPage = lazy(() => import("./DriveUploadPage"));
@@ -69,7 +64,6 @@ const AnnouncementsPage = lazy(() => import("./AnnouncementsPage"));
 const SettingsPage = lazy(() => import("./SettingsPage"));
 const ShortenPage = lazy(() => import("./ShortenPage"));
 const RewardEarningsPage = lazy(() => import("./RewardEarningsPage"));
-const PublicGiftPage = lazy(() => import("./PublicGiftPage"));
 const PublicUpiGiveawayPage = lazy(() => import("./PublicUpiGiveawayPage"));
 
 interface MembershipVerificationProps {
@@ -450,11 +444,8 @@ export const MiniAppHome: React.FC = () => {
 
   const [currentView, setCurrentView] = useState<string>(() => {
     console.log("[MiniAppHome] Initializing view. Pathname:", window.location.pathname, "Search:", window.location.search);
-    if (window.location.pathname.startsWith("/game/")) return "game-player";
     const params = new URLSearchParams(window.location.search);
     const page = params.get("page");
-    if (page === "game-earn") return "game-earn";
-    if (page === "game-center") return "game-center";
     if (page === "referral" || window.location.pathname === "/referral") return "referral";
     if (page === "content") return "dashboard";
     if (page === "files") return "my-content";
@@ -502,15 +493,11 @@ export const MiniAppHome: React.FC = () => {
     if (window.location.pathname === "/referral" && currentView !== "referral") {
       console.log("[MiniAppHome] Pathname useEffect MATCHED '/referral'. Calling setCurrentView('referral')");
       setCurrentView("referral");
-    } else if (window.location.pathname.startsWith("/game/")) {
-      setCurrentView("game-player");
     } else if (window.location.pathname === "/" || window.location.pathname === "") {
       const searchParams = new URLSearchParams(window.location.search);
       const viewParam = searchParams.get("view");
       if (viewParam) {
         setCurrentView(viewParam);
-      } else if (currentView === "game-player") {
-        setCurrentView("game-center");
       }
     }
   }, [window.location.pathname]);
@@ -520,19 +507,7 @@ export const MiniAppHome: React.FC = () => {
   // Deep Link Handling
   useEffect(() => {
     if (activeUser?.membershipVerified && startParam && !hasCheckedDeepLink) {
-      if (startParam.startsWith("game_") && isPhoneVerified) {
-        const gameId = startParam.replace("game_", "");
-        console.log(`[MiniAppHome] Deep link detected for game: ${gameId}`);
-        setHasCheckedDeepLink(true);
-        setCurrentView("game-player");
-        // Update URL to match game-player expectations
-        window.history.replaceState({}, "", `/game/${gameId}`);
-      } else if (startParam.startsWith("gift_")) {
-        const giftId = startParam.replace("gift_", "");
-        console.log(`[MiniAppHome] Deep link detected for gift: ${giftId}`);
-        setHasCheckedDeepLink(true);
-        setCurrentView(`gift-${giftId}`);
-      } else if (startParam.startsWith("upi_")) {
+      if (startParam.startsWith("upi_")) {
         const giveawayId = startParam.replace("upi_", "");
         console.log(`[MiniAppHome] Deep link detected for upi giveaway: ${giveawayId}`);
         setHasCheckedDeepLink(true);
@@ -574,11 +549,7 @@ export const MiniAppHome: React.FC = () => {
   const [loadingGpTasks, setLoadingGpTasks] = useState(false);
   const [completedGpTaskIds, setCompletedGpTaskIds] = useState<string[]>([]);
   
-  const [videoTasks, setVideoTasks] = useState<any[]>([]);
-  const [loadingVideoTasks, setLoadingVideoTasks] = useState(false);
-  const [activeVideoTaskId, setActiveVideoTaskId] = useState<string | null>(null);
-  const [videoCompletions, setVideoCompletions] = useState<Record<string, number>>({});
-  const [userRewardTab, setUserRewardTab] = useState<"standard" | "gp" | "video">("standard");
+  const [userRewardTab, setUserRewardTab] = useState<"standard" | "gp">("standard");
 
   // Copy Feedback State
   const [copiedCode, setCopiedCode] = useState(false);
@@ -664,26 +635,7 @@ export const MiniAppHome: React.FC = () => {
         .catch((err) => console.error("Error loading tasks:", err))
         .finally(() => setLoadingTasks(false));
 
-      // Fetch Video Ads Tasks
-      setLoadingVideoTasks(true);
-      fetch(`${API_BASE}/api/video-tasks`)
-        .then(res => res.json())
-        .then(data => {
-          const list = Array.isArray(data) ? data : [];
-          const normalized = list.map((t: any) => ({
-            ...t,
-            type: t.type || "video"
-          }));
-          setVideoTasks(normalized);
-          if (activeUser?.id) {
-            fetch(`${API_BASE}/api/video-tasks/user-completions?userId=${activeUser.id}`)
-              .then(r => r.json())
-              .then(cData => {
-                if (cData.counts) setVideoCompletions(cData.counts);
-              });
-          }
-        })
-        .finally(() => setLoadingVideoTasks(false));
+
 
       fetch(`${API_BASE}/api/gplinks-tasks`)
         .then((res) => res.json())
@@ -746,46 +698,6 @@ export const MiniAppHome: React.FC = () => {
   }
 
   // Render Sub-Views
-  if (currentView === "game-player") {
-    const gameId = window.location.pathname.split("/game/")[1] || "";
-    return (
-      <GamePlayerPage 
-        gameId={gameId}
-        userId={activeUser.id}
-        onBack={() => {
-          navigate("/?view=game-center");
-          setCurrentView("game-center");
-        }}
-      />
-    );
-  }
-
-  if (currentView === "game-earn") {
-    return (
-      <GameCenterPage 
-        userId={activeUser.id} 
-        onBack={() => {
-          navigate("/");
-          setCurrentView("home");
-        }} 
-        initialView="intro"
-      />
-    );
-  }
-
-  if (currentView === "game-center") {
-    return (
-      <GameCenterPage 
-        userId={activeUser.id} 
-        onBack={() => {
-          navigate("/");
-          setCurrentView("home");
-        }} 
-        initialView="center"
-      />
-    );
-  }
-
   if (currentView === "my-content") {
     return (
       <MyContentPage 
@@ -893,22 +805,11 @@ export const MiniAppHome: React.FC = () => {
     );
   }
 
-  if (activeVideoTaskId) {
-    return (
-      <VideoTaskPage
-        userId={activeUser.id}
-        taskId={activeVideoTaskId}
-        onBack={() => setActiveVideoTaskId(null)}
-      />
-    );
-  }
-
   const cleanBotUser = tgSettings?.botUsername ? tgSettings.botUsername.replace(/^@/, '') : "Roysharearn_bot";
   const referralLink = `https://t.me/${cleanBotUser}?start=ref_${activeUser.id}`;
 
   const actionButtons = [
     { id: "self-earning", label: "Self Earning", icon: Star, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
-    { id: "game-earn", label: "Game & Earn", icon: PlayCircle, color: "bg-purple-600", shadow: "shadow-purple-500/20" },
     { id: "upload-file", label: "Upload File", icon: Upload, color: "bg-emerald-600", shadow: "shadow-emerald-500/20" },
     { id: "url-shortener", label: "URL Shortener", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
     { id: "my-content", label: "My Content", icon: FolderOpen, color: "bg-sky-500", shadow: "shadow-sky-500/20" },
@@ -1195,11 +1096,7 @@ export const MiniAppHome: React.FC = () => {
           </Suspense>
         )}
 
-        {currentView.startsWith("gift-") && (
-          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-            <PublicGiftPage giftId={currentView.replace("gift-", "")} onBack={() => setCurrentView("home")} />
-          </Suspense>
-        )}
+
 
         {currentView.startsWith("upi-") && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
@@ -1305,7 +1202,7 @@ export const MiniAppHome: React.FC = () => {
               </div>
 
               {/* Tab Selector */}
-              <div className="grid grid-cols-3 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
                 <button
                   onClick={() => setUserRewardTab("standard")}
                   className={`py-2 text-xs font-bold rounded-lg transition-all ${userRewardTab === "standard" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
@@ -1317,12 +1214,6 @@ export const MiniAppHome: React.FC = () => {
                   className={`py-2 text-xs font-bold rounded-lg transition-all ${userRewardTab === "gp" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
                 >
                   🔗 Shortener Tasks ({gpTasks.length})
-                </button>
-                <button
-                  onClick={() => setUserRewardTab("video")}
-                  className={`py-2 text-xs font-bold rounded-lg transition-all ${userRewardTab === "video" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
-                >
-                  🎥 Video Ads ({videoTasks.length})
                 </button>
               </div>
 
@@ -1348,7 +1239,7 @@ export const MiniAppHome: React.FC = () => {
                     </div>
                   )}
                 </>
-              ) : userRewardTab === "gp" ? (
+              ) : (
                 <>
                   {loadingGpTasks ? (
                     <div className="flex justify-center py-12">
@@ -1371,34 +1262,6 @@ export const MiniAppHome: React.FC = () => {
                           />
                         );
                       })}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  {loadingVideoTasks ? (
-                    <div className="flex justify-center py-12">
-                      <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                    </div>
-                  ) : videoTasks.filter((task) => task.type === "video").length === 0 ? (
-                    <div className="text-center py-12 text-slate-400 text-sm">
-                      No video tasks available
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {videoTasks
-                        .filter((task) => task.type === "video")
-                        .map((task) => {
-                          const completions = videoCompletions[task.id] || 0;
-                          return (
-                            <VideoTaskCard 
-                              key={task.id} 
-                              task={task} 
-                              completions={completions} 
-                              onStart={(id) => setActiveVideoTaskId(id)} 
-                            />
-                          );
-                        })}
                     </div>
                   )}
                 </>

@@ -6,8 +6,6 @@ import { motion, AnimatePresence } from "motion/react";
 import { db } from "../lib/firebase";
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, where, deleteDoc, writeBatch, orderBy } from "firebase/firestore";
 import { StatCard, HealthItem } from "../components/AdminComponents";
-import ClickAdillaAdsManager from "../components/ClickAdillaAdsManager";
-import VideoAdsAdminView from "../components/VideoAdsAdminView";
 import { EconomyAdminView } from "../components/EconomyAdminView";
 import {
   Zap,
@@ -3547,15 +3545,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     } else if (activeTab === "📄 Ads.txt Manager") {
       fetchAdsTxt();
       fetchAdsTxtProviders();
-    } else if (activeTab === "🎮 GamePix Integration") {
-      fetchGamePixConfig();
-    } else if (activeTab === "🎮 Game Catalog") {
-      fetchCatalogGames();
-    } else if (activeTab === "✏️ Manage Games") {
-      fetchPublishedGames();
-      fetchCategories();
-    } else if (activeTab === "➕ Add Custom Game") {
-      fetchCategories();
     }
 
     return () => {
@@ -4704,18 +4693,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🚀 Referral System",
               "⚙️ System Settings",
               "📄 Ads.txt Manager",
-              "🎥 GameMonetize Walkthroughs",
-              "🎮 Game Rewards",
-              "🎮 GamePix Integration",
-              "🎮 Game Catalog",
-              "➕ Add Custom Game",
-              "✏️ Manage Games",
               "📱 Telegram Settings",
-              "🎁 Gift Link Generator",
-              "📊 Gift Claims History",
               "💸 UPI Giveaway",
-              "📊 ClickAdilla API",
-              "🎥 Video Ads",
             ].map((btn) => (
               <button
                 key={btn}
@@ -4723,14 +4702,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   setActiveTab(btn);
                   if (btn === "💰 Verified Tasks") fetchVerifiedTasks();
                   if (btn === "🔗 Shortener Tasks") fetchGpTasks();
-                  if (btn === "🎮 Game Rewards") fetchGameRewardSettings();
-                  if (btn === "🎥 GameMonetize Walkthroughs") {
-                    fetchWalkthroughSettings();
-                    fetchWalkthroughs();
-                  }
                   if (btn === "📱 Telegram Settings") fetchTelegramOfficialSettings();
-                  if (btn === "🎁 Gift Link Generator") fetchGifts();
-                  if (btn === "📊 Gift Claims History") fetchGiftClaims();
                 }}
                 className={`px-4 py-2 hover:bg-slate-800 border border-slate-800 rounded-xl text-sm font-medium transition-colors ${activeTab === btn ? "bg-blue-600 text-white border-blue-500" : "bg-slate-900 text-slate-300"}`}
               >
@@ -11625,7 +11597,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
-          {activeTab === "🎮 GamePix Integration" && (
+          {false && activeTab === "🎮 GamePix Integration" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
                 <div>
@@ -11869,7 +11841,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
-          {activeTab === "🎮 Game Catalog" && (
+          {false && activeTab === "🎮 Game Catalog" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
                 <div>
@@ -12068,7 +12040,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
-          {activeTab === "➕ Add Custom Game" && (
+          {false && activeTab === "➕ Add Custom Game" && (
             <div className="space-y-8 pb-20">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
                 <div>
@@ -12763,7 +12735,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
-          {activeTab === "✏️ Manage Games" && (
+          {false && activeTab === "✏️ Manage Games" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
                 <div>
@@ -13715,7 +13687,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
-          {activeTab === "🎁 Gift Link Generator" && (
+          {false && activeTab === "🎁 Gift Link Generator" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
                 <div>
@@ -13903,7 +13875,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
-          {activeTab === "📊 Gift Claims History" && (
+          {false && activeTab === "📊 Gift Claims History" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 md:items-center">
                 <div>
@@ -14007,15 +13979,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
-          {activeTab === "🎥 Video Ads" && (
-            <VideoAdsAdminView />
-          )}
 
-          {activeTab === "📊 ClickAdilla API" && (
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto">
-              <ClickAdillaAdsManager />
-            </motion.div>
-          )}
 
           {activeTab === "🛡️ Economy Protection" && (
             <EconomyAdminView />
@@ -14319,7 +14283,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
-          {activeTab === "🎮 Game Rewards" && (
+          {false && activeTab === "🎮 Game Rewards" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
                 <h2 className="text-2xl font-bold text-white flex items-center gap-2">

@@ -259,6 +259,29 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
+  // Neutralize deleted features' endpoints
+  app.use([
+    "/api/video-tasks",
+    "/api/admin/video-tasks",
+    "/api/admin/video-analytics",
+    "/api/admin/video-logs",
+    "/api/admin/video-logs-action",
+    "/api/admin/clickadilla",
+    "/api/gamepix",
+    "/api/admin/gamepix",
+    "/api/admin/games",
+    "/api/admin/game-categories",
+    "/api/game/rewards",
+    "/api/game/sessions",
+    "/api/game/analytics",
+    "/api/admin/gamemonetize",
+    "/api/admin/game-reward-settings",
+    "/api/game/reward-settings",
+    "/api/game/convert-coins"
+  ], (req, res) => {
+    res.status(410).json({ error: "Feature removed", success: false });
+  });
+
   // Register UPI Giveaway Router
   app.use("/api/upi-giveaway", upiGiveawayRouter);
 
@@ -636,7 +659,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
     }
   };
 
-  app.post("/api/auth/telegram-verify", requireAdminDb, async (req, res) => {
+  app.post("/api/auth/telegram-verify", async (req, res) => {
     try {
       const { initData } = req.body;
       if (!initData) return res.status(400).json({ error: "Missing initData" });
@@ -713,7 +736,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
     }
   });
 
-  app.get("/api/user/profile/:id", requireAdminDb, async (req, res) => {
+  app.get("/api/user/profile/:id", async (req, res) => {
     try {
       const { id } = req.params;
       const userSnap = await getDoc(doc(db, "users", id));
@@ -746,7 +769,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
     }
   });
 
-  app.post("/api/user/complete-profile", requireAdminDb, async (req, res) => {
+  app.post("/api/user/complete-profile", async (req, res) => {
     try {
       const { userId, details } = req.body;
       if (!userId || !details) return res.status(400).json({ error: "Missing parameters" });
@@ -9776,7 +9799,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.post("/api/daily-bonus/claim", requireAdminDb, async (req, res) => {
+  app.post("/api/daily-bonus/claim", async (req, res) => {
     try {
       const { userId, type } = req.body;
       if (!userId || !type) return res.status(400).json({ error: "Missing parameters" });
@@ -10041,7 +10064,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     return crypto.createHash("sha256").update(otp).digest("hex");
   };
 
-  app.post("/api/auth/send-otp", requireAdminDb, async (req, res) => {
+  app.post("/api/auth/send-otp", async (req, res) => {
     try {
       const { mobile, telegramId } = req.body;
       if (!mobile) {
@@ -10132,7 +10155,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.post("/api/auth/verify-otp", requireAdminDb, async (req, res) => {
+  app.post("/api/auth/verify-otp", async (req, res) => {
     try {
       const { mobile, otp, telegramId } = req.body;
       if (!mobile || !otp || !telegramId) {
@@ -10190,7 +10213,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.post("/api/auth/check-session", requireAdminDb, async (req, res) => {
+  app.post("/api/auth/check-session", async (req, res) => {
     const requestId = Math.random().toString(36).substring(7);
     try {
       const { token, fingerprint } = req.body;
