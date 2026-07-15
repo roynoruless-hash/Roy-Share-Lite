@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { authenticatedFetch } from "../lib/api";
 import { 
   Save, 
@@ -32,7 +32,7 @@ export default function ClickAdillaSettingsManager() {
   const [success, setSuccess] = useState("");
   const [previewKey, setPreviewKey] = useState(0); // to force iframe reload
 
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  
 
   // Fetch initial settings
   useEffect(() => {
@@ -127,52 +127,43 @@ export default function ClickAdillaSettingsManager() {
     setPreviewKey(prev => prev + 1);
   };
 
-  // Inject preview HTML/CSS/JS into iframe when previewKey or state changes
-  useEffect(() => {
-    if (iframeRef.current) {
-      const iframe = iframeRef.current;
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (doc) {
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="utf-8">
-              <title>ClickAdilla Preview</title>
-              <style>
-                body {
-                  margin: 0;
-                  padding: 12px;
-                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                  background-color: #0b1329;
-                  color: #f8fafc;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  min-height: 120px;
-                  text-align: center;
-                }
-                ${css}
-              </style>
-            </head>
-            <body>
-              ${html || '<div style="color: #64748b; font-size: 13px;">[Empty HTML Advertisement Body]</div>'}
-              <script>
-                try {
-                  ${js}
-                } catch (err) {
-                  console.error("Error in Ad Script:", err);
-                  document.body.innerHTML += '<div style="color: #ef4444; font-size: 11px; margin-top: 8px;">JS Error: ' + err.message + '</div>';
-                }
-              </script>
-            </body>
-          </html>
-        `);
-        doc.close();
-      }
-    }
-  }, [previewKey, html, css, js]);
+  // Instead of using doc.write and triggering cross-origin errors, 
+  // we will construct the document string and use it in srcDoc on the iframe.
+  const previewHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>ClickAdilla Preview</title>
+        <style>
+          body {
+            margin: 0;
+            padding: 12px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #0b1329;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 120px;
+            text-align: center;
+          }
+          ${css}
+        </style>
+      </head>
+      <body>
+        ${html || '<div style="color: #64748b; font-size: 13px;">[Empty HTML Advertisement Body]</div>'}
+        <script>
+          try {
+            ${js}
+          } catch (err) {
+            console.error("Error in Ad Script:", err);
+            document.body.innerHTML += '<div style="color: #ef4444; font-size: 11px; margin-top: 8px;">JS Error: ' + err.message + '</div>';
+          }
+        </script>
+      </body>
+    </html>
+  `;
 
   if (loading) {
     return (
@@ -420,10 +411,12 @@ export default function ClickAdillaSettingsManager() {
 
             <div className="flex-1 bg-slate-950 border border-slate-850 rounded-xl overflow-hidden relative">
               <iframe
-                ref={iframeRef}
+                key={previewKey}
+                
                 title="ClickAdilla Sandbox Preview Frame"
                 className="w-full h-full border-none"
-                sandbox="allow-scripts"
+                sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+                srcDoc={previewHtml}
               />
             </div>
           </div>
