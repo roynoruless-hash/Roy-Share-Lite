@@ -205,6 +205,9 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
   const requirements = getRequirementsList();
   const allRequirementsMet = requirements.every(req => req.isMet);
 
+  const tg = (window as any).Telegram?.WebApp;
+  const isInsideTelegram = !!(tg && tg.initData);
+
   // Membership Verification Action
   const handleVerifyMembership = async () => {
     if (!user?.telegramId) {
@@ -241,22 +244,14 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     }
   };
 
-  // Lucky Draw Enrollment Action
-  const handleEnrollInLuckyDraw = async () => {
-    if (!user?.telegramId || !giveawayId) {
-      setEnrollError("User or campaign details not available.");
-      return;
-    }
+  const completeEnrollment = async () => {
     setEnrolling(true);
     setEnrollError("");
-    console.log(`[LuckyDraw] 🚀 Initiating Enrollment API call | Campaign: ${giveawayId} | User: ${user.telegramId}`);
-    console.log(`[LuckyDraw] Current dbUser state:`, dbUser);
-    console.log(`[LuckyDraw] Requirements list state:`, requirements);
-
+    console.log(`[LuckyDraw] 🚀 Initiating Enrollment API call | Campaign: ${giveawayId} | User: ${user?.telegramId}`);
     try {
       const payload = {
         campaignId: giveawayId,
-        telegramId: user.telegramId
+        telegramId: user?.telegramId
       };
       const endpoint = "/api/upi-giveaway/lucky-draw/enroll";
       console.log(`[LuckyDraw] Sending payload to ${endpoint}:`, payload);
@@ -284,7 +279,7 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
 
       if (res.ok && data.success) {
         console.log("[LuckyDraw] ✅ Successfully enrolled on server. Updating UI status immediately.");
-        setParticipationStatus("enrolled"); // Update immediately to change button status to Enrolled
+        setParticipationStatus("enrolled");
       } else {
         console.warn("[LuckyDraw] ❌ Enrollment rejected by server:", data.error);
         setEnrollError(data.error || "Enrollment failed. Please ensure you satisfy all rules.");
@@ -295,6 +290,55 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     } finally {
       setEnrolling(false);
       console.log("[LuckyDraw] 🏁 Enrollment flow finished.");
+    }
+  };
+
+  // Lucky Draw Enrollment Action
+  const handleEnrollInLuckyDraw = async () => {
+    if (!user?.telegramId || !giveawayId) {
+      setEnrollError("User or campaign details not available.");
+      return;
+    }
+
+    if (!isInsideTelegram) {
+      setEnrollError("Rewarded Ads and Enrollment are only available inside the Telegram Mini App.");
+      return;
+    }
+
+    setEnrolling(true);
+    setEnrollError("");
+    
+    const blockId = "3856"; // Recommended Adsgram test block ID for rewarded videos
+    const adsgram = (window as any).Adsgram;
+    
+    if (adsgram) {
+      console.log("[LuckyDraw] Adsgram SDK is initialized correctly in the window scope.");
+      try {
+        console.log("[Adsgram] Callback: loaded | Initializing ad controller with blockId:", blockId);
+        const adController = adsgram.init({ blockId });
+        console.log("[Adsgram] Ad controller initialized:", adController);
+        
+        console.log("[Adsgram] Callback: opened | Displaying rewarded video ad...");
+        adController.show()
+          .then((result: any) => {
+            console.log("[Adsgram] Callback: rewarded | User successfully watched the full ad!", result);
+            // After successful ad reward callback, proceed to enroll
+            completeEnrollment();
+          })
+          .catch((err: any) => {
+            console.error("[Adsgram] Callback: failed or closed | Ad closed prematurely or failed to load:", err);
+            setEnrollError("Please watch the full ad to participate.");
+            setEnrolling(false);
+          });
+      } catch (err: any) {
+        console.error("[LuckyDraw] Failed to initialize Adsgram. Callback: failed:", err);
+        setEnrollError("Failed to load sponsored ad. Please try again.");
+        setEnrolling(false);
+      }
+    } else {
+      console.log("[LuckyDraw] Adsgram SDK not loaded in window.");
+      setEnrollError("Adsgram SDK failed to load. Please ensure you are running inside Telegram and have a stable internet connection.");
+      setEnrolling(false);
     }
   };
 
@@ -526,29 +570,51 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
                </div>
              )}
 
-             {/* Enroll Button */}
-             <button
-               onClick={handleEnrollInLuckyDraw}
-               disabled={enrolling || !allRequirementsMet || giveawayIsEnded}
-               className={`w-full py-4 font-black rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-lg ${
-                 allRequirementsMet && !giveawayIsEnded
-                   ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white cursor-pointer shadow-emerald-950/20"
-                   : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-800"
-               }`}
-             >
-               {enrolling ? (
-                 <Loader2 className="w-5 h-5 text-white animate-spin" />
-               ) : (
-                 <>
-                   <Sparkles className="w-4.5 h-4.5 text-yellow-400 animate-pulse" />
-                   {allRequirementsMet ? "Enroll In Lucky Draw 🍀" : "Complete Requirements to Enroll"}
-                 </>
-               )}
-             </button>
+             {/* Enroll Button / Unsupported Environment Notice */}
+             {!isInsideTelegram ? (
+               <div className="space-y-4">
+                 <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 p-4 rounded-2xl flex flex-col gap-2 text-xs">
+                   <div className="flex items-center gap-2 font-black uppercase text-amber-400">
+                     <AlertCircle className="w-4 h-4 shrink-0" />
+                     <span>Unsupported Environment</span>
+                   </div>
+                   <p className="text-slate-400 leading-relaxed font-medium">
+                     Rewarded Ads and Enrollment are only available inside the Telegram Mini App. Please open this campaign inside Telegram to participate.
+                   </p>
+                 </div>
+                 <button
+                   disabled={true}
+                   className="w-full py-4 bg-slate-800 text-slate-500 font-black rounded-xl text-sm flex items-center justify-center gap-2 cursor-not-allowed border border-slate-800"
+                 >
+                   <Lock className="w-4.5 h-4.5 text-slate-500" />
+                   Open in Telegram to Enroll
+                 </button>
+               </div>
+             ) : (
+               <button
+                 onClick={handleEnrollInLuckyDraw}
+                 disabled={enrolling || !allRequirementsMet || giveawayIsEnded}
+                 className={`w-full py-4 font-black rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-lg ${
+                   allRequirementsMet && !giveawayIsEnded
+                     ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white cursor-pointer shadow-emerald-950/20"
+                     : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-800"
+                 }`}
+               >
+                 {enrolling ? (
+                   <Loader2 className="w-5 h-5 text-white animate-spin" />
+                 ) : (
+                   <>
+                     <Sparkles className="w-4.5 h-4.5 text-yellow-400 animate-pulse" />
+                     {allRequirementsMet ? "Enroll In Lucky Draw 🍀" : "Complete Requirements to Enroll"}
+                   </>
+                 )}
+               </button>
+             )}
           </div>
         )}
 
       </main>
+
     </div>
   );
 }

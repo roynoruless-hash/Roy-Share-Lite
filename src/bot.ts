@@ -36,7 +36,7 @@ function formatCurrency(amount: number, currency: string = "INR", includeSymbol:
 }
 
 function getAppUrl(): string {
-    return "https://www.royshare.online";
+    return getMiniAppUrl("");
 }
 
 function getMiniAppUrl(pathAndQuery: string): string {
@@ -957,8 +957,8 @@ async function handleDeepLinkReferral(db: any, botToken: string, chatId: number,
         await sendTelegramMessage(botToken, chatId, "⚠️ You have already claimed your referral reward!", {
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "✅ Return to RoyShare", url: `https://www.royshare.online/referral-success?code=${rawCode}&success=true` }],
-                    [{ text: "📱 Open Mini App", web_app: { url: "https://www.royshare.online/" } }]
+                    [{ text: "✅ Return to RoyShare", url: `${getAppUrl()}/referral-success?code=${rawCode}&success=true` }],
+                    [{ text: "📱 Open Mini App", web_app: { url: `${getAppUrl()}/` } }]
                 ]
             }
         });
@@ -972,8 +972,8 @@ async function handleDeepLinkReferral(db: any, botToken: string, chatId: number,
         await sendTelegramMessage(botToken, chatId, "⚠️ You have already completed your registration via a referral link!", {
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "✅ Return to RoyShare", url: `https://www.royshare.online/referral-success?code=${rawCode}&success=true` }],
-                    [{ text: "📱 Open Mini App", web_app: { url: "https://www.royshare.online/" } }]
+                    [{ text: "✅ Return to RoyShare", url: `${getAppUrl()}/referral-success?code=${rawCode}&success=true` }],
+                    [{ text: "📱 Open Mini App", web_app: { url: `${getAppUrl()}/` } }]
                 ]
             }
         });
@@ -1103,8 +1103,8 @@ Click below to return to RoyShare or open the app!`;
         parse_mode: "Markdown",
         reply_markup: {
             inline_keyboard: [
-                [{ text: "✅ Return to RoyShare", url: `https://www.royshare.online/referral-success?code=${rawCode}&success=true` }],
-                [{ text: "📱 Open Mini App", web_app: { url: "https://www.royshare.online/" } }]
+                [{ text: "✅ Return to RoyShare", url: `${getAppUrl()}/referral-success?code=${rawCode}&success=true` }],
+                [{ text: "📱 Open Mini App", web_app: { url: `${getAppUrl()}/` } }]
             ]
         }
     });
@@ -2606,7 +2606,6 @@ function getMainMenuKeyboard(userId?: string | number) {
     return {
         keyboard: [
             [{ text: "🚀 Self Earning", web_app: { url: userId ? `${appUrl}/?userId=${userId}` : appUrl } }],
-            [{ text: "🎮 Game & Earn", web_app: { url: userId ? `${appUrl}/app?page=game-earn&userId=${userId}` : `${appUrl}/app?page=game-earn` } }],
             [
                 { text: "📤 Upload File" },
                 { text: "🔗 URL Shortener" }
@@ -6036,7 +6035,7 @@ This feature is currently under maintenance and will be implemented soon.`;
 }
 
 function getActualAppUrl(): string {
-    return "https://www.royshare.online";
+    return getMiniAppUrl("");
 }
 
 async function showUploadMenu(botToken: string, chatId: number, userId: string, messageIdToEdit?: number) {

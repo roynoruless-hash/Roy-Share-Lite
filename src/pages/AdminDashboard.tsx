@@ -7,7 +7,6 @@ import { db } from "../lib/firebase";
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, where, deleteDoc, writeBatch, orderBy } from "firebase/firestore";
 import { StatCard, HealthItem } from "../components/AdminComponents";
 import { EconomyAdminView } from "../components/EconomyAdminView";
-import ClickAdillaSettingsManager from "../components/ClickAdillaSettingsManager";
 import LuckyDrawWinnerManager from "../components/LuckyDrawWinnerManager";
 import {
   Zap,
@@ -431,8 +430,43 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [verifyGroupLoading, setVerifyGroupLoading] = useState(false);
   const [verifyGroupStatus, setVerifyGroupStatus] = useState<any>(null);
 
+  const [telegramUrlsInfo, setTelegramUrlsInfo] = useState<any>({
+    appUrl: "",
+    rawAppUrl: "",
+    loading: false,
+    error: ""
+  });
+
+  const fetchTelegramUrls = async () => {
+    setTelegramUrlsInfo((prev: any) => ({ ...prev, loading: true, error: "" }));
+    try {
+      const res = await authenticatedFetch("/api/admin/telegram-urls");
+      const data = await res.json();
+      if (data.success) {
+        setTelegramUrlsInfo({
+          appUrl: data.appUrl || "",
+          rawAppUrl: data.rawAppUrl || "",
+          loading: false,
+          error: ""
+        });
+      } else {
+        setTelegramUrlsInfo((prev: any) => ({ ...prev, loading: false, error: data.error || "Failed to load URLs" }));
+      }
+    } catch (err: any) {
+      setTelegramUrlsInfo((prev: any) => ({ ...prev, loading: false, error: err.message }));
+    }
+  };
+
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const handleCopyUrl = (url: string, index: number) => {
+    navigator.clipboard.writeText(url);
+    setCopiedIndex(index);
+    setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
   const fetchTelegramOfficialSettings = async () => {
     setTelegramOfficialLoading(true);
+    fetchTelegramUrls();
     try {
       const res = await authenticatedFetch("/api/admin/telegram-settings");
       const data = await res.json();
@@ -4695,7 +4729,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🚀 Referral System",
               "⚙️ System Settings",
               "📄 Ads.txt Manager",
-              "📊 ClickAdilla Settings",
               "📱 Telegram Settings",
               "💸 UPI Giveaway",
               "🎁 Lucky Draw Winner",
@@ -8970,12 +9003,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   >
                     📢 Ad Analytics
                   </button>
-                  <button
-                    onClick={() => setAnalyticsView("Game Analytics")}
-                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === "Game Analytics" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
-                  >
-                    🎮 Game Analytics
-                  </button>
+
                   <button
                     onClick={() =>
                       alert("Export functionality to be implemented")
@@ -9277,51 +9305,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     </p>
                   </div>
                 </div>
-              ) : analyticsView === "Game Analytics" ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">
-                      Total Game Opens
-                    </h3>
-                    <p className="text-2xl font-bold text-blue-400">
-                      {analyticsData.gameAnalytics?.totalOpens || 0}
-                    </p>
-                  </div>
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">
-                      Total Completions
-                    </h3>
-                    <p className="text-2xl font-bold text-emerald-400">
-                      {analyticsData.gameAnalytics?.totalCompletions || 0}
-                    </p>
-                  </div>
-                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-amber-500/80 uppercase tracking-wider mb-1">
-                      Total Reward Claims
-                    </h3>
-                    <p className="text-2xl font-bold text-amber-400">
-                      {analyticsData.gameAnalytics?.totalClaims || 0}
-                    </p>
-                  </div>
-                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-purple-500/80 uppercase tracking-wider mb-1">
-                      Avg Play Time (min)
-                    </h3>
-                    <p className="text-2xl font-bold text-purple-400">
-                      {Math.round((analyticsData.gameAnalytics?.avgPlayTime || 0) / 60)}
-                    </p>
-                  </div>
-                  <div className="bg-slate-500/10 border border-slate-500/20 rounded-2xl p-4 col-span-2">
-                    <h3 className="text-xs font-semibold text-slate-500/80 uppercase tracking-wider mb-1">
-                      Completion Rate
-                    </h3>
-                    <p className="text-2xl font-bold text-white">
-                      {analyticsData.gameAnalytics?.totalOpens > 0 
-                        ? Math.round((analyticsData.gameAnalytics?.totalCompletions / analyticsData.gameAnalytics?.totalOpens) * 100)
-                        : 0}%
-                    </p>
-                  </div>
-                </div>
+
               ) : null}
             </div>
           )}
@@ -13676,6 +13660,254 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 </div>
               </div>
 
+              {/* Telegram Mini App URLs Card */}
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-xl hover:border-blue-500/30 transition-all">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/60 pb-5">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-blue-500/10 rounded-2xl">
+                      <Globe className="w-6 h-6 text-blue-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Telegram Mini App URLs</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">Validate and manage all WebApp launch URLs configured in your system</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchTelegramUrls}
+                    disabled={telegramUrlsInfo.loading}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 self-start sm:self-center disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${telegramUrlsInfo.loading ? "animate-spin" : ""}`} />
+                    Reload URLs
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950/65 p-4 rounded-2xl border border-slate-850">
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Backend App URL (Configured)</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-white font-mono break-all">
+                        {telegramUrlsInfo.appUrl || "https://www.royshare.online"}
+                      </span>
+                      {telegramUrlsInfo.rawAppUrl ? (
+                        <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded text-[9px] font-bold uppercase">ENV SET</span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded text-[9px] font-bold uppercase">FALLBACK</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Browser Origin (This Environment)</span>
+                    <span className="text-sm font-semibold text-blue-400 font-mono break-all block">{window.location.origin}</span>
+                  </div>
+                </div>
+
+                {(!window.location.hostname.includes("royshare.online") && (telegramUrlsInfo.appUrl === "https://www.royshare.online" || telegramUrlsInfo.appUrl === "https://royshare.online")) && (
+                  <div className="p-4 bg-rose-500/15 border border-rose-500/25 rounded-2xl text-rose-300 text-xs leading-relaxed space-y-1 animate-pulse">
+                    <div className="font-bold flex items-center gap-2 text-rose-400">
+                      <span>⚠️ Warning: Misconfigured WebApp Buttons Detected!</span>
+                    </div>
+                    <p>
+                      The Telegram bot is currently pointing to the public website home page (<strong>https://www.royshare.online</strong>) instead of your current development/preview Mini App environment (<strong>{window.location.origin}</strong>).
+                    </p>
+                    <p className="text-[11px] text-rose-400/80">
+                      To test and run the Mini App inside Telegram, you must define <code>APP_URL</code> as <code>{window.location.origin}</code> in your environment settings.
+                    </p>
+                  </div>
+                )}
+
+                <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-slate-900/60">
+                          <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Feature / WebApp Button</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Configured Launch URL</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {(() => {
+                          const baseAppUrl = telegramUrlsInfo.appUrl || "https://www.royshare.online";
+                          const isProductionDomain = window.location.hostname.includes("royshare.online");
+                          
+                          const urlList = [
+                            {
+                              name: "🚀 Self Earning WebApp URL",
+                              url: `${baseAppUrl}/?userId=123456789`,
+                              isNative: false,
+                              button: "🚀 Self Earning",
+                              description: "Launched by the primary '🚀 Self Earning' button inside the bot menu."
+                            },
+
+                            {
+                              name: "📤 Upload File / Google Drive",
+                              url: `${baseAppUrl}/drive-upload?tg_id=123456789&userId=123456789`,
+                              isNative: false,
+                              button: "🚀 Open Upload Page",
+                              description: "Used to link Google Drive accounts and upload personal files."
+                            },
+                            {
+                              name: "📁 My Content / Files Manager",
+                              url: `${baseAppUrl}/app?page=content&userId=123456789`,
+                              isNative: false,
+                              button: "📁 My Content",
+                              description: "WebApp route where users view and manage their uploaded contents."
+                            },
+                            {
+                              name: "🔗 My Links / URL Shortener",
+                              url: `${baseAppUrl}/app?page=links&userId=123456789`,
+                              isNative: false,
+                              button: "🔗 My Links",
+                              description: "The main area where users shorten URLs and manage active redirection links."
+                            },
+                            {
+                              name: "🎁 Play Daily Bonus WebApp URL",
+                              url: `${baseAppUrl}/daily-bonus?userId=123456789`,
+                              isNative: false,
+                              button: "🎁 Play Daily Bonus",
+                              description: "Enables users to play and claim their daily login streaks and rewards."
+                            },
+                            {
+                              name: "📋 Earn Rewards Task WebApp URL",
+                              url: `${baseAppUrl}/earn-rewards?userId=123456789&taskId=SAMPLE_TASK_ID`,
+                              isNative: false,
+                              button: "📋 Take a Survey / Task",
+                              description: "WebApp view launched to track and verify sponsor-task completions."
+                            },
+                            {
+                              name: "📋 Surveys WebApp URL",
+                              url: `${baseAppUrl}/surveys?userId=123456789`,
+                              isNative: false,
+                              button: "📋 Open Surveys",
+                              description: "Direct entry portal to active survey panels inside the Mini App."
+                            },
+                            {
+                              name: "❓ FAQ Support URL",
+                              url: `${baseAppUrl}/app?page=support&view=faq&userId=123456789`,
+                              isNative: false,
+                              button: "❓ FAQ",
+                              description: "Frequently Asked Questions inside the customer support interface."
+                            },
+                            {
+                              name: "🌐 Help Center Support URL",
+                              url: `${baseAppUrl}/app?page=support&userId=123456789`,
+                              isNative: false,
+                              button: "🌐 Help Center (Mini App)",
+                              description: "Launches the Mini App help desk and interactive customer support."
+                            },
+                            {
+                              name: "Main Mini App URL (Portal Root)",
+                              url: `${baseAppUrl}/`,
+                              isNative: false,
+                              button: "📱 Open Mini App",
+                              description: "The fallback base root loaded when starting the bot or clicking referral links."
+                            },
+                            {
+                              name: "📢 Announcements WebApp URL",
+                              url: "N/A (Natively Handled)",
+                              isNative: true,
+                              button: "📢 Announcements",
+                              description: "No WebApp. Handled dynamically inside Telegram chat via rich bot messages."
+                            },
+                            {
+                              name: "⚙️ Settings WebApp URL",
+                              url: "N/A (Natively Handled)",
+                              isNative: true,
+                              button: "⚙️ Settings",
+                              description: "No WebApp. Settings are fully interactive inline keyboard callback menus."
+                            }
+                          ];
+
+                          return urlList.map((item, idx) => {
+                            let status = "Valid";
+                            if (!item.isNative) {
+                              if (!baseAppUrl) status = "Missing";
+                              else if ((baseAppUrl.includes("royshare.online") || baseAppUrl.includes("www.royshare.online")) && !isProductionDomain) {
+                                status = "Invalid";
+                              }
+                            }
+                            
+                            return (
+                              <tr key={idx} className="hover:bg-slate-900/35 transition-colors">
+                                <td className="px-4 py-4 max-w-xs">
+                                  <div className="font-bold text-white text-sm">{item.name}</div>
+                                  <div className="text-slate-400 text-xs mt-1">{item.description}</div>
+                                  <div className="mt-1.5 flex items-center gap-1.5">
+                                    <span className="text-[10px] text-slate-500 font-medium">Telegram Button:</span>
+                                    <span className="px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] font-mono">{item.button}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-4 whitespace-nowrap">
+                                  {item.isNative ? (
+                                    <span className="px-2.5 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full text-xs font-semibold">
+                                      Native Flow
+                                    </span>
+                                  ) : status === "Invalid" ? (
+                                    <span className="px-2.5 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full text-xs font-semibold flex items-center gap-1 w-fit">
+                                      <span className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping"></span>
+                                      Invalid
+                                    </span>
+                                  ) : status === "Missing" ? (
+                                    <span className="px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-xs font-semibold">
+                                      Missing
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-semibold flex items-center gap-1 w-fit">
+                                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                      Valid
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-4 max-w-md font-mono text-xs text-slate-300">
+                                  {item.isNative ? (
+                                    <span className="text-slate-500 italic">No external WebApp URL required</span>
+                                  ) : (
+                                    <span className={`break-all ${status === "Invalid" ? "text-rose-300" : "text-slate-300"}`}>
+                                      {item.url}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-4 whitespace-nowrap text-right text-slate-300">
+                                  <div className="flex items-center justify-end gap-2">
+                                    {!item.isNative && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopyUrl(item.url, idx)}
+                                          className="p-2 bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700 text-slate-300 rounded-lg transition-all cursor-pointer"
+                                          title="Copy URL"
+                                        >
+                                          {copiedIndex === idx ? (
+                                            <span className="text-[10px] px-1 font-bold text-emerald-400">Copied!</span>
+                                          ) : (
+                                            <Copy size={13} />
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => window.open(item.url, "_blank")}
+                                          className="p-2 bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700 text-slate-300 rounded-lg transition-all cursor-pointer"
+                                          title="Test URL in New Tab"
+                                        >
+                                          <ExternalLink size={13} />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
               {/* Master Save Bar */}
               <div className="flex justify-end pt-4">
                 <button
@@ -13991,10 +14223,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
           {activeTab === "💸 UPI Giveaway" && (
             <UpiGiveawayAdminManager />
-          )}
-
-          {activeTab === "📊 ClickAdilla Settings" && (
-            <ClickAdillaSettingsManager />
           )}
 
           {activeTab === "🎁 Lucky Draw Winner" && (

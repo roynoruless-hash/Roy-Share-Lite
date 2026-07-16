@@ -52,41 +52,6 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack }: PublicUpiG
   // Copy helpers
   const [copiedCode, setCopiedCode] = useState(false);
 
-  // Advertisement Settings & States
-  const [adSettings, setAdSettings] = useState<any>(null);
-  const [showAdPopup, setShowAdPopup] = useState(false);
-  const [adTimer, setAdTimer] = useState(15);
-  const [adSubmissionData, setAdSubmissionData] = useState<any>(null);
-
-  // Fetch Advertisement Settings
-  useEffect(() => {
-    fetch(`${API_BASE}/api/public/clickadilla/settings`)
-      .then(res => res.json())
-      .then(data => {
-        setAdSettings(data);
-      })
-      .catch(console.error);
-  }, []);
-
-  // Advertisement Timer logic
-  useEffect(() => {
-    let interval: any;
-    if (showAdPopup && adTimer > 0) {
-      interval = setInterval(() => {
-        setAdTimer(prev => prev - 1);
-      }, 1000);
-    } else if (showAdPopup && adTimer === 0) {
-      setShowAdPopup(false);
-      setSuccessMsg("🎉 Entry Submitted Successfully! Your entry is now confirmed! Good Luck! 🍀");
-      if (adSubmissionData) {
-        setExistingEntry({ status: "Pending", ticketNumber: adSubmissionData.ticketNumber || "" });
-      } else {
-        setExistingEntry({ status: "Pending" });
-      }
-    }
-    return () => clearInterval(interval);
-  }, [showAdPopup, adTimer, adSubmissionData]);
-
   // Fetch Giveaway
   useEffect(() => {
     if (!giveawayId) return;
@@ -238,14 +203,8 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack }: PublicUpiG
 
       const data = await res.json();
       if (res.ok && data.success) {
-        if (adSettings && adSettings.enabled) {
-          setShowAdPopup(true);
-          setAdTimer(15);
-          setAdSubmissionData(data); // save success data, waiting for ad
-        } else {
-          setSuccessMsg("🎉 Entry Submitted Successfully! Your entry is now confirmed! Good Luck! 🍀");
-          setExistingEntry({ status: "Pending", ticketNumber: data.ticketNumber || "" });
-        }
+        setSuccessMsg("🎉 Entry Submitted Successfully! Your entry is now confirmed! Good Luck! 🍀");
+        setExistingEntry({ status: "Pending", ticketNumber: data.ticketNumber || "" });
       } else {
         setError(data.error || "Failed to submit entry. Please try again.");
       }
@@ -579,71 +538,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack }: PublicUpiG
 
       </main>
 
-      {/* Ad Popup */}
-      <AnimatePresence>
-        {showAdPopup && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950 p-4"
-          >
-            <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[500px]">
-              {/* Header */}
-              <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-900">
-                <span className="text-xs font-bold text-slate-400">Advertisement</span>
-                <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1 rounded-full border border-slate-800 text-xs font-mono text-slate-300">
-                  <Clock className="w-3.5 h-3.5 text-blue-400" />
-                  Wait {adTimer}s
-                </div>
-              </div>
 
-              {/* Ad Content */}
-              <div className="flex-1 bg-[#0b1329] relative overflow-hidden flex flex-col">
-                <iframe
-                  title="Advertisement"
-                  className="w-full h-full border-none flex-1"
-                  sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
-                  srcDoc={`
-                    <!DOCTYPE html>
-                    <html>
-                      <head>
-                        <meta charset="utf-8">
-                        <meta name="viewport" content="width=device-width, initial-scale=1">
-                        <style>
-                          body {
-                            margin: 0;
-                            padding: 12px;
-                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                            background-color: #0b1329;
-                            color: #f8fafc;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            min-height: 100vh;
-                            text-align: center;
-                          }
-                          ${adSettings?.css || ""}
-                        </style>
-                      </head>
-                      <body>
-                        ${adSettings?.html || "<div>Loading advertisement...</div>"}
-                        <script>
-                          try {
-                            ${adSettings?.js || ""}
-                          } catch (e) {
-                            console.error("Ad Script Error:", e);
-                          }
-                        </script>
-                      </body>
-                    </html>
-                  `}
-                />
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
     </div>
   );
