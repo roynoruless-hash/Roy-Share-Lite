@@ -13717,194 +13717,159 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   </div>
                 )}
 
-                <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-800 bg-slate-900/60">
-                          <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Feature / WebApp Button</th>
-                          <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
-                          <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Configured Launch URL</th>
-                          <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/50">
-                        {(() => {
-                          const baseAppUrl = telegramUrlsInfo.appUrl || "https://www.royshare.online";
-                          const isProductionDomain = window.location.hostname.includes("royshare.online");
-                          
-                          const urlList = [
-                            {
-                              name: "🚀 Self Earning WebApp URL",
-                              url: `${baseAppUrl}/?userId=123456789`,
-                              isNative: false,
-                              button: "🚀 Self Earning",
-                              description: "Launched by the primary '🚀 Self Earning' button inside the bot menu."
-                            },
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {(() => {
+                    const botUsernameRaw = telegramOfficialSettings?.botUsername || telegramConfigs?.botUsername || "";
+                    const cleanBotUsername = botUsernameRaw.replace(/^@/, "").trim();
 
-                            {
-                              name: "📤 Upload File / Google Drive",
-                              url: `${baseAppUrl}/drive-upload?tg_id=123456789&userId=123456789`,
-                              isNative: false,
-                              button: "🚀 Open Upload Page",
-                              description: "Used to link Google Drive accounts and upload personal files."
-                            },
-                            {
-                              name: "📁 My Content / Files Manager",
-                              url: `${baseAppUrl}/app?page=content&userId=123456789`,
-                              isNative: false,
-                              button: "📁 My Content",
-                              description: "WebApp route where users view and manage their uploaded contents."
-                            },
-                            {
-                              name: "🔗 My Links / URL Shortener",
-                              url: `${baseAppUrl}/app?page=links&userId=123456789`,
-                              isNative: false,
-                              button: "🔗 My Links",
-                              description: "The main area where users shorten URLs and manage active redirection links."
-                            },
-                            {
-                              name: "🎁 Play Daily Bonus WebApp URL",
-                              url: `${baseAppUrl}/daily-bonus?userId=123456789`,
-                              isNative: false,
-                              button: "🎁 Play Daily Bonus",
-                              description: "Enables users to play and claim their daily login streaks and rewards."
-                            },
-                            {
-                              name: "📋 Earn Rewards Task WebApp URL",
-                              url: `${baseAppUrl}/earn-rewards?userId=123456789&taskId=SAMPLE_TASK_ID`,
-                              isNative: false,
-                              button: "📋 Take a Survey / Task",
-                              description: "WebApp view launched to track and verify sponsor-task completions."
-                            },
-                            {
-                              name: "📋 Surveys WebApp URL",
-                              url: `${baseAppUrl}/surveys?userId=123456789`,
-                              isNative: false,
-                              button: "📋 Open Surveys",
-                              description: "Direct entry portal to active survey panels inside the Mini App."
-                            },
-                            {
-                              name: "❓ FAQ Support URL",
-                              url: `${baseAppUrl}/app?page=support&view=faq&userId=123456789`,
-                              isNative: false,
-                              button: "❓ FAQ",
-                              description: "Frequently Asked Questions inside the customer support interface."
-                            },
-                            {
-                              name: "🌐 Help Center Support URL",
-                              url: `${baseAppUrl}/app?page=support&userId=123456789`,
-                              isNative: false,
-                              button: "🌐 Help Center (Mini App)",
-                              description: "Launches the Mini App help desk and interactive customer support."
-                            },
-                            {
-                              name: "Main Mini App URL (Portal Root)",
-                              url: `${baseAppUrl}/`,
-                              isNative: false,
-                              button: "📱 Open Mini App",
-                              description: "The fallback base root loaded when starting the bot or clicking referral links."
-                            },
-                            {
-                              name: "📢 Announcements WebApp URL",
-                              url: "N/A (Natively Handled)",
-                              isNative: true,
-                              button: "📢 Announcements",
-                              description: "No WebApp. Handled dynamically inside Telegram chat via rich bot messages."
-                            },
-                            {
-                              name: "⚙️ Settings WebApp URL",
-                              url: "N/A (Natively Handled)",
-                              isNative: true,
-                              button: "⚙️ Settings",
-                              description: "No WebApp. Settings are fully interactive inline keyboard callback menus."
-                            }
-                          ];
+                    const urlList = [
+                      {
+                        name: "🚀 Self Earning",
+                        slug: "dashboard",
+                        isNative: false,
+                        description: "Launched by the primary '🚀 Self Earning' button inside the bot menu."
+                      },
+                      {
+                        name: "📤 Upload File / Google Drive",
+                        slug: "upload",
+                        isNative: false,
+                        description: "Used to link Google Drive accounts and upload personal files."
+                      },
+                      {
+                        name: "📁 My Content",
+                        slug: "content",
+                        isNative: false,
+                        description: "WebApp route where users view and manage their uploaded contents."
+                      },
+                      {
+                        name: "🔗 My Links",
+                        slug: "links",
+                        isNative: false,
+                        description: "The main area where users shorten URLs and manage active redirection links."
+                      },
+                      {
+                        name: "🎁 Play Daily Bonus",
+                        slug: "daily_bonus",
+                        isNative: false,
+                        description: "Enables users to play and claim their daily login streaks and rewards."
+                      },
+                      {
+                        name: "📋 Earn Rewards / Tasks",
+                        slug: "earn_rewards",
+                        isNative: false,
+                        description: "WebApp view launched to track and verify sponsor-task completions."
+                      },
+                      {
+                        name: "📊 Surveys",
+                        slug: "surveys",
+                        isNative: false,
+                        description: "Direct entry portal to active survey panels inside the Mini App."
+                      },
+                      {
+                        name: "🎉 Lucky Draw",
+                        slug: "lucky_draw",
+                        isNative: false,
+                        description: "Enables users to join and participate in lucky draw giveaways."
+                      },
+                      {
+                        name: "❓ FAQ Support",
+                        slug: "faq",
+                        isNative: false,
+                        description: "Frequently Asked Questions inside the customer support interface."
+                      },
+                      {
+                        name: "🌐 Help Center",
+                        slug: "support",
+                        isNative: false,
+                        description: "Launches the Mini App help desk and interactive customer support."
+                      },
+                      {
+                        name: "Main Mini App URL (Portal Root)",
+                        slug: "home",
+                        isNative: false,
+                        description: "The fallback base root loaded when starting the bot or clicking referral links."
+                      },
+                      {
+                        name: "📢 Announcements",
+                        isNative: true,
+                        description: "No WebApp. Handled dynamically inside Telegram chat via rich bot messages."
+                      },
+                      {
+                        name: "⚙️ Settings",
+                        isNative: true,
+                        description: "No WebApp. Settings are fully interactive inline keyboard callback menus."
+                      }
+                    ];
 
-                          return urlList.map((item, idx) => {
-                            let status = "Valid";
-                            if (!item.isNative) {
-                              if (!baseAppUrl) status = "Missing";
-                              else if ((baseAppUrl.includes("royshare.online") || baseAppUrl.includes("www.royshare.online")) && !isProductionDomain) {
-                                status = "Invalid";
-                              }
-                            }
-                            
-                            return (
-                              <tr key={idx} className="hover:bg-slate-900/35 transition-colors">
-                                <td className="px-4 py-4 max-w-xs">
-                                  <div className="font-bold text-white text-sm">{item.name}</div>
-                                  <div className="text-slate-400 text-xs mt-1">{item.description}</div>
-                                  <div className="mt-1.5 flex items-center gap-1.5">
-                                    <span className="text-[10px] text-slate-500 font-medium">Telegram Button:</span>
-                                    <span className="px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] font-mono">{item.button}</span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-4 whitespace-nowrap">
-                                  {item.isNative ? (
-                                    <span className="px-2.5 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full text-xs font-semibold">
-                                      Native Flow
-                                    </span>
-                                  ) : status === "Invalid" ? (
-                                    <span className="px-2.5 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full text-xs font-semibold flex items-center gap-1 w-fit">
-                                      <span className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping"></span>
-                                      Invalid
-                                    </span>
-                                  ) : status === "Missing" ? (
-                                    <span className="px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-xs font-semibold">
-                                      Missing
-                                    </span>
+                    return urlList.map((item, idx) => {
+                      let miniAppUrl = "";
+                      let cannotGenerateReason = "";
+
+                      if (!cleanBotUsername) {
+                        cannotGenerateReason = "Bot username missing";
+                      } else if (item.isNative) {
+                        cannotGenerateReason = "Mini App route not registered";
+                      } else if (!item.slug) {
+                        cannotGenerateReason = "StartApp slug missing";
+                      } else {
+                        miniAppUrl = `https://t.me/${cleanBotUsername}?startapp=${item.slug}`;
+                      }
+
+                      return (
+                        <div key={idx} className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4 hover:border-slate-700/80 transition-all">
+                          <div>
+                            <div className="flex items-start justify-between gap-2">
+                              <h4 className="font-bold text-white text-base tracking-tight">{item.name}</h4>
+                              {cannotGenerateReason ? (
+                                <span className="px-2 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full text-[10px] font-semibold">
+                                  {cannotGenerateReason}
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[10px] font-semibold">
+                                  Valid
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-slate-400 text-xs mt-1.5 leading-relaxed">{item.description}</p>
+                          </div>
+
+                          <div className="space-y-2 pt-2">
+                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                              Telegram Mini App URL:
+                            </span>
+                            {cannotGenerateReason ? (
+                              <div className="p-3 bg-rose-950/20 border border-rose-500/10 rounded-xl text-rose-300 text-xs font-mono break-all italic">
+                                {cannotGenerateReason}
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  readOnly
+                                  value={miniAppUrl}
+                                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 text-xs font-mono focus:outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyUrl(miniAppUrl, idx)}
+                                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 min-w-[70px]"
+                                >
+                                  {copiedIndex === idx ? (
+                                    <span className="text-emerald-400 font-bold">Copied</span>
                                   ) : (
-                                    <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-semibold flex items-center gap-1 w-fit">
-                                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                                      Valid
-                                    </span>
+                                    <>
+                                      <Copy size={12} />
+                                      <span>Copy</span>
+                                    </>
                                   )}
-                                </td>
-                                <td className="px-4 py-4 max-w-md font-mono text-xs text-slate-300">
-                                  {item.isNative ? (
-                                    <span className="text-slate-500 italic">No external WebApp URL required</span>
-                                  ) : (
-                                    <span className={`break-all ${status === "Invalid" ? "text-rose-300" : "text-slate-300"}`}>
-                                      {item.url}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-4 whitespace-nowrap text-right text-slate-300">
-                                  <div className="flex items-center justify-end gap-2">
-                                    {!item.isNative && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleCopyUrl(item.url, idx)}
-                                          className="p-2 bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700 text-slate-300 rounded-lg transition-all cursor-pointer"
-                                          title="Copy URL"
-                                        >
-                                          {copiedIndex === idx ? (
-                                            <span className="text-[10px] px-1 font-bold text-emerald-400">Copied!</span>
-                                          ) : (
-                                            <Copy size={13} />
-                                          )}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => window.open(item.url, "_blank")}
-                                          className="p-2 bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700 text-slate-300 rounded-lg transition-all cursor-pointer"
-                                          title="Test URL in New Tab"
-                                        >
-                                          <ExternalLink size={13} />
-                                        </button>
-                                      </>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          });
-                        })()}
-                      </tbody>
-                    </table>
-                  </div>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
 
