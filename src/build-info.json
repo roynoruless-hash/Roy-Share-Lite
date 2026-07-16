@@ -1,7 +1,7 @@
 {
   "buildVersion": "0.0.0",
-  "commitSha": "b2bb855",
-  "commitMessage": "Unavailable",
-  "commitDate": "Unavailable",
-  "buildDateTime": "2026-07-15 23:45 UTC"
+  "commitSha": "e4fbbe6",
+  "commitMessage": "Fix image upload to try ImgBB and fallback to Firebase Server",
+  "commitDate": "2026-07-16 00:23 UTC",
+  "buildDateTime": "2026-07-16 00:33 UTC"
 }

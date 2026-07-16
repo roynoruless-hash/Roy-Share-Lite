@@ -6377,6 +6377,76 @@ app.post("/api/admin/video-logs-action", async (req, res) => {
     }
   });
 
+  app.post("/api/admin/upload-image", express.json({ limit: "15mb" }), async (req, res) => {
+    try {
+      const { base64, folder = "giveaways" } = req.body;
+      if (!base64) {
+        return res.status(400).json({ success: false, error: "No image file provided." });
+      }
+
+      const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
+      let imgUrl = null;
+
+      // 1. Try ImgBB first
+      try {
+        const docRef = doc(db, "settings", "imgbb");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists() && docSnap.data().apiKey) {
+          const apiKey = docSnap.data().apiKey;
+          const params = new URLSearchParams();
+          params.append("image", cleanBase64);
+          
+          const response = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(apiKey)}`, {
+            method: "POST",
+            body: params
+          });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            return res.json({ success: true, url: data.data.url });
+          }
+        }
+      } catch (err) {
+        console.error("ImgBB upload error (falling back to Firebase Storage):", err);
+      }
+
+      // 2. Fallback to Firebase Storage Admin
+      try {
+        const match = base64.match(/^data:(image\/\w+);base64,/);
+        const mimeType = match ? match[1] : "image/png";
+        const ext = mimeType.split("/")[1] || "png";
+        const buffer = Buffer.from(cleanBase64, "base64");
+        
+        const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+        const bucket = getStorage().bucket();
+        const fileRef = bucket.file(fileName);
+        
+        await fileRef.save(buffer, {
+          metadata: { contentType: mimeType }
+        });
+
+        try {
+          await fileRef.makePublic();
+          imgUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+        } catch (pubErr) {
+          console.error("Failed to make public, generating signed URL instead:", pubErr);
+          const [signedUrl] = await fileRef.getSignedUrl({
+            action: 'read',
+            expires: '01-01-2100' // Far future expiry
+          });
+          imgUrl = signedUrl;
+        }
+
+        return res.json({ success: true, url: imgUrl });
+      } catch (err) {
+        console.error("Firebase Storage Admin upload error:", err);
+        return res.status(500).json({ success: false, error: "Failed to upload image via both ImgBB and Firebase." });
+      }
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+});
+
   app.post("/api/admin/imgbb/upload", express.json({ limit: "15mb" }), async (req, res) => {
     try {
       const { base64 } = req.body;
