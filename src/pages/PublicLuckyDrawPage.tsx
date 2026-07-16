@@ -258,25 +258,40 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
         campaignId: giveawayId,
         telegramId: user.telegramId
       };
-      console.log("[LuckyDraw] Sending payload to /api/lucky-draw/enroll:", payload);
+      const endpoint = "/api/upi-giveaway/lucky-draw/enroll";
+      console.log(`[LuckyDraw] Sending payload to ${endpoint}:`, payload);
       
-      const res = await fetch("/api/lucky-draw/enroll", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      
+      const responseText = await res.text();
+      console.log(`[LuckyDraw] Raw response status: ${res.status}`);
+      
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseErr) {
+        console.error("[LuckyDraw] Failed to parse enrollment response as JSON. Raw response text:", responseText);
+        setEnrollError(`Server error (${res.status}). Please try again later.`);
+        setEnrolling(false);
+        return;
+      }
+
       console.log(`[LuckyDraw] 📩 Enrollment API response received | HTTP Status: ${res.status}`, data);
 
       if (res.ok && data.success) {
-        console.log("[LuckyDraw] ✅ Successfully enrolled! Waiting for Firestore onSnapshot listener to update participationStatus.");
+        console.log("[LuckyDraw] ✅ Successfully enrolled on server. Updating UI status immediately.");
+        setParticipationStatus("enrolled"); // Update immediately to change button status to Enrolled
       } else {
         console.warn("[LuckyDraw] ❌ Enrollment rejected by server:", data.error);
         setEnrollError(data.error || "Enrollment failed. Please ensure you satisfy all rules.");
       }
     } catch (err: any) {
       console.error("[LuckyDraw] 💥 Enrollment API exception occurred:", err);
-      setEnrollError("Network error while submitting enrollment. Please try again.");
+      setEnrollError(err.message || "Network error while submitting enrollment. Please try again.");
     } finally {
       setEnrolling(false);
       console.log("[LuckyDraw] 🏁 Enrollment flow finished.");
