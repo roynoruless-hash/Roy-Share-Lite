@@ -49,6 +49,7 @@ import {
   ListFilter
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { ImageUpload } from "./ImageUpload";
 import { formatFriendlyKolkata, parseInKolkata } from "../lib/dateUtils";
 import WinnerCardGenerator from "./WinnerCardGenerator";
 import { API_BASE } from "../config/api";
@@ -1209,27 +1210,19 @@ export default function LuckyDrawWinnerManager() {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-400">Banner Image URL</label>
-                        <input
-                          type="text"
-                          value={formBannerUrl}
-                          onChange={(e) => setFormBannerUrl(e.target.value)}
-                          placeholder="https://example.com/banner.png"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:border-blue-500/50 outline-none"
-                        />
-                      </div>
+                      <ImageUpload 
+                        label="Banner Image"
+                        value={formBannerUrl}
+                        onChange={setFormBannerUrl}
+                        placeholder="https://example.com/banner.png"
+                      />
 
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-400">Thumbnail Image URL</label>
-                        <input
-                          type="text"
-                          value={formThumbnailUrl}
-                          onChange={(e) => setFormThumbnailUrl(e.target.value)}
-                          placeholder="https://example.com/thumb.png"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:border-blue-500/50 outline-none"
-                        />
-                      </div>
+                      <ImageUpload 
+                        label="Thumbnail Image"
+                        value={formThumbnailUrl}
+                        onChange={setFormThumbnailUrl}
+                        placeholder="https://example.com/thumb.png"
+                      />
                     </div>
 
                     <div className="space-y-1.5">
