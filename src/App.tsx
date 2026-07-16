@@ -112,11 +112,10 @@ export default function App() {
 
     // Check if we are in Telegram Mini App context
     const searchParams = new URLSearchParams(window.location.search);
-    const hasTgParams = searchParams.has("tgWebAppData") || searchParams.has("tgWebAppVersion") || searchParams.has("userId") || searchParams.has("tgWebAppStartParam");
-    const isTelegram = !!(window as any).Telegram?.WebApp?.initData || hasTgParams || /Telegram/i.test(navigator.userAgent);
-    const isReferralPath = window.location.pathname === "/referral";
+    const hasTgParams = searchParams.has("tgWebAppData") || searchParams.has("tgWebAppVersion") || searchParams.has("tgWebAppStartParam");
+    const isTelegram = !!(window as any).Telegram?.WebApp?.initData || hasTgParams;
 
-    if (isTelegram || isReferralPath) {
+    if (isTelegram) {
       return (
         <TelegramAuthGuard>
           <MiniAppHome />

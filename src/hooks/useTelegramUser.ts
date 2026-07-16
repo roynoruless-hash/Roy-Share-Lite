@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTelegramAuth } from "../context/TelegramAuthContext";
 
 interface TelegramUser {
   telegramId: string;
@@ -37,22 +38,63 @@ const getFingerprint = () => {
 };
 
 export function useTelegramUser(): UseTelegramUserReturn {
-  const [user, setUser] = useState<TelegramUser | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const auth = useTelegramAuth();
+  const [localUser, setLocalUser] = useState<TelegramUser | null>(null);
+  const [localLoading, setLocalLoading] = useState<boolean>(true);
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const fetchUser = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
+  const fetchFallbackUser = useCallback(async () => {
+    // If we are already authenticated via the global context, use it
+    if (auth.user) {
+      setLocalUser({
+        telegramId: String(auth.user.id || auth.user.telegramId),
+        username: auth.user.username || "no_username",
+        firstName: auth.user.firstName || "User",
+        lastName: auth.user.lastName || "",
+        photoUrl: auth.user.photoUrl || "",
+        mobile: auth.user.mobile || auth.user.phone || "",
+        isVerified: !!auth.user.phoneVerifiedInMiniApp || !!auth.user.phone || !!auth.user.mobile || true
+      });
+      setLocalLoading(false);
+      setLocalError(null);
+      return;
+    }
+
+    setLocalLoading(true);
+    setLocalError(null);
+
     const token = localStorage.getItem("rs_session_token");
     const fingerprint = getFingerprint();
     const tg = (window as any).Telegram?.WebApp;
     const initData = tg?.initData || "";
 
+    const params = new URLSearchParams(window.location.search);
+    const queryUserId = params.get("userId") || params.get("tg_id") || params.get("tgId");
+
     try {
-      // 1. Try checking existing session
+      // 1. Try checking URL parameters first (very common in browser deep links / redirects)
+      if (queryUserId) {
+        console.log("[useTelegramUser] Query parameter user ID found:", queryUserId);
+        const res = await fetch(`/api/user/profile/${queryUserId}`);
+        const data = await res.json();
+        if (data.success && data.user) {
+          console.log("[useTelegramUser] Successfully retrieved fallback profile for ID:", queryUserId);
+          setLocalUser({
+            telegramId: String(data.user.id),
+            username: data.user.username,
+            firstName: data.user.firstName || "User",
+            photoUrl: data.user.photoUrl,
+            mobile: data.user.mobile,
+            isVerified: !!data.user.phoneVerifiedInMiniApp || !!data.user.phone || !!data.user.mobile || true
+          });
+          setLocalLoading(false);
+          return;
+        }
+      }
+
+      // 2. Try checking existing legacy session token
       if (token) {
+        console.log("[useTelegramUser] Checking existing rs_session_token...");
         const res = await fetch("/api/auth/check-session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -60,33 +102,74 @@ export function useTelegramUser(): UseTelegramUserReturn {
         });
         const data = await res.json();
         if (data.success && data.user) {
-          setUser(data.user);
-          setLoading(false);
+          console.log("[useTelegramUser] Valid session verified via check-session");
+          setLocalUser(data.user);
+          setLocalLoading(false);
           return;
         } else {
           localStorage.removeItem("rs_session_token");
         }
       }
 
-      // 2. If in Telegram but no session, we could try other methods if they exist
-      // For now, we rely on the session token
+      // 3. If there is Telegram WebApp with initData, but context has not finished or failed, we can try verifying it directly as a safeguard
+      if (initData) {
+        console.log("[useTelegramUser] Telegram WebApp initData found, verifying directly...");
+        const res = await fetch("/api/auth/telegram-verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData })
+        });
+        const data = await res.json();
+        if (data.success && data.user) {
+          console.log("[useTelegramUser] Successfully verified directly via telegram-verify");
+          setLocalUser({
+            telegramId: String(data.user.id),
+            username: data.user.username,
+            firstName: data.user.firstName || "User",
+            photoUrl: data.user.photoUrl,
+            mobile: data.user.mobile,
+            isVerified: !!data.user.phoneVerifiedInMiniApp || !!data.user.phone || !!data.user.mobile || true
+          });
+          setLocalLoading(false);
+          return;
+        }
+      }
+
+      setLocalUser(null);
     } catch (err: any) {
-      console.error("[useTelegramUser] Error:", err);
-      setError(err.message || "Authentication check failed");
+      console.error("[useTelegramUser] Fallback verification error:", err);
+      setLocalError(err.message || "Authentication check failed");
     } finally {
-      setLoading(false);
+      setLocalLoading(false);
     }
-  }, []);
+  }, [auth.user]);
 
   useEffect(() => {
-    fetchUser();
-  }, [fetchUser]);
+    fetchFallbackUser();
+  }, [fetchFallbackUser]);
+
+  // Combine global auth state and local fallback state
+  const resolvedUser = auth.user ? {
+    telegramId: String(auth.user.id || auth.user.telegramId),
+    username: auth.user.username || "no_username",
+    firstName: auth.user.firstName || "User",
+    lastName: auth.user.lastName || "",
+    photoUrl: auth.user.photoUrl || "",
+    mobile: auth.user.mobile || auth.user.phone || "",
+    isVerified: !!auth.user.phoneVerifiedInMiniApp || !!auth.user.phone || !!auth.user.mobile || true
+  } : localUser;
+
+  const resolvedLoading = auth.user ? false : (auth.loading && localLoading);
+  const resolvedError = auth.user ? null : (auth.error || localError);
 
   return {
-    user,
-    loading,
-    error,
-    isAuthenticated: !!user,
-    refresh: fetchUser
+    user: resolvedUser,
+    loading: resolvedLoading,
+    error: resolvedError,
+    isAuthenticated: !!resolvedUser,
+    refresh: async () => {
+      await auth.verifyAuth();
+      await fetchFallbackUser();
+    }
   };
 }

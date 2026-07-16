@@ -79,14 +79,7 @@ export default function RewardTasksPage({ userIdProp, taskIdProp, onBack }: { us
       try {
         setLoading(true);
         const tg = (window as any).Telegram?.WebApp;
-        const isActuallyInTelegram = !!(tg && tg.initDataUnsafe?.user?.id);
         
-        if (!isActuallyInTelegram && !userIdProp) {
-          setError("Access denied: Please open this page from inside the official Telegram Mini App.");
-          setLoading(false);
-          return;
-        }
-
         // Fetch Settings & User Information
         const settingsRes = await fetch(`${API_BASE}/api/earn-rewards/settings?userId=${userId}`);
         const data = await settingsRes.json();

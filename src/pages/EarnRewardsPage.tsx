@@ -290,30 +290,6 @@ export default function EarnRewardsPage() {
     );
   }
 
-  // Universal Telegram Environment Check
-  if (!loading && !isTelegramApp && (userId || taskId)) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
-        <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mb-6 text-amber-500">
-          <AlertCircle size={40} />
-        </div>
-        <h1 className="text-2xl font-bold text-white mb-2">Telegram Mini App Required</h1>
-        <p className="text-gray-400 max-w-xs mb-8">
-          This reward page is only accessible within the official Telegram Mini App. Please open it from the Telegram bot using the Mini App button.
-        </p>
-        <button
-          onClick={() => window.location.href = `https://t.me/${botUsername}`}
-          className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center gap-2"
-        >
-          <Play size={18} className="fill-current" />
-          Open In Telegram Bot
-        </button>
-        <div className="mt-8 text-[10px] text-slate-600 font-mono">
-          Environment: Browser/Desktop Detected
-        </div>
-      </div>
-    );
-  }
 
   if (showRewardAlreadyClaimed) {
     return (
