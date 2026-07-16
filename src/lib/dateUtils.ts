@@ -110,7 +110,7 @@ export function formatFriendlyKolkata(input: any): string {
  * Adds development logs as requested in Requirement 8.
  */
 export function getGiveawayTimingStatus(giveaway: any): { 
-  status: "Draft" | "NotStarted" | "Active" | "Ended" | "Paused" | "Drawing" | "Completed";
+  status: "Draft" | "Active" | "Ended" | "Paused" | "Drawing" | "Completed";
   message: string;
 } {
   if (!giveaway) {
@@ -118,13 +118,8 @@ export function getGiveawayTimingStatus(giveaway: any): {
   }
 
   const rawStatus = giveaway.status || "Draft";
-  let startVal = giveaway.startDate;
+  
   let endVal = giveaway.endDate;
-  if (startVal && typeof startVal === "string" && giveaway.startTime) {
-    if (startVal.indexOf("T") === -1) {
-      startVal = `${startVal}T${giveaway.startTime}`;
-    }
-  }
   if (endVal && typeof endVal === "string" && giveaway.endTime) {
     if (endVal.indexOf("T") === -1) {
       endVal = `${endVal}T${giveaway.endTime}`;
@@ -132,54 +127,38 @@ export function getGiveawayTimingStatus(giveaway: any): {
   }
 
   const now = new Date();
-  const parsedStart = startVal ? parseInKolkata(startVal) : null;
   const parsedEnd = endVal ? parseInKolkata(endVal) : null;
 
-  // Requirement 8: Add console logs during development
   console.log("=== GIVEAWAY TIMING AUDIT ===");
   console.log("Giveaway ID:", giveaway.id || "N/A");
   console.log("Title:", giveaway.title);
   console.log("Current Time (UTC):", now.toISOString());
   console.log("Current Time (Kolkata Local String):", formatFriendlyKolkata(now));
-  console.log("Raw Start Date:", startVal);
-  console.log("Parsed Start Date (UTC):", parsedStart ? parsedStart.toISOString() : "N/A");
-  console.log("Parsed Start Date (Kolkata Local String):", parsedStart ? formatFriendlyKolkata(parsedStart) : "N/A");
   console.log("Raw End Date:", endVal);
   console.log("Parsed End Date (UTC):", parsedEnd ? parsedEnd.toISOString() : "N/A");
   console.log("Parsed End Date (Kolkata Local String):", parsedEnd ? formatFriendlyKolkata(parsedEnd) : "N/A");
   console.log("Firestore Status:", rawStatus);
 
   if (rawStatus === "Draft") {
-    console.log("Result: Draft - This giveaway is currently draft.");
     return { status: "Draft", message: "This giveaway is currently draft." };
   }
-
   if (rawStatus === "Paused") {
-    console.log("Result: Paused - This giveaway is currently paused.");
     return { status: "Paused", message: "This giveaway is currently paused." };
   }
-
   if (rawStatus === "Drawing Winners" || rawStatus === "Drawing") {
-    console.log("Result: Drawing Winners");
     return { status: "Drawing", message: "Winners are currently being drawn." };
   }
-
   if (rawStatus === "Completed" || giveaway.winnersDrawn) {
-    console.log("Result: Completed");
     return { status: "Completed", message: "This giveaway has been completed." };
   }
 
   // For "Live" status:
   if (rawStatus === "Live" || rawStatus === "Ended") {
-    if (parsedStart && now < parsedStart) {
-      console.log("Comparison: current < start => Not Started");
-      return { status: "NotStarted", message: "This giveaway has not started yet." };
-    }
-    if (parsedEnd && now > parsedEnd) {
-      console.log("Comparison: current > end => Ended");
+    if (parsedEnd && now >= parsedEnd) {
+      console.log("Comparison: current >= end => Ended");
       return { status: "Ended", message: "Giveaway has ended." };
     }
-    console.log("Comparison: start <= current <= end => Active");
+    console.log("Comparison: current < end => Active");
     return { status: "Active", message: "" };
   }
 
@@ -187,16 +166,9 @@ export function getGiveawayTimingStatus(giveaway: any): {
   return { status: "Draft", message: "This giveaway is currently draft." };
 }
 
-
 export function getGiveawayTimeLeft(giveaway: any) {
-  let startVal = giveaway?.startDate;
   let endVal = giveaway?.endDate;
   
-  if (startVal && typeof startVal === "string" && giveaway.startTime) {
-    if (startVal.indexOf("T") === -1) {
-      startVal = `${startVal}T${giveaway.startTime}`;
-    }
-  }
   if (endVal && typeof endVal === "string" && giveaway.endTime) {
     if (endVal.indexOf("T") === -1) {
       endVal = `${endVal}T${giveaway.endTime}`;
@@ -204,24 +176,16 @@ export function getGiveawayTimeLeft(giveaway: any) {
   }
 
   const now = new Date();
-  const parsedStart = startVal ? parseInKolkata(startVal) : null;
   const parsedEnd = endVal ? parseInKolkata(endVal) : null;
-
-  let targetDate = parsedEnd;
-  let isCountingToStart = false;
-
-  if (parsedStart && now < parsedStart) {
-    targetDate = parsedStart;
-    isCountingToStart = true;
-  }
+  const targetDate = parsedEnd;
 
   if (!targetDate) {
-    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true, isCountingToStart: false };
+    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
   }
 
   const diff = targetDate.getTime() - now.getTime();
   if (diff <= 0) {
-    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true, isCountingToStart };
+    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
   }
 
   return {
@@ -229,7 +193,6 @@ export function getGiveawayTimeLeft(giveaway: any) {
     hours: Math.floor((diff / (1000 * 60 * 60)) % 24),
     minutes: Math.floor((diff / 1000 / 60) % 60),
     seconds: Math.floor((diff / 1000) % 60),
-    isExpired: false,
-    isCountingToStart
+    isExpired: false
   };
 }

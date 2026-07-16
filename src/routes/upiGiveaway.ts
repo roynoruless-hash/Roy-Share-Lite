@@ -320,9 +320,9 @@ router.post("/submit-entry", async (req: any, res: any) => {
 // 3. Create or Update Giveaway Campaign
 router.post("/save-giveaway", async (req: any, res: any) => {
   try {
-    const { id, title, description, bannerUrl, totalBudget, totalWinners, minReward, maxReward, startDate, endDate, status, entryRules, autoPostChannel } = req.body;
+    const { id, title, description, bannerUrl, totalBudget, totalWinners, minReward, maxReward, endDate, status, entryRules, autoPostChannel } = req.body;
     
-    if (!title || !bannerUrl || !totalBudget || !totalWinners || !startDate || !endDate) {
+    if (!title || !bannerUrl || !totalBudget || !totalWinners || !endDate) {
       return res.status(400).json({ success: false, error: "Missing required giveaway configurations" });
     }
 
@@ -342,7 +342,6 @@ router.post("/save-giveaway", async (req: any, res: any) => {
       totalWinners: Number(totalWinners),
       minReward: Number(minReward),
       maxReward: Number(maxReward),
-      startDate: Timestamp.fromDate(parseInKolkata(startDate)),
       endDate: Timestamp.fromDate(parseInKolkata(endDate)),
       status: status || "Draft",
       entryRules: entryRules || {

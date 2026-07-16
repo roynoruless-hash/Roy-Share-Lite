@@ -96,9 +96,7 @@ export default function LuckyDrawWinnerManager() {
   const [formCurrency, setFormCurrency] = useState("INR");
   const [formWinnerCount, setFormWinnerCount] = useState<number>(5);
 
-  const [formStartDate, setFormStartDate] = useState("");
-  const [formStartTime, setFormStartTime] = useState("");
-  const [formEndDate, setFormEndDate] = useState("");
+      const [formEndDate, setFormEndDate] = useState("");
   const [formEndTime, setFormEndTime] = useState("");
 
   const [formRequireTgChannel, setFormRequireTgChannel] = useState(false);
@@ -329,9 +327,7 @@ export default function LuckyDrawWinnerManager() {
     // Default dates to today & tomorrow
     const today = new Date();
     const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-    setFormStartDate(today.toISOString().split("T")[0]);
-    setFormStartTime("12:00");
-    setFormEndDate(tomorrow.toISOString().split("T")[0]);
+            setFormEndDate(tomorrow.toISOString().split("T")[0]);
     setFormEndTime("12:00");
 
     setFormRequireTgChannel(false);
@@ -374,9 +370,7 @@ export default function LuckyDrawWinnerManager() {
     setFormCurrency(c.currency || "INR");
     setFormWinnerCount(c.winnerCount || 5);
 
-    setFormStartDate(c.startDate || "");
-    setFormStartTime(c.startTime || "");
-    setFormEndDate(c.endDate || "");
+            setFormEndDate(c.endDate || "");
     setFormEndTime(c.endTime || "");
 
     const rules = c.rules || {};
@@ -421,9 +415,7 @@ export default function LuckyDrawWinnerManager() {
     setFormCurrency(c.currency || "INR");
     setFormWinnerCount(c.winnerCount || 5);
 
-    setFormStartDate(c.startDate || "");
-    setFormStartTime(c.startTime || "");
-    setFormEndDate(c.endDate || "");
+            setFormEndDate(c.endDate || "");
     setFormEndTime(c.endTime || "");
 
     const rules = c.rules || {};
@@ -487,15 +479,7 @@ export default function LuckyDrawWinnerManager() {
       }
     }
 
-    // Date/Time Validations
-    if (formStartDate && formEndDate) {
-      const startDateTime = new Date(`${formStartDate}T${formStartTime || "00:00"}`);
-      const endDateTime = new Date(`${formEndDate}T${formEndTime || "00:00"}`);
-      if (endDateTime <= startDateTime) {
-        showToast("End date/time must be after the start date/time.", "error");
-        return;
-      }
-    }
+
 
     setIsSaving(true);
     try {
@@ -510,9 +494,7 @@ export default function LuckyDrawWinnerManager() {
         prizeAmount: Number(formPrizeAmount || 0),
         currency: formCurrency.trim(),
         winnerCount: Number(formWinnerCount || 1),
-        startDate: formStartDate,
-        startTime: formStartTime,
-        endDate: formEndDate,
+                        endDate: formEndDate,
         endTime: formEndTime,
         rules: {
           requireTgChannel: formRequireTgChannel,
@@ -799,8 +781,7 @@ export default function LuckyDrawWinnerManager() {
     if (statusFilter === "Ended") return c.status === "Ended";
     
     if (statusFilter === "Upcoming") {
-      const startDateTime = c.startDate && c.startTime ? new Date(`${c.startDate}T${c.startTime}`) : null;
-      return startDateTime && startDateTime > new Date() && c.status !== "Draft";
+      return false;
     }
     if (statusFilter === "Completed") {
       return c.status === "Ended" || c.winnersDrawn;
@@ -1326,27 +1307,6 @@ export default function LuckyDrawWinnerManager() {
                 {/* 3. SCHEDULE TAB */}
                 {activeTab === "schedule" && (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-400 flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-500" /> Start Date</label>
-                        <input
-                          type="date"
-                          value={formStartDate}
-                          onChange={(e) => setFormStartDate(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:border-blue-500/50 outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-400 flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-500" /> Start Time (Kolkata)</label>
-                        <input
-                          type="time"
-                          value={formStartTime}
-                          onChange={(e) => setFormStartTime(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:border-blue-500/50 outline-none font-mono"
-                        />
-                      </div>
-                    </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1.5">

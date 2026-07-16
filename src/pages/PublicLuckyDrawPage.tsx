@@ -12,7 +12,7 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
   const [giveaway, setGiveaway] = useState<any>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: false, isCountingToStart: false });
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: false });
   const [participationStatus, setParticipationStatus] = useState<"not_enrolled" | "enrolled" | "winner">("not_enrolled");
   const [winnerDetails, setWinnerDetails] = useState<any>(null);
 
@@ -34,18 +34,18 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
   }, [giveawayId]);
 
   useEffect(() => {
-    if (!user?.id || !giveawayId) return;
+    if (!user?.telegramId || !giveawayId) return;
     const checkParticipation = async () => {
       try {
         const pRef = collection(db, "lucky_draw_participants");
-        const q = query(pRef, where("campaignId", "==", giveawayId), where("telegramId", "==", String(user.id)));
+        const q = query(pRef, where("campaignId", "==", giveawayId), where("telegramId", "==", String(user.telegramId)));
         const snap = await getDocs(q);
         if (!snap.empty) {
           setParticipationStatus("enrolled");
         }
         
         const wRef = collection(db, "lucky_draw_winners");
-        const wQ = query(wRef, where("campaignId", "==", giveawayId), where("telegramId", "==", String(user.id)));
+        const wQ = query(wRef, where("campaignId", "==", giveawayId), where("telegramId", "==", String(user.telegramId)));
         const wSnap = await getDocs(wQ);
         if (!wSnap.empty) {
           setParticipationStatus("winner");
@@ -56,7 +56,7 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
       }
     };
     checkParticipation();
-  }, [giveawayId, user?.id]);
+  }, [giveawayId, user?.telegramId]);
 
   useEffect(() => {
     if (!giveaway) return;
@@ -104,32 +104,7 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
       </header>
 
       <main className="p-6 max-w-md mx-auto space-y-6 relative z-10">
-        {timing.status === "NotStarted" ? (
-          <div className="bg-blue-500/10 border border-blue-500/20 p-8 rounded-3xl text-center text-blue-400 text-sm space-y-4">
-            <Clock className="w-10 h-10 mx-auto text-blue-500" />
-            <h3 className="font-bold text-white">Giveaway Has Not Started Yet</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
-            
-            {timeLeft.isCountingToStart && (
-              <div className="pt-4">
-                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block text-center mb-2">Starts In</span>
-                <div className="grid grid-cols-4 gap-2 text-center max-w-xs mx-auto">
-                  <div className="bg-slate-950/40 p-2.5 rounded-xl border border-blue-500/20"><span className="text-lg font-black text-white block">{timeLeft.days}</span><span className="text-[9px] text-blue-400 font-bold uppercase">Days</span></div>
-                  <div className="bg-slate-950/40 p-2.5 rounded-xl border border-blue-500/20"><span className="text-lg font-black text-white block">{timeLeft.hours}</span><span className="text-[9px] text-blue-400 font-bold uppercase">Hours</span></div>
-                  <div className="bg-slate-950/40 p-2.5 rounded-xl border border-blue-500/20"><span className="text-lg font-black text-white block">{timeLeft.minutes}</span><span className="text-[9px] text-blue-400 font-bold uppercase">Mins</span></div>
-                  <div className="bg-slate-950/40 p-2.5 rounded-xl border border-blue-500/20"><span className="text-lg font-black text-white block">{timeLeft.seconds}</span><span className="text-[9px] text-blue-400 font-bold uppercase">Secs</span></div>
-                </div>
-              </div>
-            )}
-            {giveaway.startDate && (
-              <p className="text-[11px] text-slate-500 font-mono mt-4">
-                Scheduled for: {formatFriendlyKolkata(giveaway.startDate)}
-              </p>
-            )}
-          </div>
-        ) : (
-          <>
-            {giveaway && (
+        {giveaway && (
           <div className="bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative">
             <div className="h-44 w-full bg-slate-950 relative overflow-hidden">
               <img src={giveaway.bannerUrl || giveaway.thumbnailUrl || "https://images.unsplash.com/photo-1620321023374-d1a68fbc720d"} alt={giveaway.title} className="w-full h-full object-cover" />
@@ -240,8 +215,7 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
              </p>
           </div>
         )}
-          </>
-        )}
+
       </main>
     </div>
   );

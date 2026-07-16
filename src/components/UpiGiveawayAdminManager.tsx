@@ -61,8 +61,7 @@ export default function UpiGiveawayAdminManager() {
   const [formTotalWinners, setFormTotalWinners] = useState(10);
   const [formMinReward, setFormMinReward] = useState(10);
   const [formMaxReward, setFormMaxReward] = useState(100);
-  const [formStartDate, setFormStartDate] = useState("");
-  const [formEndDate, setFormEndDate] = useState("");
+    const [formEndDate, setFormEndDate] = useState("");
   const [formStatus, setFormStatus] = useState<"Draft" | "Live" | "Paused" | "Ended" | "Drawing Winners" | "Completed">("Draft");
   const [autoPostChannel, setAutoPostChannel] = useState(false);
   
@@ -195,12 +194,8 @@ export default function UpiGiveawayAdminManager() {
     if (formMinReward * formTotalWinners > formTotalBudget) {
       return setError(`Total Budget is ₹${formTotalBudget} but minimum rewards for ${formTotalWinners} winners requires at least ₹${formMinReward * formTotalWinners}. Please increase budget or reduce winners/min reward.`);
     }
-    if (!formStartDate) return setError("Start date & time is required.");
-    if (!formEndDate) return setError("End date & time is required.");
-    if (parseInKolkata(formEndDate) <= parseInKolkata(formStartDate)) {
-      return setError("End date must be after start date.");
-    }
-
+        if (!formEndDate) return setError("End date & time is required.");
+    
     try {
       const giveawayId = editingId || `giveaway_${Date.now()}`;
       
@@ -216,8 +211,7 @@ export default function UpiGiveawayAdminManager() {
           totalWinners: Number(formTotalWinners),
           minReward: Number(formMinReward),
           maxReward: Number(formMaxReward),
-          startDate: formStartDate,
-          endDate: formEndDate,
+                    endDate: formEndDate,
           status: formStatus,
           entryRules: {
             telegramLoginRequired: ruleTgLogin,
@@ -257,8 +251,7 @@ export default function UpiGiveawayAdminManager() {
     setFormTotalWinners(10);
     setFormMinReward(10);
     setFormMaxReward(100);
-    setFormStartDate("");
-    setFormEndDate("");
+        setFormEndDate("");
     setFormStatus("Draft");
     setAutoPostChannel(false);
     setRuleTgLogin(true);
@@ -281,8 +274,7 @@ export default function UpiGiveawayAdminManager() {
     setFormTotalWinners(giveaway.totalWinners || 10);
     setFormMinReward(giveaway.minReward || 10);
     setFormMaxReward(giveaway.maxReward || 100);
-    setFormStartDate(formatInKolkata(giveaway.startDate));
-    setFormEndDate(formatInKolkata(giveaway.endDate));
+        setFormEndDate(formatInKolkata(giveaway.endDate));
     setFormStatus(giveaway.status || "Draft");
     setAutoPostChannel(false);
     
@@ -770,27 +762,15 @@ export default function UpiGiveawayAdminManager() {
 
             {/* Right Col */}
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-300">Start Date & Time</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={formStartDate}
-                    onChange={(e) => setFormStartDate(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-slate-800 px-4 py-3 rounded-xl text-slate-200 focus:outline-none text-xs transition"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-300">End Date & Time</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={formEndDate}
-                    onChange={(e) => setFormEndDate(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-slate-800 px-4 py-3 rounded-xl text-slate-200 focus:outline-none text-xs transition"
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300">End Date & Time</label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={formEndDate}
+                  onChange={(e) => setFormEndDate(e.target.value)}
+                  className="w-full bg-slate-950/80 border border-slate-800 px-4 py-3 rounded-xl text-slate-200 focus:outline-none text-xs transition"
+                />
               </div>
 
               <div className="space-y-1">
