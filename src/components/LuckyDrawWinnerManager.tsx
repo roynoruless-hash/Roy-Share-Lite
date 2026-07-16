@@ -78,6 +78,7 @@ export default function LuckyDrawWinnerManager() {
 
   // --- COMPONENT MODALS & FORM STATES ---
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit" | "duplicate">("create");
   const [activeTab, setActiveTab] = useState<'basic' | 'prize' | 'schedule' | 'rules' | 'advanced'>('basic');
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -454,6 +455,7 @@ export default function LuckyDrawWinnerManager() {
   // Save Giveaway Doc
   const handleSaveGiveaway = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
 
     // Validations
     if (!formTitle.trim()) {
@@ -463,6 +465,16 @@ export default function LuckyDrawWinnerManager() {
 
     if (!formId.trim()) {
       showToast("Campaign ID cannot be empty.", "error");
+      return;
+    }
+
+    if (!formPrizeAmount || formPrizeAmount <= 0) {
+      showToast("Please enter a valid Prize Amount greater than 0.", "error");
+      return;
+    }
+
+    if (!formWinnerCount || formWinnerCount <= 0) {
+      showToast("Please enter a valid Total Winners count greater than 0.", "error");
       return;
     }
 
@@ -485,6 +497,7 @@ export default function LuckyDrawWinnerManager() {
       }
     }
 
+    setIsSaving(true);
     try {
       const docRef = doc(db, "lucky_draws", formId.trim());
       const payload = {
@@ -536,6 +549,8 @@ export default function LuckyDrawWinnerManager() {
     } catch (err: any) {
       console.error("[LuckyDraw] Save error:", err);
       showToast("Failed to save Campaign: " + err.message, "error");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -825,7 +840,7 @@ export default function LuckyDrawWinnerManager() {
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-6 right-6 z-50 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 backdrop-blur-md border ${
+            className={`fixed top-6 right-6 z-[9999] px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 backdrop-blur-md border ${
               toast.type === "success" 
                 ? "bg-emerald-950/80 border-emerald-500/30 text-emerald-300"
                 : toast.type === "error"
@@ -1599,10 +1614,15 @@ export default function LuckyDrawWinnerManager() {
                   Cancel
                 </button>
                 <button
+                  disabled={isSaving}
                   onClick={handleSaveGiveaway}
-                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition shadow-lg shadow-blue-500/10 cursor-pointer"
+                  className={`px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition shadow-lg shadow-blue-500/10 cursor-pointer flex items-center justify-center gap-2 ${isSaving ? "opacity-70 cursor-not-allowed" : ""}`}
                 >
-                  Save Changes
+                  {isSaving ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Saving...
+                    </>
+                  ) : "Save Changes"}
                 </button>
               </div>
 
