@@ -106,8 +106,57 @@ export function formatFriendlyKolkata(input: any): string {
 }
 
 /**
- * Gets the current status of the giveaway based on dates and status field.
- * Adds development logs as requested in Requirement 8.
+ * Create one function: getGiveawayStatus(giveaway)
+ * Return only:
+ * - LIVE
+ * - ENDED
+ * 
+ * Logic:
+ * if(now < endTimestamp)
+ *     LIVE
+ * else
+ *     ENDED
+ */
+export function getGiveawayStatus(giveaway: any): "LIVE" | "ENDED" {
+  if (!giveaway) {
+    console.log("[getGiveawayStatus] No giveaway data provided => ENDED");
+    return "ENDED";
+  }
+
+  let endVal = giveaway.endDate;
+  if (!endVal) {
+    console.log("[getGiveawayStatus] No endDate found on giveaway => ENDED");
+    return "ENDED";
+  }
+
+  // Handle case where we have separate endDate and endTime strings
+  if (typeof endVal === "string" && giveaway.endTime && endVal.indexOf("T") === -1) {
+    endVal = `${endVal}T${giveaway.endTime}`;
+  }
+
+  const now = new Date();
+  const parsedEnd = parseInKolkata(endVal);
+
+  console.log("[getGiveawayStatus] Evaluating giveaway state:", {
+    id: giveaway.id || "N/A",
+    title: giveaway.title,
+    now: now.toISOString(),
+    parsedEnd: parsedEnd.toISOString(),
+    currentTimeFriendly: formatFriendlyKolkata(now),
+    endTimeFriendly: formatFriendlyKolkata(parsedEnd),
+  });
+
+  if (now.getTime() < parsedEnd.getTime()) {
+    console.log("[getGiveawayStatus] Outcome: LIVE");
+    return "LIVE";
+  } else {
+    console.log("[getGiveawayStatus] Outcome: ENDED");
+    return "ENDED";
+  }
+}
+
+/**
+ * Gets the current status of the giveaway based on getGiveawayStatus helper.
  */
 export function getGiveawayTimingStatus(giveaway: any): { 
   status: "Draft" | "Active" | "Ended" | "Paused" | "Drawing" | "Completed";
@@ -117,53 +166,12 @@ export function getGiveawayTimingStatus(giveaway: any): {
     return { status: "Draft", message: "Giveaway not loaded" };
   }
 
-  const rawStatus = giveaway.status || "Draft";
-  
-  let endVal = giveaway.endDate;
-  if (endVal && typeof endVal === "string" && giveaway.endTime) {
-    if (endVal.indexOf("T") === -1) {
-      endVal = `${endVal}T${giveaway.endTime}`;
-    }
-  }
-
-  const now = new Date();
-  const parsedEnd = endVal ? parseInKolkata(endVal) : null;
-
-  console.log("=== GIVEAWAY TIMING AUDIT ===");
-  console.log("Giveaway ID:", giveaway.id || "N/A");
-  console.log("Title:", giveaway.title);
-  console.log("Current Time (UTC):", now.toISOString());
-  console.log("Current Time (Kolkata Local String):", formatFriendlyKolkata(now));
-  console.log("Raw End Date:", endVal);
-  console.log("Parsed End Date (UTC):", parsedEnd ? parsedEnd.toISOString() : "N/A");
-  console.log("Parsed End Date (Kolkata Local String):", parsedEnd ? formatFriendlyKolkata(parsedEnd) : "N/A");
-  console.log("Firestore Status:", rawStatus);
-
-  if (rawStatus === "Draft") {
-    return { status: "Draft", message: "This giveaway is currently draft." };
-  }
-  if (rawStatus === "Paused") {
-    return { status: "Paused", message: "This giveaway is currently paused." };
-  }
-  if (rawStatus === "Drawing Winners" || rawStatus === "Drawing") {
-    return { status: "Drawing", message: "Winners are currently being drawn." };
-  }
-  if (rawStatus === "Completed" || giveaway.winnersDrawn) {
-    return { status: "Completed", message: "This giveaway has been completed." };
-  }
-
-  // For "Live" status:
-  if (rawStatus === "Live" || rawStatus === "Ended") {
-    if (parsedEnd && now >= parsedEnd) {
-      console.log("Comparison: current >= end => Ended");
-      return { status: "Ended", message: "Giveaway has ended." };
-    }
-    console.log("Comparison: current < end => Active");
+  const status = getGiveawayStatus(giveaway);
+  if (status === "LIVE") {
     return { status: "Active", message: "" };
+  } else {
+    return { status: "Ended", message: "Giveaway has ended." };
   }
-
-  console.log("Result: Draft (Fallback)");
-  return { status: "Draft", message: "This giveaway is currently draft." };
 }
 
 export function getGiveawayTimeLeft(giveaway: any) {

@@ -45,6 +45,7 @@ import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, wher
 import upiGiveawayRouter from "./src/routes/upiGiveaway";
 import { adjustTrustScore } from "./src/lib/trustScore";
 import { evaluateReward, getEconomySettings, saveEconomySettings } from "./src/lib/economy";
+import { getGiveawayStatus } from "./src/lib/dateUtils";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "royshare_aes_256_encryption_key_32bytes_long!";
 const hashKey = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
@@ -1401,6 +1402,119 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
     } catch (e: any) {
       console.error("Membership verification error:", e);
       res.status(500).json({ error: e.message || "Verification failed" });
+    }
+  });
+
+  // 🍀 Lucky Draw Enrollment Endpoint
+  app.post("/api/lucky-draw/enroll", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
+    try {
+      const { campaignId, telegramId } = req.body;
+      console.log(`[${requestId}] [Enroll API] START | campaignId: ${campaignId}, telegramId: ${telegramId}`);
+
+      if (!campaignId || !telegramId) {
+        console.log(`[${requestId}] [Enroll API] ERROR | Missing campaignId or telegramId`);
+        return res.status(400).json({ success: false, error: "Missing campaignId or telegramId" });
+      }
+
+      // 1. Fetch user document from "users" collection
+      const userRef = doc(db, "users", String(telegramId));
+      const userSnap = await firestoreGetDoc(userRef);
+      if (!userSnap.exists()) {
+        console.log(`[${requestId}] [Enroll API] ERROR | User profile not found: ${telegramId}`);
+        return res.status(404).json({ success: false, error: "User profile not found. Please verify membership first." });
+      }
+      const u = userSnap.data();
+
+      // 2. Fetch campaign document from "lucky_draws" collection
+      const campaignRef = doc(db, "lucky_draws", campaignId);
+      const campaignSnap = await firestoreGetDoc(campaignRef);
+      if (!campaignSnap.exists()) {
+        console.log(`[${requestId}] [Enroll API] ERROR | Campaign not found: ${campaignId}`);
+        return res.status(404).json({ success: false, error: "Lucky Draw campaign not found." });
+      }
+      const c = campaignSnap.data();
+
+      // Check status using getGiveawayStatus as the single source of truth
+      const campaignStatus = getGiveawayStatus({ id: campaignId, ...c });
+      if (campaignStatus !== "LIVE") {
+        console.log(`[${requestId}] [Enroll API] ERROR | Campaign status evaluated as: ${campaignStatus}`);
+        return res.status(400).json({ success: false, error: "This campaign has ended or is not live." });
+      }
+
+      // 3. Evaluate eligibility
+      const rules = c.rules || {};
+      const reasons: string[] = [];
+
+      const pObj = {
+        membershipVerified: !!u.membershipVerified,
+        referralCount: Number(u.referrals || 0),
+        rewardTasksCompleted: Number(u.tasksCompleted || 0),
+        isVerified: !!u.verified,
+        isWalletConnected: !!(u.walletAddress || u.isWalletConnected),
+        isMobileVerified: !!(u.phone || u.isMobileVerified),
+        isEmailVerified: !!(u.email || u.isEmailVerified),
+      };
+
+      console.log(`[${requestId}] [Enroll API] Checking eligibility for ${telegramId}:`, pObj);
+
+      if (rules.requireTgChannel && !pObj.membershipVerified) {
+        reasons.push("Telegram Channel not joined");
+      }
+      if (rules.requireTgGroup && !pObj.membershipVerified) {
+        reasons.push("Telegram Group not joined");
+      }
+      if (rules.minReferrals && pObj.referralCount < Number(rules.minReferrals)) {
+        reasons.push(`Under ${rules.minReferrals} referrals (has ${pObj.referralCount})`);
+      }
+      if (rules.minRewardTasks && pObj.rewardTasksCompleted < Number(rules.minRewardTasks)) {
+        reasons.push(`Under ${rules.minRewardTasks} reward tasks completed (has ${pObj.rewardTasksCompleted})`);
+      }
+      if (rules.requireAccountVerification && !pObj.isVerified) {
+        reasons.push("Account not verified");
+      }
+      if (rules.requireWalletConnected && !pObj.isWalletConnected) {
+        reasons.push("Wallet not connected");
+      }
+      if (rules.requireMobileVerification && !pObj.isMobileVerified) {
+        reasons.push("Mobile not verified");
+      }
+      if (rules.requireEmailVerification && !pObj.isEmailVerified) {
+        reasons.push("Email not verified");
+      }
+
+      const isEligible = reasons.length === 0;
+      console.log(`[${requestId}] [Enroll API] Eligibility check results: isEligible: ${isEligible}, reasons:`, reasons);
+
+      if (!isEligible) {
+        console.warn(`[${requestId}] [Enroll API] ERROR | Requirements not met:`, reasons);
+        return res.status(400).json({ success: false, error: "Requirements not met: " + reasons.join(", ") });
+      }
+
+      // 4. Create participant document in "lucky_draw_participants"
+      console.log(`[${requestId}] [Enroll API] Creating participant doc: ${campaignId}_${telegramId}`);
+      const participantRef = doc(db, "lucky_draw_participants", `${campaignId}_${telegramId}`);
+      await setDoc(participantRef, {
+        campaignId,
+        telegramId: String(telegramId),
+        name: `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.enteredName || "Anonymous User",
+        username: u.username || "no_username",
+        joinedAt: new Date().toISOString(),
+        referralCount: pObj.referralCount,
+        rewardTasksCompleted: pObj.rewardTasksCompleted,
+        isVerified: pObj.isVerified,
+        isWalletConnected: pObj.isWalletConnected,
+        isMobileVerified: pObj.isMobileVerified,
+        isEmailVerified: pObj.isEmailVerified,
+        isEligible,
+        eligibilityReasons: reasons
+      });
+
+      console.log(`[${requestId}] [Enroll API] SUCCESS | Participant document created for user: ${telegramId}`);
+      return res.json({ success: true, isEligible, reasons });
+    } catch (e: any) {
+      console.error(`[${requestId}] [Enroll API] FATAL ERROR:`, e);
+      return res.status(500).json({ success: false, error: e.message || "Enrollment failed" });
     }
   });
 
@@ -10385,7 +10499,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         success: true, 
         authenticated: true,
         user: {
-          telegramId: userData.telegramId,
+          telegramId: userData.telegramId || sessionData.userId,
           username: userData.username || "no_username",
           firstName: userData.firstName || "User",
           mobile: userData.mobile,
@@ -10622,6 +10736,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         const pendingWithdrawals = uData?.pendingWithdrawals || 0;
 
         finalNewBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + realRewardBalance - withdrawnAmount - pendingWithdrawals;
+        
+        await setDoc(userDocRef, {
+          tasksCompleted: (uData.tasksCompleted || 0) + 1
+        }, { merge: true });
       } else if (isSb) {
         const shadowRewardBalance = (uData.shadowRewardBalance || 0) + amount;
         const shadowAvailableBalance = (uData.shadowAvailableBalance || 0) + amount;
@@ -10634,7 +10752,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           shadowAvailableBalance,
           shadowEarnings,
           shadowTotalEarnings,
-          shadowBalance
+          shadowBalance,
+          tasksCompleted: (uData.tasksCompleted || 0) + 1
         }, { merge: true });
 
         await addDoc(collection(db, "shadow_blocked_rewards"), {
@@ -10671,7 +10790,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         await setDoc(userDocRef, {
           rewardBalance,
           availableBalance: finalNewBalance,
-          earnings
+          earnings,
+          tasksCompleted: (uData.tasksCompleted || 0) + 1
         }, { merge: true });
 
         // Increase Trust Score for Completed Task (+2)

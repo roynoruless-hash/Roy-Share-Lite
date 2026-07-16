@@ -21,7 +21,7 @@ import {
   Eye
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { parseInKolkata, formatFriendlyKolkata, getGiveawayTimingStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
+import { parseInKolkata, formatFriendlyKolkata, getGiveawayStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
 
 interface PublicUpiGiveawayPageProps {
   giveawayId: string;
@@ -296,8 +296,8 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack }: PublicUpiG
   const allowUpiInput = giveaway.entryRules?.allowUpiId ?? true;
   const allowQrUpload = giveaway.entryRules?.allowQrUpload ?? true;
   
-  const timing = getGiveawayTimingStatus(giveaway);
-  const giveawayIsEnded = timing.status === "Ended" || timing.status === "Completed" || timing.status === "Drawing";
+  const status = getGiveawayStatus(giveaway);
+  const giveawayIsEnded = status === "ENDED";
 
   return (
     <div className="min-h-screen bg-[#020617] text-white pb-16 font-sans relative overflow-x-hidden">
@@ -474,39 +474,12 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack }: PublicUpiG
 
           </div>
         ) : (() => {
-          if (timing.status === "Draft") {
-            return (
-              <div className="bg-amber-500/10 border border-amber-500/20 p-8 rounded-3xl text-center text-amber-400 text-sm space-y-3">
-                <AlertCircle className="w-10 h-10 mx-auto text-amber-500 animate-pulse" />
-                <h3 className="font-bold text-white">Giveaway Draft</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
-              </div>
-            );
-          }
-          if (timing.status === "Paused") {
-            return (
-              <div className="bg-amber-500/10 border border-amber-500/20 p-8 rounded-3xl text-center text-amber-400 text-sm space-y-3">
-                <AlertCircle className="w-10 h-10 mx-auto text-amber-500" />
-                <h3 className="font-bold text-white">Giveaway Paused</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
-              </div>
-            );
-          }
-          if (timing.status === "Ended") {
+          if (status === "ENDED") {
             return (
               <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-3xl text-center text-red-400 text-sm space-y-3">
                 <AlertCircle className="w-10 h-10 mx-auto text-red-500" />
                 <h3 className="font-bold text-white">Giveaway Ended</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
-              </div>
-            );
-          }
-          if (timing.status === "Completed" || timing.status === "Drawing") {
-            return (
-              <div className="bg-purple-500/10 border border-purple-500/20 p-8 rounded-3xl text-center text-purple-400 text-sm space-y-3">
-                <Trophy className="w-10 h-10 mx-auto text-purple-500" />
-                <h3 className="font-bold text-white">Campaign Closed</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">{timing.message}</p>
+                <p className="text-xs text-slate-400 leading-relaxed">This Giveaway has ended.</p>
               </div>
             );
           }

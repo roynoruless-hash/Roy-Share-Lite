@@ -19,7 +19,7 @@ import {
   writeBatch,
   Timestamp
 } from "firebase/firestore";
-import { parseInKolkata, getGiveawayTimingStatus } from "../lib/dateUtils";
+import { parseInKolkata, getGiveawayStatus } from "../lib/dateUtils";
 
 const router = express.Router();
 
@@ -198,6 +198,152 @@ router.post("/upload", express.json({ limit: "15mb" }), async (req: any, res: an
   }
 });
 
+// Enroll User in Lucky Draw Campaign
+router.post("/lucky-draw/enroll", async (req: any, res: any) => {
+  try {
+    const { campaignId, telegramId } = req.body;
+    console.log(`[LuckyDraw Enroll API] Received request for campaignId: ${campaignId}, telegramId: ${telegramId}`);
+
+    if (!campaignId || !telegramId) {
+      console.log(`[LuckyDraw Enroll API] Error: Missing campaignId or telegramId`);
+      return res.status(400).json({ success: false, error: "Missing campaignId or telegramId" });
+    }
+
+    // 1. Fetch Lucky Draw Campaign
+    const campaignDocRef = doc(db, "lucky_draws", campaignId);
+    const campaignDoc = await getDoc(campaignDocRef);
+    if (!campaignDoc.exists()) {
+      console.log(`[LuckyDraw Enroll API] Error: Lucky Draw Campaign not found for ID: ${campaignId}`);
+      return res.status(404).json({ success: false, error: "Lucky Draw campaign not found." });
+    }
+
+    const campaign = campaignDoc.data();
+
+    // 2. Validate using getGiveawayStatus
+    const currentStatus = getGiveawayStatus({ id: campaignId, ...campaign });
+    console.log(`[LuckyDraw Enroll API] Campaign current status evaluated as: ${currentStatus}`);
+    if (currentStatus !== "LIVE") {
+      console.log(`[LuckyDraw Enroll API] Error: Lucky Draw Campaign is not active. Status: ${currentStatus}`);
+      return res.status(400).json({ success: false, error: "This Lucky Draw campaign is not live or has already closed." });
+    }
+
+    // 3. Fetch User
+    const userDocRef = doc(db, "users", String(telegramId));
+    const userDoc = await getDoc(userDocRef);
+    if (!userDoc.exists()) {
+      console.log(`[LuckyDraw Enroll API] Error: User not found in database for Telegram ID: ${telegramId}`);
+      return res.status(404).json({ success: false, error: "User profile not found. Please log in through Telegram." });
+    }
+
+    const u = userDoc.data();
+    console.log(`[LuckyDraw Enroll API] Found user profile:`, {
+      telegramId,
+      username: u.username,
+      firstName: u.firstName,
+      membershipVerified: u.membershipVerified,
+      referrals: u.referrals || 0,
+      tasksCompleted: u.tasksCompleted || 0,
+    });
+
+    // 4. Verify Eligibility Rules
+    const rules = campaign.rules || {};
+    const reasons: string[] = [];
+
+    // Rule: Require Telegram Channel Membership
+    if (rules.requireTgChannel && !u.membershipVerified) {
+      console.log(`[LuckyDraw Enroll API] Rule failed: requireTgChannel`);
+      reasons.push("You must join our official Telegram Channel to participate.");
+    }
+
+    // Rule: Require Telegram Group Membership
+    if (rules.requireTgGroup && !u.membershipVerified) {
+      console.log(`[LuckyDraw Enroll API] Rule failed: requireTgGroup`);
+      reasons.push("You must join our official Telegram Group to participate.");
+    }
+
+    // Rule: Minimum Referrals
+    const minRefs = Number(rules.minReferrals || 0);
+    const userRefs = Number(u.referrals || 0);
+    if (minRefs > 0 && userRefs < minRefs) {
+      console.log(`[LuckyDraw Enroll API] Rule failed: minReferrals. Required: ${minRefs}, Has: ${userRefs}`);
+      reasons.push(`Minimum of ${minRefs} referrals required (you have ${userRefs}).`);
+    }
+
+    // Rule: Minimum Tasks Completed
+    const minTasks = Number(rules.minRewardTasks || 0);
+    const userTasks = Number(u.tasksCompleted || 0);
+    if (minTasks > 0 && userTasks < minTasks) {
+      console.log(`[LuckyDraw Enroll API] Rule failed: minRewardTasks. Required: ${minTasks}, Has: ${userTasks}`);
+      reasons.push(`Minimum of ${minTasks} reward tasks completed required (you have ${userTasks}).`);
+    }
+
+    // Rule: Account Verification
+    if (rules.requireAccountVerification && !u.verified) {
+      console.log(`[LuckyDraw Enroll API] Rule failed: requireAccountVerification`);
+      reasons.push("Your account must be fully verified by our team.");
+    }
+
+    // Rule: Wallet Connected
+    if (rules.requireWalletConnected && !(u.walletAddress || u.isWalletConnected)) {
+      console.log(`[LuckyDraw Enroll API] Rule failed: requireWalletConnected`);
+      reasons.push("You must connect your withdrawal wallet address.");
+    }
+
+    // Rule: Mobile Verified
+    if (rules.requireMobileVerification && !(u.phone || u.isMobileVerified)) {
+      console.log(`[LuckyDraw Enroll API] Rule failed: requireMobileVerification`);
+      reasons.push("Your phone number must be verified.");
+    }
+
+    // Rule: Email Verified
+    if (rules.requireEmailVerification && !(u.email || u.isEmailVerified)) {
+      console.log(`[LuckyDraw Enroll API] Rule failed: requireEmailVerification`);
+      reasons.push("Your email address must be verified.");
+    }
+
+    if (reasons.length > 0) {
+      console.log(`[LuckyDraw Enroll API] User is not eligible. Reasons:`, reasons);
+      return res.status(400).json({ success: false, error: reasons.join(" ") });
+    }
+
+    // 5. Register participant
+    const participantId = `${campaignId}_${telegramId}`;
+    const participantRef = doc(db, "lucky_draw_participants", participantId);
+    
+    await setDoc(participantRef, {
+      campaignId,
+      telegramId: String(telegramId),
+      name: `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.enteredName || "Anonymous User",
+      username: u.username || "no_username",
+      joinedAt: new Date().toISOString(),
+      referralCount: userRefs,
+      rewardTasksCompleted: userTasks,
+      isVerified: !!u.verified,
+      isWalletConnected: !!(u.walletAddress || u.isWalletConnected),
+      isMobileVerified: !!(u.phone || u.isMobileVerified),
+      isEmailVerified: !!(u.email || u.isEmailVerified),
+      isEligible: true,
+      eligibilityReasons: []
+    });
+
+    console.log(`[LuckyDraw Enroll API] Successfully enrolled user in Lucky Draw. Participant doc created.`);
+
+    // Send Telegram Confirmation Message
+    const messageText = `🎉 <b>You have successfully joined the Lucky Draw!</b>\n\n` +
+      `Campaign: <b>${campaign.title}</b>\n` +
+      `Status: <b>Enrolled 🍀</b>\n\n` +
+      `We will notify you instantly if you are randomly selected as a winner! Good luck! 🍀`;
+    
+    await sendTgMessage(String(telegramId), messageText);
+
+    return res.json({ success: true, message: "Successfully enrolled in this Lucky Draw!" });
+
+  } catch (err: any) {
+    console.error("[LuckyDraw Enroll API] Critical Error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to enroll in Lucky Draw" });
+  }
+});
+
 // 2. Submit Entry to UPI Giveaway
 router.post("/submit-entry", async (req: any, res: any) => {
   try {
@@ -215,10 +361,10 @@ router.post("/submit-entry", async (req: any, res: any) => {
 
     const giveaway = giveawayDoc.data();
     
-    // Validate status and dates using getGiveawayTimingStatus
-    const timingStatus = getGiveawayTimingStatus({ id: giveawayDoc.id, ...giveaway });
-    if (timingStatus.status !== "Active") {
-      return res.status(400).json({ success: false, error: timingStatus.message });
+    // Validate status and dates using getGiveawayStatus
+    const currentStatus = getGiveawayStatus({ id: giveawayDoc.id, ...giveaway });
+    if (currentStatus !== "LIVE") {
+      return res.status(400).json({ success: false, error: "This giveaway is not active or has already closed." });
     }
 
     // Check Duplicate Telegram ID & accounts for SAME giveaway (Always active to prevent multi-entries)
