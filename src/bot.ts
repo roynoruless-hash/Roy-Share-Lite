@@ -40,11 +40,8 @@ function getAppUrl(): string {
 }
 
 function getMiniAppUrl(pathAndQuery: string): string {
-    const rawAppUrl = process.env.APP_URL || "https://www.royshare.online";
-    const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
-      ? rawAppUrl 
-      : "https://www.royshare.online";
-    return `${appUrl.replace(/\/$/, "")}${pathAndQuery}`;
+    const rawAppUrl = process.env.APP_URL || "https://royshare.online";
+    return `${rawAppUrl.replace(/\/$/, "")}${pathAndQuery}`;
 }
 
 async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
@@ -2605,7 +2602,7 @@ function getMainMenuKeyboard(userId?: string | number) {
     const userIdQuery = userId ? `&userId=${userId}` : "";
     return {
         keyboard: [
-            [{ text: "🚀 Self Earning", web_app: { url: userId ? `${appUrl}/?userId=${userId}` : appUrl } }],
+            [{ text: "🚀 Self Earning", web_app: { url: userId ? `${appUrl}/app?userId=${userId}` : `${appUrl}/app` } }],
             [
                 { text: "📤 Upload File" },
                 { text: "🔗 URL Shortener" }
