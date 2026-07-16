@@ -65,6 +65,7 @@ const SettingsPage = lazy(() => import("./SettingsPage"));
 const ShortenPage = lazy(() => import("./ShortenPage"));
 const RewardEarningsPage = lazy(() => import("./RewardEarningsPage"));
 const PublicUpiGiveawayPage = lazy(() => import("./PublicUpiGiveawayPage"));
+const PublicLuckyDrawPage = lazy(() => import("./PublicLuckyDrawPage"));
 
 interface MembershipVerificationProps {
   user: any;
@@ -515,7 +516,7 @@ export const MiniAppHome: React.FC = () => {
       } else if (!startParam.startsWith("ref_") && !startParam.startsWith("gift_")) {
         console.log(`[MiniAppHome] Direct deep link detected for giveaway: ${startParam}`);
         setHasCheckedDeepLink(true);
-        setCurrentView(`upi-${startParam}`);
+        if (startParam.startsWith("LD-")) { setCurrentView(`lucky-${startParam}`); } else if (startParam.startsWith("lucky_")) { setCurrentView(`lucky-${startParam.replace("lucky_", "")}`); } else { setCurrentView(`upi-${startParam}`); }
       }
     }
   }, [activeUser?.membershipVerified, isPhoneVerified, startParam, hasCheckedDeepLink]);
@@ -1102,6 +1103,11 @@ export const MiniAppHome: React.FC = () => {
 
 
 
+        {currentView.startsWith("lucky-") && (
+          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+            <PublicLuckyDrawPage giveawayId={currentView.replace("lucky-", "")} onBack={() => setCurrentView("home")} />
+          </Suspense>
+        )}
         {currentView.startsWith("upi-") && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
             <PublicUpiGiveawayPage giveawayId={currentView.replace("upi-", "")} onBack={() => setCurrentView("home")} />
