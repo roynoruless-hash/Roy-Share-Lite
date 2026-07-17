@@ -4,6 +4,7 @@ import { db } from "../lib/firebase";
 import { doc, onSnapshot, collection, query, where, getDocs } from "firebase/firestore";
 import { useTelegramUser } from "../hooks/useTelegramUser";
 import { parseInKolkata, formatFriendlyKolkata, getGiveawayStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
+import { getAdsgramConfig } from "../lib/adsManager";
 
 export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId: string; onBack: () => void }) {
   const { user } = useTelegramUser();
@@ -358,12 +359,20 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     
     let activeBlockId = "3856"; // Default/fallback to Adsgram test block ID
     try {
-      const configRes = await fetch("/api/adsgram-settings");
-      if (configRes.ok) {
-        const configData = await configRes.json();
-        if (configData.success && configData.settings?.adsgramBlockId) {
-          activeBlockId = configData.settings.adsgramBlockId;
-          console.log("[LuckyDraw] Loaded active Adsgram block ID from database:", activeBlockId);
+      const adType = giveaway?.adsgramType || "Reward";
+      console.log(`[LuckyDraw] Loading Adsgram configuration for type: ${adType}`);
+      const config = await getAdsgramConfig(adType);
+      if (config && config.blockId) {
+        activeBlockId = config.blockId;
+        console.log(`[LuckyDraw] Loaded active Adsgram block ID from database for "${adType}":`, activeBlockId);
+      } else {
+        const configRes = await fetch("/api/adsgram-settings");
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          if (configData.success && configData.settings?.adsgramBlockId) {
+            activeBlockId = configData.settings.adsgramBlockId;
+            console.log("[LuckyDraw] Loaded active Adsgram block ID from database:", activeBlockId);
+          }
         }
       }
     } catch (e) {

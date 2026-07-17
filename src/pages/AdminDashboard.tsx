@@ -419,6 +419,16 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [testStatus, setTestStatus] = useState("");
   const [testLoading, setTestLoading] = useState(false);
 
+  // New Adsgram separate types configurations
+  const [adsgramConfigs, setAdsgramConfigs] = useState<any>({
+    reward: { appId: "", blockId: "", lastSaved: "", lastTested: "", lastTestResult: "" },
+    interstitial: { appId: "", blockId: "", lastSaved: "", lastTested: "", lastTestResult: "" },
+    task: { appId: "", blockId: "", lastSaved: "", lastTested: "", lastTestResult: "" }
+  });
+  const [activeAdTab, setActiveAdTab] = useState<"reward" | "interstitial" | "task" | string>("reward");
+  const [testingType, setTestingType] = useState<string | null>(null);
+  const [testResultMsg, setTestResultMsg] = useState<{ [key: string]: { status: "Success" | "Failed"; text: string } }>({});
+
   const fetchAdsgramSettings = async () => {
     setAdsgramLoading(true);
     setAdsgramError("");
@@ -431,6 +441,29 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             adsgramAppId: data.settings.adsgramAppId || "",
             adsgramBlockId: data.settings.adsgramBlockId || "",
             lastCallbackTime: data.settings.lastCallbackTime || ""
+          });
+          setAdsgramConfigs({
+            reward: {
+              appId: data.settings.reward?.appId || data.settings.adsgramAppId || "",
+              blockId: data.settings.reward?.blockId || data.settings.adsgramBlockId || "",
+              lastSaved: data.settings.reward?.lastSaved || "",
+              lastTested: data.settings.reward?.lastTested || "",
+              lastTestResult: data.settings.reward?.lastTestResult || ""
+            },
+            interstitial: {
+              appId: data.settings.interstitial?.appId || "",
+              blockId: data.settings.interstitial?.blockId || "",
+              lastSaved: data.settings.interstitial?.lastSaved || "",
+              lastTested: data.settings.interstitial?.lastTested || "",
+              lastTestResult: data.settings.interstitial?.lastTestResult || ""
+            },
+            task: {
+              appId: data.settings.task?.appId || "",
+              blockId: data.settings.task?.blockId || "",
+              lastSaved: data.settings.task?.lastSaved || "",
+              lastTested: data.settings.task?.lastTested || "",
+              lastTestResult: data.settings.task?.lastTestResult || ""
+            }
           });
         }
       } else {
@@ -469,6 +502,161 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       setAdsgramError(err.message || "Failed to save Adsgram settings");
     } finally {
       setAdsgramSaving(false);
+    }
+  };
+
+  const saveAdsgramTypeSettings = async (type: "reward" | "interstitial" | "task") => {
+    const config = adsgramConfigs[type];
+    if (!config.appId.trim()) {
+      alert("App ID cannot be empty.");
+      return;
+    }
+    if (!config.blockId.trim()) {
+      alert("Block ID cannot be empty.");
+      return;
+    }
+
+    setAdsgramSaving(true);
+    setAdsgramSuccess("");
+    setAdsgramError("");
+    try {
+      // Validate duplicate saves by fetching database state
+      const checkRes = await authenticatedFetch("/api/admin/adsgram-settings");
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        if (checkData.success && checkData.settings) {
+          const dbConfig = checkData.settings[type] || {};
+          const isAppIdDuplicate = (dbConfig.appId || "").trim() === config.appId.trim();
+          const isBlockIdDuplicate = (dbConfig.blockId || "").trim() === config.blockId.trim();
+          
+          if (isAppIdDuplicate && isBlockIdDuplicate) {
+            setAdsgramError("Settings are identical to the currently saved configuration. Save prevented to avoid duplication.");
+            setAdsgramSaving(false);
+            return;
+          }
+        }
+      }
+
+      const updatedConfig = {
+        ...config,
+        lastSaved: new Date().toISOString()
+      };
+
+      const res = await authenticatedFetch("/api/admin/adsgram-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          [type]: updatedConfig
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAdsgramSuccess(`${type.toUpperCase()} Adsgram settings saved successfully!`);
+        fetchAdsgramSettings();
+      } else {
+        setAdsgramError(data.error || "Failed to save Adsgram settings");
+      }
+    } catch (err: any) {
+      console.error("Error saving Adsgram settings:", err);
+      setAdsgramError(err.message || "Failed to save Adsgram settings");
+    } finally {
+      setAdsgramSaving(false);
+    }
+  };
+
+  const testAdsgramConfiguration = async (type: "reward" | "interstitial" | "task") => {
+    const config = adsgramConfigs[type];
+    
+    // 1. Verify App ID exists
+    if (!config.appId || !config.appId.trim()) {
+      setTestResultMsg(prev => ({
+        ...prev,
+        [type]: { status: "Failed", text: "❌ Failed: App ID is missing." }
+      }));
+      return;
+    }
+
+    // 2. Verify Block ID exists
+    if (!config.blockId || !config.blockId.trim()) {
+      setTestResultMsg(prev => ({
+        ...prev,
+        [type]: { status: "Failed", text: "❌ Failed: Block ID is missing." }
+      }));
+      return;
+    }
+
+    setTestingType(type);
+    
+    try {
+      // 3. Verify SDK is loaded (or attempt to load it)
+      const { loadAdsgramSDK, isAdsgramSDKLoaded } = await import("../lib/adsManager");
+      await loadAdsgramSDK();
+      
+      const loaded = isAdsgramSDKLoaded();
+      if (!loaded) {
+        throw new Error("Adsgram SDK failed to resolve in window scope.");
+      }
+
+      // Try initializing the block
+      const adsgram = (window as any).Adsgram;
+      if (!adsgram || typeof adsgram.init !== "function") {
+        throw new Error("window.Adsgram.init function is not available.");
+      }
+
+      const controller = adsgram.init({ blockId: config.blockId.trim() });
+      if (!controller) {
+        throw new Error("Failed to initialize ad controller. Init returned falsy value.");
+      }
+
+      setTestResultMsg(prev => ({
+        ...prev,
+        [type]: { status: "Success", text: "✅ Success: SDK loaded, App/Block verified, ad controller initialized successfully." }
+      }));
+
+      // Update test status in database
+      const updatedConfig = {
+        ...config,
+        lastTested: new Date().toISOString(),
+        lastTestResult: "Success"
+      };
+
+      await authenticatedFetch("/api/admin/adsgram-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          [type]: updatedConfig
+        })
+      });
+      fetchAdsgramSettings();
+
+    } catch (e: any) {
+      const errorMsg = e.message || String(e);
+      setTestResultMsg(prev => ({
+        ...prev,
+        [type]: { status: "Failed", text: `❌ Failed: ${errorMsg}` }
+      }));
+
+      // Update test status in database
+      const updatedConfig = {
+        ...config,
+        lastTested: new Date().toISOString(),
+        lastTestResult: `Failed: ${errorMsg}`
+      };
+
+      try {
+        await authenticatedFetch("/api/admin/adsgram-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            [type]: updatedConfig
+          })
+        });
+        fetchAdsgramSettings();
+      } catch (dbErr) {
+        console.error("Failed to save test result in database", dbErr);
+      }
+    } finally {
+      setTestingType(null);
     }
   };
 
@@ -15821,213 +16009,638 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     )}
 
                     {settingsTab === "💸 Withdrawal Settings" && (
-                      <div className="space-y-4 max-w-lg">
-                        {[
-                          "Minimum Withdrawal",
-                          "Maximum Withdrawal",
-                          "Processing Time",
-                        ].map((field) => (
-                          <div key={field}>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">
-                              {field}
+                      <div className="space-y-6 max-w-4xl">
+                        {/* Summary Header */}
+                        <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                          <div>
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                              💸 Global Withdrawal Policies
+                            </h3>
+                            <p className="text-slate-400 text-xs mt-1">
+                              Configure payment gateways, automatic review rules, daily submission limits, and anti-fraud filters.
+                            </p>
+                          </div>
+                          <div className="flex gap-4 shrink-0">
+                            <label className="flex items-center gap-2 text-white text-sm font-medium cursor-pointer bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+                              <input
+                                type="radio"
+                                name="withdrawalsEnabledGlobal"
+                                checked={systemSettings?.withdrawalSettings?.enabled !== false}
+                                onChange={() => {
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    withdrawalSettings: {
+                                      ...(systemSettings?.withdrawalSettings || {}),
+                                      enabled: true,
+                                    },
+                                  });
+                                }}
+                                className="w-4 h-4 text-indigo-500 bg-slate-950 border-slate-800"
+                              />
+                              🟢 Enabled
                             </label>
-                            <input
-                              type="text"
-                              value={
-                                systemSettings?.withdrawalSettings?.[field] ||
-                                ""
-                              }
-                              onChange={(e) =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  withdrawalSettings: {
-                                    ...systemSettings.withdrawalSettings,
-                                    [field]: e.target.value,
-                                  },
-                                })
-                              }
-                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                            />
+                            <label className="flex items-center gap-2 text-white text-sm font-medium cursor-pointer bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+                              <input
+                                type="radio"
+                                name="withdrawalsEnabledGlobal"
+                                checked={systemSettings?.withdrawalSettings?.enabled === false}
+                                onChange={() => {
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    withdrawalSettings: {
+                                      ...(systemSettings?.withdrawalSettings || {}),
+                                      enabled: false,
+                                    },
+                                  });
+                                }}
+                                className="w-4 h-4 text-indigo-500 bg-slate-950 border-slate-800"
+                              />
+                              🔴 Disabled
+                            </label>
                           </div>
-                        ))}
+                        </div>
 
-                        <div className="pt-6 mt-6 border-t border-slate-800">
-                          <h4 className="font-bold text-white mb-4 flex items-center gap-2">
-                            <span>📉 Withdrawal Tax Settings</span>
-                            <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20 uppercase">
-                              Automatic Refund
-                            </span>
-                          </h4>
-                          <div className="space-y-4">
+                        {/* SECTION 1: METHOD CONFIGURATIONS */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          {/* Card 1: UPI */}
+                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                              <h4 className="font-bold text-white flex items-center gap-2">
+                                🇮🇳 UPI Method
+                              </h4>
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={systemSettings?.withdrawalSettings?.upiEnabled !== false}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        upiEnabled: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="sr-only peer"
+                                />
+                                <div className="w-9 h-5 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                              </label>
+                            </div>
+                            
                             <div>
-                              <label className="block text-sm font-medium text-slate-400 mb-1">
-                                Wrong UPI ID Tax (%)
+                              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                UPI Minimum (₹)
                               </label>
                               <input
                                 type="number"
-                                value={
-                                  systemSettings?.withdrawalTaxSettings
-                                    ?.upiTax ?? 5
-                                }
-                                onChange={(e) =>
+                                value={systemSettings?.withdrawalSettings?.upiMin ?? 100}
+                                onChange={(e) => {
                                   setSystemSettings({
                                     ...systemSettings,
-                                    withdrawalTaxSettings: {
-                                      ...systemSettings.withdrawalTaxSettings,
-                                      upiTax: parseFloat(e.target.value),
+                                    withdrawalSettings: {
+                                      ...(systemSettings?.withdrawalSettings || {}),
+                                      upiMin: parseFloat(e.target.value) || 0,
                                     },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                                  });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                               />
                             </div>
+
+                            <div className="pt-2 border-t border-slate-800/50 space-y-3">
+                              <label className="flex items-center justify-between text-xs text-slate-300 cursor-pointer">
+                                <span>⚡ Auto-Approve</span>
+                                <input
+                                  type="checkbox"
+                                  checked={!!systemSettings?.withdrawalSettings?.upiAutoApprove}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        upiAutoApprove: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700"
+                                />
+                              </label>
+
+                              {systemSettings?.withdrawalSettings?.upiAutoApprove && (
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                                    Max Auto-Approve (₹)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={systemSettings?.withdrawalSettings?.upiAutoApproveLimit ?? 500}
+                                    onChange={(e) => {
+                                      setSystemSettings({
+                                        ...systemSettings,
+                                        withdrawalSettings: {
+                                          ...(systemSettings?.withdrawalSettings || {}),
+                                          upiAutoApproveLimit: parseFloat(e.target.value) || 0,
+                                        },
+                                      });
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Card 2: Bank */}
+                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                              <h4 className="font-bold text-white flex items-center gap-2">
+                                🏦 Bank Account
+                              </h4>
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={systemSettings?.withdrawalSettings?.bankEnabled !== false}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        bankEnabled: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="sr-only peer"
+                                />
+                                <div className="w-9 h-5 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                              </label>
+                            </div>
+                            
                             <div>
-                              <label className="block text-sm font-medium text-slate-400 mb-1">
-                                Wrong Bank Account Tax (%)
+                              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                Bank Minimum (₹)
                               </label>
                               <input
                                 type="number"
-                                value={
-                                  systemSettings?.withdrawalTaxSettings
-                                    ?.bankTax ?? 10
-                                }
-                                onChange={(e) =>
+                                value={systemSettings?.withdrawalSettings?.bankMin ?? 500}
+                                onChange={(e) => {
                                   setSystemSettings({
                                     ...systemSettings,
-                                    withdrawalTaxSettings: {
-                                      ...systemSettings.withdrawalTaxSettings,
-                                      bankTax: parseFloat(e.target.value),
+                                    withdrawalSettings: {
+                                      ...(systemSettings?.withdrawalSettings || {}),
+                                      bankMin: parseFloat(e.target.value) || 0,
                                     },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                                  });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                               />
                             </div>
+
+                            <div className="pt-2 border-t border-slate-800/50 space-y-3">
+                              <label className="flex items-center justify-between text-xs text-slate-300 cursor-pointer">
+                                <span>⚡ Auto-Approve</span>
+                                <input
+                                  type="checkbox"
+                                  checked={!!systemSettings?.withdrawalSettings?.bankAutoApprove}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        bankAutoApprove: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700"
+                                />
+                              </label>
+
+                              {systemSettings?.withdrawalSettings?.bankAutoApprove && (
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                                    Max Auto-Approve (₹)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={systemSettings?.withdrawalSettings?.bankAutoApproveLimit ?? 1000}
+                                    onChange={(e) => {
+                                      setSystemSettings({
+                                        ...systemSettings,
+                                        withdrawalSettings: {
+                                          ...(systemSettings?.withdrawalSettings || {}),
+                                          bankAutoApproveLimit: parseFloat(e.target.value) || 0,
+                                        },
+                                      });
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Card 3: USDT */}
+                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                              <h4 className="font-bold text-white flex items-center gap-2">
+                                💵 USDT TRC20
+                              </h4>
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={systemSettings?.withdrawalSettings?.usdtEnabled !== false}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        usdtEnabled: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="sr-only peer"
+                                />
+                                <div className="w-9 h-5 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                              </label>
+                            </div>
+                            
                             <div>
-                              <label className="block text-sm font-medium text-slate-400 mb-1">
-                                Wrong USDT TRC20 Address Tax (%)
+                              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                USDT Minimum ($)
                               </label>
                               <input
                                 type="number"
-                                value={
-                                  systemSettings?.withdrawalTaxSettings
-                                    ?.usdtTax ?? 15
-                                }
-                                onChange={(e) =>
+                                value={systemSettings?.withdrawalSettings?.usdtMin ?? 10}
+                                onChange={(e) => {
                                   setSystemSettings({
                                     ...systemSettings,
-                                    withdrawalTaxSettings: {
-                                      ...systemSettings.withdrawalTaxSettings,
-                                      usdtTax: parseFloat(e.target.value),
+                                    withdrawalSettings: {
+                                      ...(systemSettings?.withdrawalSettings || {}),
+                                      usdtMin: parseFloat(e.target.value) || 0,
                                     },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                                  });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                               />
+                            </div>
+
+                            <div className="pt-2 border-t border-slate-800/50 space-y-3">
+                              <label className="flex items-center justify-between text-xs text-slate-300 cursor-pointer">
+                                <span>⚡ Auto-Approve</span>
+                                <input
+                                  type="checkbox"
+                                  checked={!!systemSettings?.withdrawalSettings?.usdtAutoApprove}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        usdtAutoApprove: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700"
+                                />
+                              </label>
+
+                              {systemSettings?.withdrawalSettings?.usdtAutoApprove && (
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                                    Max Auto-Approve ($)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={systemSettings?.withdrawalSettings?.usdtAutoApproveLimit ?? 10}
+                                    onChange={(e) => {
+                                      setSystemSettings({
+                                        ...systemSettings,
+                                        withdrawalSettings: {
+                                          ...(systemSettings?.withdrawalSettings || {}),
+                                          usdtAutoApproveLimit: parseFloat(e.target.value) || 0,
+                                        },
+                                      });
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
 
-                        <div className="pt-4 border-t border-slate-800">
-                          <h4 className="font-bold text-white mb-4">
-                            USDT (TRC20) Settings
-                          </h4>
-                          <div className="space-y-4">
+                        {/* SECTION 2: AD INTEGRATION & LIMITS */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {/* Ad Trigger Selection */}
+                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                            <h4 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                              📺 Adsgram Verification Integration
+                            </h4>
                             <div>
-                              <label className="block text-sm font-medium text-slate-400 mb-1">
-                                Network Fee (USDT)
+                              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                Ads Type Before Withdrawal
                               </label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={
-                                  systemSettings?.withdrawalSettings
-                                    ?.usdtNetworkFee ?? 1
-                                }
-                                onChange={(e) =>
+                              <select
+                                value={systemSettings?.withdrawalSettings?.adsTypeBeforeWithdrawal || "Reward"}
+                                onChange={(e) => {
                                   setSystemSettings({
                                     ...systemSettings,
                                     withdrawalSettings: {
-                                      ...systemSettings.withdrawalSettings,
-                                      usdtNetworkFee: parseFloat(
-                                        e.target.value,
-                                      ),
+                                      ...(systemSettings?.withdrawalSettings || {}),
+                                      adsTypeBeforeWithdrawal: e.target.value,
                                     },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                              />
+                                  });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="Reward">Reward Video Ad (Recommended)</option>
+                                <option value="Interstitial">Interstitial Ad</option>
+                                <option value="Task">Task Video Ad</option>
+                              </select>
+                              <p className="text-[10px] text-slate-500 mt-2">
+                                The chosen ad format will be rendered programmatically in the user's wallet app and must be fully viewed before the withdrawal forms can be submitted.
+                              </p>
                             </div>
-                            <div>
-                              <label className="block text-sm font-medium text-slate-400 mb-1">
-                                Market Adjustment Fee (%)
-                              </label>
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={
-                                  systemSettings?.withdrawalSettings
-                                    ?.usdtMarketAdjustmentPct ?? 5
-                                }
-                                onChange={(e) =>
-                                  setSystemSettings({
-                                    ...systemSettings,
-                                    withdrawalSettings: {
-                                      ...systemSettings.withdrawalSettings,
-                                      usdtMarketAdjustmentPct: parseFloat(
-                                        e.target.value,
-                                      ),
-                                    },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                              />
+                          </div>
+
+                          {/* Daily Limits & Submission Cooldowns */}
+                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                            <h4 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                              🕒 Cooldown & Daily Submission Limits
+                            </h4>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                  Daily Limit (Count)
+                                </label>
+                                <input
+                                  type="number"
+                                  value={systemSettings?.withdrawalSettings?.dailyLimit ?? 3}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        dailyLimit: parseInt(e.target.value) || 1,
+                                      },
+                                    });
+                                  }}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                  Request Cooldown (Hrs)
+                                </label>
+                                <input
+                                  type="number"
+                                  value={systemSettings?.withdrawalSettings?.cooldownHours ?? 24}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        cooldownHours: parseInt(e.target.value) || 0,
+                                      },
+                                    });
+                                  }}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                />
+                              </div>
+
+                              <div className="col-span-2 grid grid-cols-2 gap-3 pt-2 border-t border-slate-800/50">
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                                    Window Open Hour (0-23 IST)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="23"
+                                    value={systemSettings?.withdrawalSettings?.windowStartHour ?? 0}
+                                    onChange={(e) => {
+                                      setSystemSettings({
+                                        ...systemSettings,
+                                        withdrawalSettings: {
+                                          ...(systemSettings?.withdrawalSettings || {}),
+                                          windowStartHour: parseInt(e.target.value) || 0,
+                                        },
+                                      });
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
+                                    Window Close Hour (0-23 IST)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="23"
+                                    value={systemSettings?.withdrawalSettings?.windowEndHour ?? 24}
+                                    onChange={(e) => {
+                                      setSystemSettings({
+                                        ...systemSettings,
+                                        withdrawalSettings: {
+                                          ...(systemSettings?.withdrawalSettings || {}),
+                                          windowEndHour: parseInt(e.target.value) || 24,
+                                        },
+                                      });
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-4 mt-6">
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input
-                              type="radio"
-                              name="withdrawalsEnabled"
-                              checked={
-                                systemSettings?.withdrawalSettings?.enabled ===
-                                true
-                              }
-                              onChange={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  withdrawalSettings: {
-                                    ...systemSettings.withdrawalSettings,
-                                    enabled: true,
-                                  },
-                                })
-                              }
-                              className="w-4 h-4 text-indigo-600"
-                            />
-                            Enable Withdrawals
-                          </label>
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input
-                              type="radio"
-                              name="withdrawalsEnabled"
-                              checked={
-                                systemSettings?.withdrawalSettings?.enabled ===
-                                false
-                              }
-                              onChange={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  withdrawalSettings: {
-                                    ...systemSettings.withdrawalSettings,
-                                    enabled: false,
-                                  },
-                                })
-                              }
-                              className="w-4 h-4 text-indigo-600"
-                            />
-                            Disable Withdrawals
-                          </label>
+
+                        {/* SECTION 3: ANTI-FRAUD SECURITY COMPLIANCE */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                          <h4 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                            🛡️ Real-time Anti-Fraud & Auto-Rejection Compliance
+                          </h4>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                              <label className="flex items-center justify-between text-sm text-slate-300 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 cursor-pointer hover:bg-slate-950/60 transition">
+                                <div className="space-y-0.5">
+                                  <span className="font-semibold block">⚠️ Decline Low Trust Score</span>
+                                  <span className="text-[10px] text-slate-500 block">Auto-reject requests from suspicious accounts.</span>
+                                </div>
+                                <input
+                                  type="checkbox"
+                                  checked={!!systemSettings?.withdrawalSettings?.autoRejectLowTrust}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        autoRejectLowTrust: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700 shrink-0"
+                                />
+                              </label>
+
+                              {systemSettings?.withdrawalSettings?.autoRejectLowTrust && (
+                                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                    Score Threshold Limit (Reject if below)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={systemSettings?.withdrawalSettings?.trustScoreThreshold ?? 20}
+                                    onChange={(e) => {
+                                      setSystemSettings({
+                                        ...systemSettings,
+                                        withdrawalSettings: {
+                                          ...(systemSettings?.withdrawalSettings || {}),
+                                          trustScoreThreshold: parseInt(e.target.value) || 20,
+                                        },
+                                      });
+                                    }}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+                              )}
+
+                              <label className="flex items-center justify-between text-sm text-slate-300 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 cursor-pointer hover:bg-slate-950/60 transition">
+                                <div className="space-y-0.5">
+                                  <span className="font-semibold block">👥 Block Duplicate Gateways</span>
+                                  <span className="text-[10px] text-slate-500 block">Prevent multiple accounts registering the same UPI ID/Bank No.</span>
+                                </div>
+                                <input
+                                  type="checkbox"
+                                  checked={!!systemSettings?.withdrawalSettings?.autoRejectDuplicateDetails}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        autoRejectDuplicateDetails: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700 shrink-0"
+                                />
+                              </label>
+
+                              <label className="flex items-center justify-between text-sm text-slate-300 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 cursor-pointer hover:bg-slate-950/60 transition">
+                                <div className="space-y-0.5">
+                                  <span className="font-semibold block">🎫 Block with Active Tickets</span>
+                                  <span className="text-[10px] text-slate-500 block">Decline new withdrawals if an open support ticket exists.</span>
+                                </div>
+                                <input
+                                  type="checkbox"
+                                  checked={!!systemSettings?.withdrawalSettings?.autoRejectActiveSupportTicket}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        autoRejectActiveSupportTicket: e.target.checked,
+                                      },
+                                    });
+                                  }}
+                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700 shrink-0"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="space-y-4">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                  Rejection Message Prefix
+                                </label>
+                                <input
+                                  type="text"
+                                  value={systemSettings?.withdrawalSettings?.rejectReasonPrefix || "Auto-Rejected: "}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        rejectReasonPrefix: e.target.value,
+                                      },
+                                    });
+                                  }}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                  placeholder="Auto-Rejected: "
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1.5">
+                                  This text prefix will automatically precede any system-generated rejection reasons.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* SECTION 4: TAXES AND EXTRA COMPLIANCE */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                          <h4 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                            📉 Fine & Processing Penalty (Taxes)
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                                UPI Correction Penalty (%)
+                              </label>
+                              <input
+                                type="number"
+                                value={systemSettings?.withdrawalTaxSettings?.upiTax ?? 5}
+                                onChange={(e) =>
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    withdrawalTaxSettings: {
+                                      ...(systemSettings?.withdrawalTaxSettings || {}),
+                                      upiTax: parseFloat(e.target.value) || 0,
+                                    },
+                                  })
+                                }
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                                Bank Correction Penalty (%)
+                              </label>
+                              <input
+                                type="number"
+                                value={systemSettings?.withdrawalTaxSettings?.bankTax ?? 10}
+                                onChange={(e) =>
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    withdrawalTaxSettings: {
+                                      ...(systemSettings?.withdrawalTaxSettings || {}),
+                                      bankTax: parseFloat(e.target.value) || 0,
+                                    },
+                                  })
+                                }
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                                USDT TRC20 Correction Penalty (%)
+                              </label>
+                              <input
+                                type="number"
+                                value={systemSettings?.withdrawalTaxSettings?.usdtTax ?? 15}
+                                onChange={(e) =>
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    withdrawalTaxSettings: {
+                                      ...(systemSettings?.withdrawalTaxSettings || {}),
+                                      usdtTax: parseFloat(e.target.value) || 0,
+                                    },
+                                  })
+                                }
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -17454,11 +18067,35 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
                     {settingsTab === "📢 Adsgram Integration" && (
                       <div className="space-y-6">
-                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-4">
-                          <h4 className="text-lg font-bold text-white flex items-center gap-2">
-                            📢 Adsgram Configuration
-                          </h4>
-                          
+                        {/* Adsgram Configuration Dashboard */}
+                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-6">
+                          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-slate-800/80 pb-4">
+                            <div>
+                              <h4 className="text-xl font-bold text-white flex items-center gap-2">
+                                📢 Adsgram Management Panel
+                              </h4>
+                              <p className="text-slate-400 text-xs mt-1">
+                                Manage and test specific Adsgram App and Block configurations.
+                              </p>
+                            </div>
+                            {/* Horizontal Sub-Tabs */}
+                            <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800/60 shrink-0 self-start sm:self-center">
+                              {(["reward", "interstitial", "task"] as const).map((type) => (
+                                <button
+                                  key={type}
+                                  onClick={() => setActiveAdTab(type)}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${
+                                    activeAdTab === type
+                                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10"
+                                      : "text-slate-400 hover:text-white"
+                                  }`}
+                                >
+                                  {type} Ads
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
                           {adsgramSuccess && (
                             <div className="p-4 bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 rounded-xl text-sm">
                               {adsgramSuccess}
@@ -17470,51 +18107,190 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             </div>
                           )}
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                                Adsgram App ID
-                              </label>
-                              <input
-                                type="text"
-                                value={adsgramSettings.adsgramAppId || ""}
-                                onChange={(e) => setAdsgramSettings({ ...adsgramSettings, adsgramAppId: e.target.value })}
-                                placeholder="e.g. 12345"
-                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-                              />
+                          {/* Active Tab Config Form */}
+                          <div className="space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                    Adsgram App ID
+                                  </label>
+                                  {adsgramConfigs[activeAdTab]?.appId && (
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(adsgramConfigs[activeAdTab].appId);
+                                        alert("App ID copied!");
+                                      }}
+                                      className="text-[10px] text-indigo-400 hover:underline flex items-center gap-1"
+                                    >
+                                      📋 Copy App ID
+                                    </button>
+                                  )}
+                                </div>
+                                <input
+                                  type="text"
+                                  value={adsgramConfigs[activeAdTab]?.appId || ""}
+                                  onChange={(e) =>
+                                    setAdsgramConfigs({
+                                      ...adsgramConfigs,
+                                      [activeAdTab]: {
+                                        ...adsgramConfigs[activeAdTab],
+                                        appId: e.target.value
+                                      }
+                                    })
+                                  }
+                                  placeholder="e.g. 12345"
+                                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                                />
+                              </div>
+
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                    Adsgram Block ID
+                                  </label>
+                                  {adsgramConfigs[activeAdTab]?.blockId && (
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(adsgramConfigs[activeAdTab].blockId);
+                                        alert("Block ID copied!");
+                                      }}
+                                      className="text-[10px] text-indigo-400 hover:underline flex items-center gap-1"
+                                    >
+                                      📋 Copy Block ID
+                                    </button>
+                                  )}
+                                </div>
+                                <input
+                                  type="text"
+                                  value={adsgramConfigs[activeAdTab]?.blockId || ""}
+                                  onChange={(e) =>
+                                    setAdsgramConfigs({
+                                      ...adsgramConfigs,
+                                      [activeAdTab]: {
+                                        ...adsgramConfigs[activeAdTab],
+                                        blockId: e.target.value
+                                      }
+                                    })
+                                  }
+                                  placeholder="e.g. 3856"
+                                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                                />
+                              </div>
                             </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                                Adsgram Block ID
-                              </label>
-                              <input
-                                type="text"
-                                value={adsgramSettings.adsgramBlockId || ""}
-                                onChange={(e) => setAdsgramSettings({ ...adsgramSettings, adsgramBlockId: e.target.value })}
-                                placeholder="e.g. 3856"
-                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-                              />
+
+                            <div className="flex flex-wrap gap-3 pt-2 border-t border-slate-900">
+                              <button
+                                onClick={() => saveAdsgramTypeSettings(activeAdTab as any)}
+                                disabled={adsgramSaving}
+                                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-indigo-600/15"
+                              >
+                                {adsgramSaving ? "Saving..." : `💾 Save ${activeAdTab.toUpperCase()} Config`}
+                              </button>
+                              
+                              <button
+                                onClick={() => testAdsgramConfiguration(activeAdTab as any)}
+                                disabled={testingType !== null}
+                                className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-all disabled:opacity-50 border border-slate-700 flex items-center gap-2"
+                              >
+                                {testingType === activeAdTab ? "🧪 Testing Connection..." : `🧪 Test Configuration`}
+                              </button>
                             </div>
+
+                            {/* Live Test result feedback */}
+                            {testResultMsg[activeAdTab] && (
+                              <div className={`p-4 rounded-xl text-xs font-mono border ${
+                                testResultMsg[activeAdTab].status === "Success"
+                                  ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-400"
+                                  : "bg-rose-500/10 border-rose-500/25 text-rose-400"
+                              }`}>
+                                {testResultMsg[activeAdTab].text}
+                              </div>
+                            )}
                           </div>
 
-                          <div className="pt-2">
-                            <button
-                              onClick={saveAdsgramSettings}
-                              disabled={adsgramSaving}
-                              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition-all disabled:opacity-50"
-                            >
-                              {adsgramSaving ? "Saving..." : "💾 Save Settings"}
-                            </button>
+                          {/* Active Tab Specifications & Bonus Details Section */}
+                          <div className="border-t border-slate-900 pt-6 space-y-4">
+                            <h5 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+                              📊 {activeAdTab.toUpperCase()} Ads Status & Telemetry
+                            </h5>
+                            
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                                <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider block mb-1">Status</span>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  {adsgramConfigs[activeAdTab]?.appId && adsgramConfigs[activeAdTab]?.blockId ? (
+                                    <>
+                                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                      <span className="text-emerald-400 text-xs font-bold">Connected</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                                      <span className="text-rose-400 text-xs font-bold">Not Configured</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                                <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider block mb-1">SDK Status</span>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  {typeof window !== "undefined" && (window as any).Adsgram ? (
+                                    <>
+                                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                                      <span className="text-indigo-400 text-xs font-bold">Loaded (v2.x)</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="w-2 h-2 rounded-full bg-slate-600"></span>
+                                      <span className="text-slate-400 text-xs font-bold">Not Loaded</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                                <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider block mb-1">Last Saved</span>
+                                <span className="text-white text-xs font-semibold block mt-0.5">
+                                  {adsgramConfigs[activeAdTab]?.lastSaved 
+                                    ? new Date(adsgramConfigs[activeAdTab].lastSaved).toLocaleString() 
+                                    : "Never"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                                <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider block mb-1">Last Tested</span>
+                                <span className="text-white text-xs font-semibold block mt-0.5">
+                                  {adsgramConfigs[activeAdTab]?.lastTested 
+                                    ? new Date(adsgramConfigs[activeAdTab].lastTested).toLocaleString() 
+                                    : "Never"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 sm:col-span-2">
+                                <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider block mb-1">Last Test Result</span>
+                                <span className={`text-xs font-mono block mt-0.5 truncate ${
+                                  adsgramConfigs[activeAdTab]?.lastTestResult === "Success" 
+                                    ? "text-emerald-400 font-bold" 
+                                    : adsgramConfigs[activeAdTab]?.lastTestResult 
+                                      ? "text-rose-400" 
+                                      : "text-slate-500"
+                                }`}>
+                                  {adsgramConfigs[activeAdTab]?.lastTestResult || "No historical tests performed"}
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
-                        {/* Generated Callback URL Panel */}
+                        {/* Generated Callback URL Panel - exclusively for Reward Ads as they have callbacks */}
                         <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-4">
                           <h4 className="text-lg font-bold text-white flex items-center gap-2">
                             🔗 Reward Callback URL
                           </h4>
-                          <p className="text-slate-400 text-sm">
-                            Register this callback URL in your Adsgram dashboard under the Block configurations. Adsgram will trigger this endpoint to grant users real-time balance credits after successful ad completion.
+                          <p className="text-slate-400 text-xs">
+                            Register this callback URL in your Adsgram dashboard under the Reward/Block configurations. Adsgram will trigger this endpoint to grant users real-time balance credits after successful ad completion.
                           </p>
                           
                           <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -17532,7 +18308,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                 navigator.clipboard.writeText(url);
                                 alert("Reward Callback URL copied to clipboard!");
                               }}
-                              className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold rounded-xl transition-all border border-slate-700 shrink-0"
+                              className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-all border border-slate-700 shrink-0"
                             >
                               📋 Copy URL
                             </button>
@@ -17544,7 +18320,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                           <h4 className="text-lg font-bold text-white flex items-center gap-2">
                             🧪 Test Callback
                           </h4>
-                          <p className="text-slate-400 text-sm">
+                          <p className="text-slate-400 text-xs">
                             Simulate an Adsgram server-to-server callback request to verify your backend endpoints are fully operational.
                           </p>
 
@@ -17564,7 +18340,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             <button
                               onClick={handleTestCallback}
                               disabled={testLoading}
-                              className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition-all disabled:opacity-50 shrink-0"
+                              className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition-all disabled:opacity-50 shrink-0 text-xs font-bold"
                             >
                               {testLoading ? "Testing..." : "🧪 Test Callback"}
                             </button>
@@ -17575,43 +18351,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                               {testStatus}
                             </div>
                           )}
-                        </div>
-
-                        {/* Adsgram Connection Status Card */}
-                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-4">
-                          <h4 className="text-lg font-bold text-white flex items-center gap-2">
-                            📊 Adsgram Status
-                          </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                              <span className="text-slate-500 text-xs block mb-1">Connection State</span>
-                              <div className="flex items-center gap-2">
-                                {adsgramSettings.adsgramAppId && adsgramSettings.adsgramBlockId ? (
-                                  <>
-                                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                                    <span className="text-emerald-400 text-sm font-bold">Connected</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                                    <span className="text-rose-400 text-sm font-bold">Not Configured</span>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                              <span className="text-slate-500 text-xs block mb-1">Active Blocks</span>
-                              <span className="text-white text-sm font-semibold">
-                                {adsgramSettings.adsgramBlockId ? `Block #${adsgramSettings.adsgramBlockId}` : "None"}
-                              </span>
-                            </div>
-                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                              <span className="text-slate-500 text-xs block mb-1">Last S2S Callback</span>
-                              <span className="text-white text-sm font-semibold block truncate">
-                                {adsgramSettings.lastCallbackTime ? new Date(adsgramSettings.lastCallbackTime).toLocaleString() : "Never"}
-                              </span>
-                            </div>
-                          </div>
                         </div>
                       </div>
                     )}

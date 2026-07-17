@@ -90,6 +90,7 @@ export default function LuckyDrawWinnerManager() {
   const [formBannerUrl, setFormBannerUrl] = useState("");
   const [formThumbnailUrl, setFormThumbnailUrl] = useState("");
   const [formStatus, setFormStatus] = useState<'Draft' | 'Active' | 'Paused' | 'Ended'>('Draft');
+  const [formAdsgramType, setFormAdsgramType] = useState<"Reward" | "Interstitial" | "Task">("Reward");
 
   const [formPrizeType, setFormPrizeType] = useState<'Cash' | 'UPI' | 'Gift' | 'Coupon' | 'Custom'>('Cash');
   const [formPrizeAmount, setFormPrizeAmount] = useState<number>(100);
@@ -349,6 +350,7 @@ export default function LuckyDrawWinnerManager() {
     setFormAutoPublish(true);
     setFormAutoEnd(true);
     setFormAutoNotify(true);
+    setFormAdsgramType("Reward");
 
     setActiveTab("basic");
     setIsModalOpen(true);
@@ -394,6 +396,7 @@ export default function LuckyDrawWinnerManager() {
     setFormAutoPublish(adv.autoPublish !== false);
     setFormAutoEnd(adv.autoEnd !== false);
     setFormAutoNotify(adv.autoNotify !== false);
+    setFormAdsgramType(c.adsgramType || "Reward");
 
     setActiveTab("basic");
     setIsModalOpen(true);
@@ -439,6 +442,7 @@ export default function LuckyDrawWinnerManager() {
     setFormAutoPublish(adv.autoPublish !== false);
     setFormAutoEnd(adv.autoEnd !== false);
     setFormAutoNotify(adv.autoNotify !== false);
+    setFormAdsgramType(c.adsgramType || "Reward");
 
     setActiveTab("basic");
     setIsModalOpen(true);
@@ -494,6 +498,7 @@ export default function LuckyDrawWinnerManager() {
         prizeAmount: Number(formPrizeAmount || 0),
         currency: formCurrency.trim(),
         winnerCount: Number(formWinnerCount || 1),
+        adsgramType: formAdsgramType,
                         endDate: formEndDate,
         endTime: formEndTime,
         rules: {
@@ -1511,6 +1516,19 @@ export default function LuckyDrawWinnerManager() {
                           <option value="indigo-950">Midnight Blue</option>
                           <option value="emerald-950">Forest Emerald</option>
                           <option value="zinc-950">Deep Charcoal</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-400">Ads Type</label>
+                        <select
+                          value={formAdsgramType}
+                          onChange={(e: any) => setFormAdsgramType(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:border-blue-500/50 outline-none"
+                        >
+                          <option value="Reward">Reward</option>
+                          <option value="Interstitial">Interstitial</option>
+                          <option value="Task">Task</option>
                         </select>
                       </div>
                     </div>

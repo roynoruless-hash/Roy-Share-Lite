@@ -41,7 +41,7 @@ import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] Vite import removed\n`);
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch } from "firebase/firestore";
+import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch, deleteField } from "firebase/firestore";
 import upiGiveawayRouter from "./src/routes/upiGiveaway";
 import { adjustTrustScore } from "./src/lib/trustScore";
 import { evaluateReward, getEconomySettings, saveEconomySettings } from "./src/lib/economy";
@@ -800,18 +800,44 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
       const snap = await getDoc(ref);
       if (!snap.exists()) return res.status(404).json({ error: "Not found" });
       
-      await setDoc(ref, { status: "Approved", approvedAt: new Date().toISOString() }, { merge: true });
+      const wData = snap.data();
+      if (wData.status === "Approved") {
+        return res.status(400).json({ error: "Withdrawal is already approved" });
+      }
+
+      await setDoc(ref, { 
+        status: "Approved", 
+        approvedAt: new Date().toISOString() 
+      }, { merge: true });
       
-      const data = snap.data();
-      await sendTgMessage(data.userId, `✅ <b>Withdrawal Approved</b>\n\nAmount: ₹${data.amount}\nStatus: Approved\n\nThe payment has been approved and will be transferred shortly.`);
-      res.json({ success: true });
+      await sendTgMessage(wData.userId, `✅ <b>Withdrawal Approved</b>\n\nAmount: ₹${wData.amount}\nStatus: Approved\n\nThe payment has been approved and will be transferred shortly.`);
+      res.json({ success: true, message: "Withdrawal approved successfully." });
     } catch (e: any) {
       console.error("Admin approve error:", e);
       res.status(500).json({ error: "Server error" });
     }
   });
 
-
+  app.post("/api/admin/withdrawals/:id/processing", requireAdminDb, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const ref = doc(db, "withdrawals", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Not found" });
+      
+      const wData = snap.data();
+      await setDoc(ref, { 
+        status: "Processing", 
+        processingAt: new Date().toISOString() 
+      }, { merge: true });
+      
+      await sendTgMessage(wData.userId, `⏳ <b>Withdrawal Processing</b>\n\nAmount: ₹${wData.amount}\nStatus: Processing\n\nYour withdrawal is being processed by the finance department.`);
+      res.json({ success: true, message: "Withdrawal marked as processing." });
+    } catch (e: any) {
+      console.error("Admin processing error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
 
   app.post("/api/admin/withdrawals/:id/paid", requireAdminDb, async (req, res) => {
     try {
@@ -821,14 +847,59 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
       const snap = await getDoc(ref);
       if (!snap.exists()) return res.status(404).json({ error: "Not found" });
       
-      await setDoc(ref, { status: "Paid", paidAt: new Date().toISOString(), transactionReference }, { merge: true });
+      const wData = snap.data();
+      if (wData.status === "Paid") {
+        return res.status(400).json({ error: "Withdrawal already marked as Paid." });
+      }
+
+      const requestedAmount = Number(wData.amount || 0);
+      const isUsdt = (wData.method || "").toUpperCase().includes("USDT") || !!wData.walletAddress;
+      const USDT_RATE = 90;
+      const inrRequestedAmount = isUsdt ? (requestedAmount * USDT_RATE) : requestedAmount;
+
+      // 1. Update withdrawal status
+      await setDoc(ref, { 
+        status: "Paid", 
+        paidAt: new Date().toISOString(), 
+        transactionReference 
+      }, { merge: true });
       
-      const data = snap.data();
+      // 2. Adjust User parameters (deduct pending, increment total withdrawn)
+      const userRef = doc(db, "users", wData.userId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        
+        const currentPending = Number(userData.pendingWithdrawals || 0);
+        const currentWithdrawn = Number(userData.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData.totalWithdrawn || 0));
+        const currentBalance = Number(userData.balance || 0);
+
+        const newPending = Math.max(0, currentPending - inrRequestedAmount);
+        const newWithdrawn = currentWithdrawn + inrRequestedAmount;
+
+        // Recalculate availableBalance
+        const fileEarnings = userData?.fileEarnings || 0;
+        const linkEarnings = userData?.linkEarnings || 0;
+        const referralEarnings = userData?.referralEarnings || 0;
+        const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
+        const rewardBalance = userData?.rewardBalance || 0;
+
+        const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + currentBalance - newWithdrawn - newPending;
+
+        await setDoc(userRef, { 
+          pendingWithdrawals: newPending, 
+          withdrawnAmount: newWithdrawn,
+          totalWithdrawn: newWithdrawn,
+          availableBalance,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+
       // Increase Trust Score for Successful Withdrawal (+5)
-      adjustTrustScore(data.userId, 5, "Successful Withdrawal").catch(() => {});
+      adjustTrustScore(wData.userId, 5, "Successful Withdrawal").catch(() => {});
       
-      await sendTgMessage(data.userId, `💸 <b>Withdrawal Paid</b>\n\nAmount:\n${data.amount}\n\nReference ID:\n${transactionReference}`);
-      res.json({ success: true });
+      await sendTgMessage(wData.userId, `💸 <b>Withdrawal Paid</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nStatus: Paid\nReference ID: <code>${transactionReference}</code>\n\nYour funds have been transferred! Thank you.`);
+      res.json({ success: true, message: "Withdrawal marked as Paid successfully." });
     } catch (e: any) {
       console.error("Admin paid error:", e);
       res.status(500).json({ error: "Server error" });
@@ -844,85 +915,232 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
       if (!snap.exists()) return res.status(404).json({ error: "Not found" });
       
       const wData = snap.data();
-      if (wData.status === "Rejected" || wData.status === "Cancelled") {
-          return res.status(400).json({ error: "Withdrawal already processed" });
+      if (wData.status === "Rejected" || wData.status === "Cancelled" || wData.status === "Failed") {
+        return res.status(400).json({ error: "Withdrawal already finalized as " + wData.status });
       }
 
       const finalReason = rejectReason || "Rejected by administrator";
       const requestedAmount = Number(wData.amount || 0);
+      const isUsdt = (wData.method || "").toUpperCase().includes("USDT") || !!wData.walletAddress;
+      const USDT_RATE = 90;
+      const inrRequestedAmount = isUsdt ? (requestedAmount * USDT_RATE) : requestedAmount;
 
       // Update withdrawal doc
       await setDoc(ref, { 
-          status: "Rejected", 
-          rejectReason: finalReason, 
-          adminRemark: finalReason,
-          taxPercent: 0,
-          taxAmount: 0,
-          refundAmount: requestedAmount,
-          rejectedAt: new Date().toISOString()
+        status: "Rejected", 
+        rejectReason: finalReason, 
+        adminRemark: finalReason,
+        refundAmount: requestedAmount,
+        rejectedAt: new Date().toISOString()
       }, { merge: true });
 
       // Update user balance and pendingWithdrawals
       const userRef = doc(db, "users", wData.userId);
       const userSnap = await getDoc(userRef);
       if (userSnap.exists()) {
-          const userData = userSnap.data();
-          
-          // Important: pendingWithdrawals is in INR
-          const isUsdt = (wData.method || "").toUpperCase().includes("USDT") || !!wData.walletAddress;
-          const USDT_RATE = 90; 
-          
-          const inrRequestedAmount = isUsdt ? (requestedAmount * USDT_RATE) : requestedAmount;
+        const userData = userSnap.data();
+        
+        const currentPending = Number(userData.pendingWithdrawals || 0);
+        const currentBalance = Number(userData.balance || 0);
+        
+        const newPending = Math.max(0, currentPending - inrRequestedAmount);
+        
+        // Recalculate availableBalance
+        const fileEarnings = userData?.fileEarnings || 0;
+        const linkEarnings = userData?.linkEarnings || 0;
+        const referralEarnings = userData?.referralEarnings || 0;
+        const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
+        const rewardBalance = userData?.rewardBalance || 0;
+        const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
+        
+        const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + currentBalance - withdrawnAmount - newPending;
 
-          const currentPending = Number(userData.pendingWithdrawals || 0);
-          const currentBalance = Number(userData.balance || 0);
-          
-          const newPending = Math.max(0, currentPending - inrRequestedAmount);
-          
-          // Recalculate availableBalance
-          const fileEarnings = userData?.fileEarnings || 0;
-          const linkEarnings = userData?.linkEarnings || 0;
-          const referralEarnings = userData?.referralEarnings || 0;
-          const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
-          const rewardBalance = userData?.rewardBalance || 0;
-          const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
-          
-          const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + currentBalance - withdrawnAmount - newPending;
+        await setDoc(userRef, { 
+          pendingWithdrawals: newPending, 
+          availableBalance,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
 
-          await setDoc(userRef, { 
-              pendingWithdrawals: newPending, 
-              availableBalance,
-              updatedAt: new Date().toISOString()
-          }, { merge: true });
+        // Transaction History Record
+        await addDoc(collection(db, "transactions"), {
+          userId: wData.userId,
+          type: "Withdrawal Rejected",
+          requestedAmount: requestedAmount,
+          refundAmount: requestedAmount,
+          reason: finalReason,
+          method: wData.method,
+          currency: isUsdt ? "USDT" : "INR",
+          timestamp: new Date().toISOString(),
+          withdrawalId: id
+        });
 
-          // Transaction History Record
-          await addDoc(collection(db, "transactions"), {
-              userId: wData.userId,
-              type: "Withdrawal Rejected",
-              requestedAmount: requestedAmount,
-              taxPercent: 0,
-              taxAmount: 0,
-              refundAmount: requestedAmount,
-              reason: finalReason,
-              method: wData.method,
-              currency: isUsdt ? "USDT" : "INR",
-              timestamp: new Date().toISOString(),
-              withdrawalId: id
-          });
-
-          // Notify User via Telegram
-          const tgMessage = `❌ <b>Withdrawal Rejected</b>\n\n` +
-                          `Amount: ₹${requestedAmount}\n` +
-                          `Reason: ${finalReason}\n\n` +
-                          `The amount has been returned to your wallet.`;
-          
-          await sendTgMessage(wData.userId, tgMessage);
+        // Notify User via Telegram
+        const tgMessage = `❌ <b>Withdrawal Rejected</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nReason: ${finalReason}\n\nThe amount has been returned to your wallet.`;
+        await sendTgMessage(wData.userId, tgMessage);
       }
 
-      res.json({ success: true });
+      res.json({ success: true, message: "Withdrawal request rejected and user refunded." });
     } catch (e: any) {
       console.error("Admin reject error:", e);
-      res.status(500).json({ error: "Server error" });
+      res.status(500).json({ error: "Server error: " + e.message });
+    }
+  });
+
+  app.post("/api/admin/withdrawals/:id/fail", requireAdminDb, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { rejectReason } = req.body;
+      const ref = doc(db, "withdrawals", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Not found" });
+      
+      const wData = snap.data();
+      if (wData.status === "Rejected" || wData.status === "Cancelled" || wData.status === "Failed") {
+        return res.status(400).json({ error: "Withdrawal already finalized as " + wData.status });
+      }
+
+      const finalReason = rejectReason || "Payment transfer failed. Refunded to wallet.";
+      const requestedAmount = Number(wData.amount || 0);
+      const isUsdt = (wData.method || "").toUpperCase().includes("USDT") || !!wData.walletAddress;
+      const USDT_RATE = 90;
+      const inrRequestedAmount = isUsdt ? (requestedAmount * USDT_RATE) : requestedAmount;
+
+      // Update withdrawal doc
+      await setDoc(ref, { 
+        status: "Failed", 
+        rejectReason: finalReason, 
+        adminRemark: finalReason,
+        refundAmount: requestedAmount,
+        failedAt: new Date().toISOString()
+      }, { merge: true });
+
+      // Update user balance and pendingWithdrawals
+      const userRef = doc(db, "users", wData.userId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        
+        const currentPending = Number(userData.pendingWithdrawals || 0);
+        const currentBalance = Number(userData.balance || 0);
+        
+        const newPending = Math.max(0, currentPending - inrRequestedAmount);
+        
+        // Recalculate availableBalance
+        const fileEarnings = userData?.fileEarnings || 0;
+        const linkEarnings = userData?.linkEarnings || 0;
+        const referralEarnings = userData?.referralEarnings || 0;
+        const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
+        const rewardBalance = userData?.rewardBalance || 0;
+        const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
+        
+        const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + currentBalance - withdrawnAmount - newPending;
+
+        await setDoc(userRef, { 
+          pendingWithdrawals: newPending, 
+          availableBalance,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        // Transaction History Record
+        await addDoc(collection(db, "transactions"), {
+          userId: wData.userId,
+          type: "Withdrawal Failed",
+          requestedAmount: requestedAmount,
+          refundAmount: requestedAmount,
+          reason: finalReason,
+          method: wData.method,
+          currency: isUsdt ? "USDT" : "INR",
+          timestamp: new Date().toISOString(),
+          withdrawalId: id
+        });
+
+        // Notify User via Telegram
+        const tgMessage = `⚠️ <b>Withdrawal Transfer Failed</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nReason: ${finalReason}\n\nThe funds have been safely returned to your wallet balance.`;
+        await sendTgMessage(wData.userId, tgMessage);
+      }
+
+      res.json({ success: true, message: "Withdrawal request marked as Failed and user refunded." });
+    } catch (e: any) {
+      console.error("Admin fail error:", e);
+      res.status(500).json({ error: "Server error: " + e.message });
+    }
+  });
+
+  app.post("/api/admin/withdrawals/:id/redraw", requireAdminDb, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const ref = doc(db, "withdrawals", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Not found" });
+      
+      const wData = snap.data();
+      const oldStatus = wData.status;
+      if (oldStatus === "Pending") {
+        return res.status(400).json({ error: "Withdrawal is already in Pending state." });
+      }
+
+      const requestedAmount = Number(wData.amount || 0);
+      const isUsdt = (wData.method || "").toUpperCase().includes("USDT") || !!wData.walletAddress;
+      const USDT_RATE = 90;
+      const inrRequestedAmount = isUsdt ? (requestedAmount * USDT_RATE) : requestedAmount;
+
+      // Reset withdrawal status to Pending
+      await setDoc(ref, { 
+        status: "Pending", 
+        rejectReason: deleteField(),
+        adminRemark: deleteField(),
+        transactionReference: deleteField(),
+        paidAt: deleteField(),
+        approvedAt: deleteField(),
+        rejectedAt: deleteField(),
+        failedAt: deleteField(),
+        processingAt: deleteField()
+      }, { merge: true });
+
+      // Update user balances depending on what the previous status was
+      const userRef = doc(db, "users", wData.userId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        
+        let newPending = Number(userData.pendingWithdrawals || 0);
+        let newWithdrawn = Number(userData.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData.totalWithdrawn || 0));
+
+        if (oldStatus === "Rejected" || oldStatus === "Cancelled" || oldStatus === "Failed") {
+          // Previously refunded. Deduct refund from wallet and add back to pending!
+          newPending = newPending + inrRequestedAmount;
+        } else if (oldStatus === "Paid") {
+          // Previously paid out. Deduct from withdrawn amount, and add back to pending!
+          newWithdrawn = Math.max(0, newWithdrawn - inrRequestedAmount);
+          newPending = newPending + inrRequestedAmount;
+        } else if (oldStatus === "Approved" || oldStatus === "Processing") {
+          // Balance was already deducted and in pending state. No balance adjustments needed.
+        }
+
+        // Recalculate availableBalance
+        const fileEarnings = userData?.fileEarnings || 0;
+        const linkEarnings = userData?.linkEarnings || 0;
+        const referralEarnings = userData?.referralEarnings || 0;
+        const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
+        const rewardBalance = userData?.rewardBalance || 0;
+        const currentBalance = Number(userData.balance || 0);
+
+        const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + currentBalance - newWithdrawn - newPending;
+
+        await setDoc(userRef, { 
+          pendingWithdrawals: newPending, 
+          withdrawnAmount: newWithdrawn,
+          totalWithdrawn: newWithdrawn,
+          availableBalance,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+
+      await sendTgMessage(wData.userId, `🔄 <b>Withdrawal Re-opened</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nStatus: Pending (Manual Review)\n\nYour withdrawal request has been reset to Pending status for re-verification.`);
+      res.json({ success: true, message: "Withdrawal reset to Pending status." });
+    } catch (e: any) {
+      console.error("Admin redraw error:", e);
+      res.status(500).json({ error: "Server error: " + e.message });
     }
   });
 
@@ -9935,17 +10153,56 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // Admin endpoint to update Adsgram settings
   app.put("/api/admin/adsgram-settings", requireAdminDb, async (req, res) => {
     try {
-      const { adsgramAppId, adsgramBlockId } = req.body;
+      const { reward, interstitial, task, adsgramAppId, adsgramBlockId } = req.body;
       const docRef = doc(db, "settings", "adsgram");
       const snap = await getDoc(docRef);
       const existingData = snap.exists() ? snap.data() : {};
 
-      const saveData = {
+      const saveData: any = {
         ...existingData,
-        adsgramAppId: String(adsgramAppId || "").trim(),
-        adsgramBlockId: String(adsgramBlockId || "").trim(),
         updatedAt: new Date().toISOString()
       };
+
+      if (reward !== undefined) {
+        saveData.reward = {
+          appId: String(reward.appId || "").trim(),
+          blockId: String(reward.blockId || "").trim(),
+          lastSaved: reward.lastSaved || new Date().toISOString(),
+          lastTested: reward.lastTested || (existingData.reward?.lastTested || null),
+          lastTestResult: reward.lastTestResult || (existingData.reward?.lastTestResult || null)
+        };
+        // Synchronize legacy top-level keys with Reward for total safety and fallback compatibility
+        saveData.adsgramAppId = saveData.reward.appId;
+        saveData.adsgramBlockId = saveData.reward.blockId;
+      }
+
+      if (interstitial !== undefined) {
+        saveData.interstitial = {
+          appId: String(interstitial.appId || "").trim(),
+          blockId: String(interstitial.blockId || "").trim(),
+          lastSaved: interstitial.lastSaved || new Date().toISOString(),
+          lastTested: interstitial.lastTested || (existingData.interstitial?.lastTested || null),
+          lastTestResult: interstitial.lastTestResult || (existingData.interstitial?.lastTestResult || null)
+        };
+      }
+
+      if (task !== undefined) {
+        saveData.task = {
+          appId: String(task.appId || "").trim(),
+          blockId: String(task.blockId || "").trim(),
+          lastSaved: task.lastSaved || new Date().toISOString(),
+          lastTested: task.lastTested || (existingData.task?.lastTested || null),
+          lastTestResult: task.lastTestResult || (existingData.task?.lastTestResult || null)
+        };
+      }
+
+      // Legacy direct saves compatibility
+      if (adsgramAppId !== undefined) {
+        saveData.adsgramAppId = String(adsgramAppId || "").trim();
+      }
+      if (adsgramBlockId !== undefined) {
+        saveData.adsgramBlockId = String(adsgramBlockId || "").trim();
+      }
 
       await setDoc(docRef, saveData, { merge: true });
       res.json({ success: true });
@@ -10255,7 +10512,28 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).json({ success: false, message: "Missing required parameters." });
       }
 
-      // Validation check for fields
+      // 1. Load System Settings for Withdrawal Policies
+      const settingsSnap = await getDoc(doc(db, "settings", "system"));
+      const settingsData = settingsSnap.exists() ? settingsSnap.data() : {};
+      const withdrawalSettings = settingsData?.withdrawalSettings || {};
+
+      // 2. Validate Payment Method Status
+      let methodEnabled = true;
+      if (method === "UPI ID") {
+        methodEnabled = withdrawalSettings.upiEnabled !== false;
+      } else if (method === "Bank Account") {
+        methodEnabled = withdrawalSettings.bankEnabled !== false;
+      } else if (method === "USDT (TRC20)") {
+        methodEnabled = withdrawalSettings.usdtEnabled !== false;
+      } else {
+        return res.status(400).json({ success: false, message: "Invalid payment method selected." });
+      }
+
+      if (!methodEnabled) {
+        return res.status(400).json({ success: false, message: "Selected payment method is currently disabled by administrator." });
+      }
+
+      // 3. Validation check for fields
       if (method === "UPI ID") {
         if (!upiId || !upiId.trim()) {
           return res.status(400).json({ success: false, message: "UPI ID is required." });
@@ -10268,8 +10546,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (!walletAddress || !walletAddress.trim()) {
           return res.status(400).json({ success: false, message: "USDT Wallet address is required." });
         }
-      } else {
-        return res.status(400).json({ success: false, message: "Invalid payment method selected." });
       }
 
       const userDocRef = doc(db, "users", String(userId));
@@ -10280,6 +10556,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       const userData = userSnap.data();
       const isSb = userData.shadowBanned === true;
+      const userTrustScore = userData.trustScore !== undefined ? Number(userData.trustScore) : 100;
 
       const userBalance = Number(userData.balance || 0);
       const fileEarnings = Number(userData.fileEarnings || 0);
@@ -10322,26 +10599,135 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).json({ success: false, message: "Invalid withdrawal amount." });
       }
 
-      // Get minimum withdrawal from system settings
-      const settingsSnap = await getDoc(doc(db, "settings", "system"));
-      let minWithdrawal = 100; // Default
-      if (settingsSnap.exists()) {
-        const settingsData = settingsSnap.data();
-        const minWithdrawalValue = settingsData?.withdrawalSettings?.["Minimum Withdrawal"];
-        if (minWithdrawalValue) {
-          minWithdrawal = parseFloat(String(minWithdrawalValue).replace(/[^0-9.]/g, "")) || 100;
-        }
+      // 4. Verify Minimum Withdrawal Amount
+      let minWithdrawal = 100;
+      if (method === "UPI ID") {
+        minWithdrawal = parseFloat(withdrawalSettings.upiMin) || 100;
+      } else if (method === "Bank Account") {
+        minWithdrawal = parseFloat(withdrawalSettings.bankMin) || 500;
+      } else if (method === "USDT (TRC20)") {
+        minWithdrawal = parseFloat(withdrawalSettings.usdtMin) || 10;
       }
 
-      // Ensure minimum is checked correctly. 
-      // If USDT, min is also evaluated after converting or natively depending on display. 
-      // Let's verify if requestedAmountInINR < minWithdrawal in INR terms
-      if (requestedAmountInINR < minWithdrawal) {
-        return res.status(400).json({ success: false, message: `Minimum withdrawal amount is ₹${minWithdrawal} (or equivalent).` });
+      if (isUsdtMethod) {
+        if (requestedAmount < minWithdrawal) {
+          return res.status(400).json({ success: false, message: `Minimum withdrawal amount is ${minWithdrawal} USDT.` });
+        }
+      } else {
+        if (requestedAmount < minWithdrawal) {
+          return res.status(400).json({ success: false, message: `Minimum withdrawal amount is ₹${minWithdrawal}.` });
+        }
       }
 
       if (requestedAmountInINR > availableBalance) {
         return res.status(400).json({ success: false, message: "Insufficient wallet balance." });
+      }
+
+      // 5. Verify Withdrawal Window (IST hours)
+      if (withdrawalSettings.windowStartHour !== undefined && withdrawalSettings.windowEndHour !== undefined) {
+        const startHour = Number(withdrawalSettings.windowStartHour);
+        const endHour = Number(withdrawalSettings.windowEndHour);
+        
+        const kolkataTime = new Intl.DateTimeFormat("en-US", {
+          timeZone: "Asia/Kolkata",
+          hour: "numeric",
+          hour12: false
+        });
+        const currentHour = parseInt(kolkataTime.format(new Date()), 10);
+        
+        if (currentHour < startHour || currentHour >= endHour) {
+          return res.status(400).json({ 
+            success: false, 
+            message: `Withdrawals are only allowed during the official submission window: ${startHour}:00 to ${endHour}:00 IST.` 
+          });
+        }
+      }
+
+      // 6. Fetch User's Recent non-Cancelled/non-Failed Withdrawals for limits validation
+      const recentWDQuery = query(
+        collection(db, "withdrawals"),
+        where("userId", "==", String(userId))
+      );
+      const recentWDSnap = await getDocs(recentWDQuery);
+      const historyList = recentWDSnap.docs.map(doc => doc.data()).filter(w => w.status !== "Cancelled" && w.status !== "Failed");
+
+      // Verify Cooldown Hours
+      const cooldownHours = Number(withdrawalSettings.cooldownHours || 24);
+      if (historyList.length > 0) {
+        // Sort to find the newest
+        const sortedHistory = [...historyList].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const newestWD = sortedHistory[0];
+        if (newestWD && newestWD.createdAt) {
+          const elapsedMs = Date.now() - new Date(newestWD.createdAt).getTime();
+          const elapsedHours = elapsedMs / (1000 * 60 * 60);
+          if (elapsedHours < cooldownHours) {
+            const remainingHours = Math.ceil(cooldownHours - elapsedHours);
+            return res.status(400).json({ 
+              success: false, 
+              message: `Cooldown active. Please wait ${remainingHours} hour(s) before submitting another request.` 
+            });
+          }
+        }
+      }
+
+      // Verify Daily Limits (IST calendar date)
+      const dailyLimit = Number(withdrawalSettings.dailyLimit || 3);
+      const todayISTStr = new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+      const todayCount = historyList.filter(w => {
+        if (!w.createdAt) return false;
+        const wDateStr = new Date(w.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+        return wDateStr === todayISTStr;
+      }).length;
+
+      if (todayCount >= dailyLimit) {
+        return res.status(400).json({ 
+          success: false, 
+          message: `Daily withdrawal limit reached. Maximum ${dailyLimit} requests allowed per day.` 
+        });
+      }
+
+      // 7. Anti-Fraud Rules (Auto-Rejection checks)
+      let isLowTrust = false;
+      if (withdrawalSettings.autoRejectLowTrust) {
+        const threshold = Number(withdrawalSettings.trustScoreThreshold || 20);
+        isLowTrust = userTrustScore < threshold;
+      }
+
+      let isDuplicateDetail = false;
+      if (withdrawalSettings.autoRejectDuplicateDetails) {
+        if (method === "UPI ID" && upiId) {
+          const dupQuery = query(collection(db, "withdrawals"), where("upiId", "==", upiId.trim()));
+          const dupSnap = await getDocs(dupQuery);
+          isDuplicateDetail = dupSnap.docs.some(d => d.data().userId !== String(userId));
+        } else if (method === "Bank Account" && accountNumber) {
+          const dupQuery = query(collection(db, "withdrawals"), where("accountNumber", "==", accountNumber.trim()));
+          const dupSnap = await getDocs(dupQuery);
+          isDuplicateDetail = dupSnap.docs.some(d => d.data().userId !== String(userId));
+        } else if (method === "USDT (TRC20)" && walletAddress) {
+          const dupQuery = query(collection(db, "withdrawals"), where("walletAddress", "==", walletAddress.trim()));
+          const dupSnap = await getDocs(dupQuery);
+          isDuplicateDetail = dupSnap.docs.some(d => d.data().userId !== String(userId));
+        }
+      }
+
+      let hasActiveTicket = false;
+      if (withdrawalSettings.autoRejectActiveSupportTicket) {
+        const ticketQuery = query(
+          collection(db, "tickets"),
+          where("userId", "==", String(userId)),
+          where("status", "==", "open")
+        );
+        const ticketSnap = await getDocs(ticketQuery);
+        hasActiveTicket = !ticketSnap.empty;
+      }
+
+      let autoRejectReason = "";
+      if (isLowTrust) {
+        autoRejectReason = `Trust score (${userTrustScore}) is below required security threshold (${withdrawalSettings.trustScoreThreshold || 20}).`;
+      } else if (isDuplicateDetail) {
+        autoRejectReason = "This payment destination is already registered on another user account.";
+      } else if (hasActiveTicket) {
+        autoRejectReason = "You have an active open support ticket. Please resolve it before requesting withdrawals.";
       }
 
       // Generate unique Request ID
@@ -10356,13 +10742,85 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
-      // Format current date & time
       const now = new Date();
       const currentDateTime = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-      
+
+      if (autoRejectReason) {
+        const prefix = withdrawalSettings.rejectReasonPrefix || "Auto-Rejected: ";
+        const finalRejectReason = `${prefix}${autoRejectReason}`;
+
+        const rejectDocData: any = {
+          id: withdrawalId,
+          withdrawalId,
+          userId: String(userId),
+          firstName: userData.firstName || "User",
+          lastName: userData.lastName || "",
+          username: userData.username || "",
+          mobile: userData.mobile || userData.phone || "",
+          amount: requestedAmount,
+          method,
+          status: "Rejected",
+          rejectReason: finalRejectReason,
+          adminRemark: finalRejectReason,
+          refundAmount: requestedAmount,
+          createdAt: now.toISOString(),
+          rejectedAt: now.toISOString(),
+          shadow_banned: isSb,
+          is_flagged: true,
+          trustScore: userTrustScore
+        };
+
+        if (method === "UPI ID") {
+          rejectDocData.upiId = upiId.trim();
+        } else if (method === "Bank Account") {
+          rejectDocData.accountHolderName = accountHolderName.trim();
+          rejectDocData.accountNumber = accountNumber.trim();
+          rejectDocData.ifscCode = ifscCode.trim();
+          rejectDocData.bankName = bankName.trim();
+        } else if (method === "USDT (TRC20)") {
+          rejectDocData.walletAddress = walletAddress.trim();
+          rejectDocData.network = "TRC20";
+        }
+
+        await setDoc(doc(db, "withdrawals", withdrawalId), rejectDocData);
+
+        const tgMsg = `❌ <b>Withdrawal Request Auto-Rejected</b>\n\n` +
+                      `<b>Amount:</b> ${isUsdtMethod ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\n` +
+                      `<b>Reason:</b> ${finalRejectReason}\n\n` +
+                      `Your request was automatically declined due to security guidelines. Your balance is unaffected.`;
+        await sendTgMessage(String(userId), tgMsg);
+
+        return res.json({ 
+          success: false, 
+          message: `Request auto-rejected: ${autoRejectReason}`, 
+          autoRejected: true, 
+          withdrawalId,
+          status: "Rejected"
+        });
+      }
+
+      // 8. Determine final status & handle Auto-Approval checks
       const userStatus = userData.status || "Normal";
-      const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(userStatus) || (userData?.trustScore !== undefined && userData.trustScore < 20);
-      const withdrawalStatus = isFlagged ? "Security Review" : "Pending";
+      const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(userStatus) || userTrustScore < 20;
+      let withdrawalStatus = isFlagged ? "Security Review" : "Pending";
+
+      let autoApproved = false;
+      if (!isFlagged) {
+        if (method === "UPI ID" && withdrawalSettings.upiAutoApprove) {
+          const limitVal = parseFloat(withdrawalSettings.upiAutoApproveLimit) || 500;
+          if (requestedAmountInINR <= limitVal) autoApproved = true;
+        } else if (method === "Bank Account" && withdrawalSettings.bankAutoApprove) {
+          const limitVal = parseFloat(withdrawalSettings.bankAutoApproveLimit) || 1000;
+          if (requestedAmountInINR <= limitVal) autoApproved = true;
+        } else if (method === "USDT (TRC20)" && withdrawalSettings.usdtAutoApprove) {
+          const limitVal = parseFloat(withdrawalSettings.usdtAutoApproveLimit) || 10;
+          if (requestedAmount <= limitVal) autoApproved = true;
+        }
+      }
+
+      if (autoApproved) {
+        withdrawalStatus = "Approved";
+      }
 
       const withdrawalDocData: any = {
         id: withdrawalId,
@@ -10379,7 +10837,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         receiveAmount: Number(receiveAmount || 0),
         createdAt: now.toISOString(),
         shadow_banned: isSb,
-        is_flagged: isFlagged
+        is_flagged: isFlagged,
+        trustScore: userTrustScore
       };
 
       if (method === "UPI ID") {
@@ -10398,7 +10857,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       await setDoc(doc(db, "withdrawals", withdrawalId), withdrawalDocData);
 
       // 2. Deduct available balance immediately by adding it to pendingWithdrawals on the user doc
-      // Also save details on user profile so it acts as "Saved Account details"
       const userUpdateData: any = {
         updatedAt: now.toISOString()
       };
@@ -10428,11 +10886,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // 3. Immediately send Telegram Bot notification
       let tgMsg = "";
       if (method === "USDT (TRC20)") {
-        tgMsg = `💸 <b>USDT Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ${requestedAmount} USDT (≈ ₹${requestedAmountInINR.toFixed(2)})\n<b>Fee:</b> ${processingFee} USDT\n<b>Receive Amount:</b> <b>${receiveAmount} USDT</b>\n<b>Wallet:</b> <code>${walletAddress.trim()}</code>\n<b>Network:</b> TRC20 (Fixed)\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+        tgMsg = `💸 <b>USDT Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ${requestedAmount} USDT (≈ ₹${requestedAmountInINR.toFixed(2)})\n<b>Fee:</b> ${processingFee} USDT\n<b>Receive Amount:</b> <b>${receiveAmount} USDT</b>\n<b>Wallet:</b> <code>${walletAddress.trim()}</code>\n<b>Network:</b> TRC20 (Fixed)\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
       } else if (method === "Bank Account") {
-        tgMsg = `💸 <b>Bank Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>Bank Name:</b> ${bankName.trim()}\n<b>A/C No:</b> <code>${accountNumber.trim()}</code>\n<b>Holder:</b> ${accountHolderName.trim()}\n<b>IFSC:</b> <code>${ifscCode.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+        tgMsg = `💸 <b>Bank Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>Bank Name:</b> ${bankName.trim()}\n<b>A/C No:</b> <code>${accountNumber.trim()}</code>\n<b>Holder:</b> ${accountHolderName.trim()}\n<b>IFSC:</b> <code>${ifscCode.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
       } else {
-        tgMsg = `💸 <b>UPI Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>UPI ID:</b> <code>${upiId.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+        tgMsg = `💸 <b>UPI Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>UPI ID:</b> <code>${upiId.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
       }
 
       await sendTgMessage(String(userId), tgMsg);

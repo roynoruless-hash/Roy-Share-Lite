@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { loadAdsgramSDK, getAdsgramConfig } from "../lib/adsManager";
 
 export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> = ({ onBack, initialTab = "wallet" }) => {
   const { user } = useTelegramAuth();
@@ -43,6 +44,8 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
   // System settings for minimum withdrawal
   const [minWithdrawal, setMinWithdrawal] = useState<number>(100);
   const [loadingSettings, setLoadingSettings] = useState<boolean>(true);
+  const [withdrawalSettings, setWithdrawalSettings] = useState<any>(null);
+  const [adLoading, setAdLoading] = useState<boolean>(false);
 
   // History State
   const [history, setHistory] = useState<any[]>([]);
@@ -96,13 +99,12 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
         settingsSnap.forEach((doc) => {
           if (doc.id === "system") {
             const settingsData = doc.data();
-            const minWithdrawalValue = settingsData?.withdrawalSettings?.["Minimum Withdrawal"];
-            if (minWithdrawalValue) {
-              const parsed = parseFloat(String(minWithdrawalValue).replace(/[^0-9.]/g, ""));
-              if (!isNaN(parsed)) {
-                setMinWithdrawal(parsed);
-              }
-            }
+            const wSettings = settingsData?.withdrawalSettings || {};
+            setWithdrawalSettings(wSettings);
+            
+            // Set dynamic minWithdrawal depending on initial paymentMethod ("UPI")
+            const upiMin = parseFloat(wSettings.upiMin) || 100;
+            setMinWithdrawal(upiMin);
           }
         });
       } catch (err) {
@@ -113,6 +115,18 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
     };
     fetchMinWithdrawal();
   }, []);
+
+  // Update dynamic minWithdrawal limit when method or settings change
+  useEffect(() => {
+    if (!withdrawalSettings) return;
+    if (paymentMethod === "UPI") {
+      setMinWithdrawal(parseFloat(withdrawalSettings.upiMin) || 100);
+    } else if (paymentMethod === "BANK") {
+      setMinWithdrawal(parseFloat(withdrawalSettings.bankMin) || 500);
+    } else if (paymentMethod === "USDT") {
+      setMinWithdrawal(parseFloat(withdrawalSettings.usdtMin) || 10);
+    }
+  }, [paymentMethod, withdrawalSettings]);
 
   // Fetch Withdrawal History
   const fetchHistory = async () => {
@@ -162,14 +176,40 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
     const USDT_RATE = 90;
     const amountInINR = isUsdt ? parsedAmount * USDT_RATE : parsedAmount;
 
-    // Check minimum withdrawal
-    if (amountInINR < minWithdrawal) {
-      if (isUsdt) {
-        setError(`Minimum withdrawal amount is ${(minWithdrawal / USDT_RATE).toFixed(2)} USDT (₹${minWithdrawal}).`);
-      } else {
-        setError(`Minimum withdrawal amount is ₹${minWithdrawal}.`);
-      }
+    // Check if withdrawals are enabled globally
+    if (withdrawalSettings?.enabled === false) {
+      setError("Withdrawals are currently disabled by administrator.");
       return;
+    }
+
+    // Check if specific method is enabled
+    let methodEnabled = true;
+    if (paymentMethod === "UPI") {
+      methodEnabled = withdrawalSettings?.upiEnabled !== false;
+    } else if (paymentMethod === "BANK") {
+      methodEnabled = withdrawalSettings?.bankEnabled !== false;
+    } else if (paymentMethod === "USDT") {
+      methodEnabled = withdrawalSettings?.usdtEnabled !== false;
+    }
+
+    if (!methodEnabled) {
+      setError("Selected payment method is currently disabled by administrator.");
+      return;
+    }
+
+    // Check minimum withdrawal
+    if (isUsdt) {
+      const minVal = parseFloat(withdrawalSettings?.usdtMin) || 10;
+      if (parsedAmount < minVal) {
+        setError(`Minimum withdrawal amount is ${minVal} USDT.`);
+        return;
+      }
+    } else {
+      const minVal = parseFloat(paymentMethod === "UPI" ? withdrawalSettings?.upiMin : withdrawalSettings?.bankMin) || (paymentMethod === "UPI" ? 100 : 500);
+      if (parsedAmount < minVal) {
+        setError(`Minimum withdrawal amount is ₹${minVal}.`);
+        return;
+      }
     }
 
     // Check available balance
@@ -222,6 +262,60 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
     if (receive <= 0) {
       setError("Withdrawal amount is too small after processing fee.");
       return;
+    }
+
+    // Trigger Adsgram flow before submit
+    const isInsideTelegram = typeof window !== "undefined" && !!(window as any).Telegram?.WebApp?.initData;
+    setAdLoading(true);
+
+    try {
+      // 1. Determine active ad type and block ID
+      const selectedAdType = withdrawalSettings?.adsTypeBeforeWithdrawal || "Reward";
+      console.log(`[Withdrawal Ad] Loading configuration for type: ${selectedAdType}`);
+      
+      let activeBlockId = "3856"; // Fallback to Adsgram test block ID
+      const adConfig = await getAdsgramConfig(selectedAdType);
+      if (adConfig && adConfig.blockId) {
+        activeBlockId = adConfig.blockId;
+      }
+
+      // 2. Call Telegram ready
+      const currentTg = (window as any).Telegram?.WebApp;
+      if (currentTg) {
+        try {
+          currentTg.ready();
+        } catch (tgErr) {
+          console.error("tg.ready error", tgErr);
+        }
+      }
+
+      // 3. Load Adsgram SDK
+      const adsgram = await loadAdsgramSDK();
+      if (!adsgram) {
+        throw new Error("Adsgram SDK failed to resolve.");
+      }
+
+      // 4. Initialize and show ad
+      console.log(`[Withdrawal Ad] Initializing ad controller with block ID: ${activeBlockId}`);
+      const adController = adsgram.init({ blockId: activeBlockId });
+      
+      await adController.show();
+      console.log("[Withdrawal Ad] User successfully completed ad viewing.");
+
+    } catch (adError: any) {
+      console.error("[Withdrawal Ad] Ad presentation failed or skipped:", adError);
+      const errStr = typeof adError === "object" ? (adError?.message || adError?.description || JSON.stringify(adError)) : String(adError);
+      
+      // If we are in real Telegram app, require complete view
+      if (isInsideTelegram) {
+        setError(`Security verification failed: Please watch the full sponsored ad to verify and submit your withdrawal. (Detail: ${errStr || "ad closed"})`);
+        setAdLoading(false);
+        return;
+      } else {
+        console.warn("[Withdrawal Ad] Outside Telegram environment, bypassing ad verification for development.");
+      }
+    } finally {
+      setAdLoading(false);
     }
 
     try {
@@ -566,6 +660,26 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                     </div>
                   </div>
 
+                  {/* Globally Disabled warning */}
+                  {withdrawalSettings?.enabled === false && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs p-4 rounded-xl flex items-center gap-3">
+                      <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
+                      <span>All withdrawals are temporarily disabled by the administrator.</span>
+                    </div>
+                  )}
+
+                  {/* Method Disabled warning */}
+                  {withdrawalSettings?.enabled !== false && withdrawalSettings && (
+                    (paymentMethod === "UPI" && withdrawalSettings.upiEnabled === false) ||
+                    (paymentMethod === "BANK" && withdrawalSettings.bankEnabled === false) ||
+                    (paymentMethod === "USDT" && withdrawalSettings.usdtEnabled === false)
+                  ) && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs p-4 rounded-xl flex items-center gap-3">
+                      <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
+                      <span>This payment method is temporarily disabled. Please choose another channel.</span>
+                    </div>
+                  )}
+
                   {error && (
                     <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-4 rounded-xl flex items-center gap-3">
                       <AlertTriangle className="w-5 h-5 flex-shrink-0" />
@@ -737,10 +851,22 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
 
                   <button
                     type="submit"
-                    disabled={loading}
-                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white py-4 rounded-2xl font-bold shadow-xl shadow-blue-500/10 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    disabled={
+                      loading || 
+                      adLoading || 
+                      withdrawalSettings?.enabled === false ||
+                      (paymentMethod === "UPI" && withdrawalSettings?.upiEnabled === false) ||
+                      (paymentMethod === "BANK" && withdrawalSettings?.bankEnabled === false) ||
+                      (paymentMethod === "USDT" && withdrawalSettings?.usdtEnabled === false)
+                    }
+                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white py-4 rounded-2xl font-bold shadow-xl shadow-blue-500/10 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    {loading ? (
+                    {adLoading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Loading Verification Ad...
+                      </>
+                    ) : loading ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
                         Processing Securely...

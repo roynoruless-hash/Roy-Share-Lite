@@ -17,7 +17,8 @@ import {
   updateDoc,
   deleteDoc,
   writeBatch,
-  Timestamp
+  Timestamp,
+  runTransaction
 } from "firebase/firestore";
 import { parseInKolkata, getGiveawayStatus } from "../lib/dateUtils";
 
@@ -344,164 +345,233 @@ router.post("/lucky-draw/enroll", async (req: any, res: any) => {
   }
 });
 
-// 2. Submit Entry to UPI Giveaway
-router.post("/submit-entry", async (req: any, res: any) => {
+// 2. Lucky Number Giveaway: Reserve Number (Temporary Reservation)
+router.post("/reserve-number", async (req: any, res: any) => {
   try {
-    const { giveawayId, telegramId, username, firstName, upiId, qrUrl, qrPath } = req.body;
+    const { giveawayId, telegramId, username, firstName, selectedNumber } = req.body;
     
-    if (!giveawayId || !telegramId) {
-      return res.status(400).json({ success: false, error: "Missing giveawayId or telegramId" });
+    if (!giveawayId || !telegramId || !selectedNumber) {
+      return res.status(400).json({ success: false, error: "Missing required parameters" });
     }
 
-    // Check if giveaway exists
+    const num = Number(selectedNumber);
+
+    // Get giveaway details
     const giveawayDoc = await getDoc(doc(db, "upi_giveaways", giveawayId));
     if (!giveawayDoc.exists()) {
       return res.status(404).json({ success: false, error: "Giveaway not found" });
     }
 
     const giveaway = giveawayDoc.data();
-    
-    // Validate status and dates using getGiveawayStatus
     const currentStatus = getGiveawayStatus({ id: giveawayDoc.id, ...giveaway });
     if (currentStatus !== "LIVE") {
       return res.status(400).json({ success: false, error: "This giveaway is not active or has already closed." });
     }
 
-    // Check Duplicate Telegram ID & accounts for SAME giveaway (Always active to prevent multi-entries)
-    const qTelegramId = query(
-      collection(db, "upi_giveaway_entries"), 
-      where("giveawayId", "==", giveawayId), 
-      where("telegramId", "==", String(telegramId))
-    );
-    const snapTelegramId = await getDocs(qTelegramId);
-    if (!snapTelegramId.empty) {
-      return res.status(400).json({ success: false, error: "Multiple entries are not allowed! You have already submitted an entry for this giveaway." });
+    // Verify selected number bounds
+    const minNum = Number(giveaway.minNumber || 1);
+    const maxNum = Number(giveaway.maxNumber || 100);
+    if (num < minNum || num > maxNum) {
+      return res.status(400).json({ success: false, error: `Invalid number. Choose between ${minNum} and ${maxNum}.` });
     }
 
-    if (username) {
-      const qUsername = query(
+    // Transaction to safely reserve the number and verify user duplicate check
+    const result = await runTransaction(db, async (transaction) => {
+      // Check if user already has an entry for this giveaway
+      const userEntryRef = doc(db, "upi_giveaway_entries", `${giveawayId}_${telegramId}`);
+      const userEntrySnap = await transaction.get(userEntryRef);
+      if (userEntrySnap.exists()) {
+        const uEntry = userEntrySnap.data();
+        if (uEntry.status === "Confirmed" || uEntry.status === "Winner" || uEntry.status === "Approved") {
+          throw new Error("You have already selected a number for this giveaway! One number per Telegram account only.");
+        }
+      }
+
+      // Check if this specific number is already reserved by another user
+      const entriesQuery = query(
         collection(db, "upi_giveaway_entries"),
         where("giveawayId", "==", giveawayId),
-        where("username", "==", String(username))
+        where("selectedNumber", "==", num)
       );
-      const snapUsername = await getDocs(qUsername);
-      if (!snapUsername.empty) {
-        return res.status(400).json({ success: false, error: "Duplicate Telegram account detected! An entry with this Telegram username is already registered." });
+      
+      const entriesSnap = await getDocs(entriesQuery);
+      for (const d of entriesSnap.docs) {
+        const entry = d.data();
+        // Ignore current user's own document
+        if (entry.telegramId === String(telegramId)) continue;
+
+        if (entry.status === "Confirmed" || entry.status === "Winner" || entry.status === "Approved" || entry.status === "Rejected") {
+          throw new Error("This number has already been selected. Please choose another number.");
+        }
+        
+        if (entry.status === "PendingAd") {
+          // Check if PendingAd is active (less than 60s ago)
+          const reservedAt = new Date(entry.reservedAt).getTime();
+          const now = Date.now();
+          if (now - reservedAt < 60000) {
+            throw new Error("This number is temporarily locked by another user watching an ad. Please choose another number.");
+          }
+        }
       }
-    }
 
-    // Check if UPI ID is already used to flag warnings
-    let isDuplicateUpi = false;
-    if (upiId && upiId.trim()) {
-      const qUpi = query(
-        collection(db, "upi_giveaway_entries"),
-        where("giveawayId", "==", giveawayId),
-        where("upiId", "==", upiId.trim())
-      );
-      const snapUpi = await getDocs(qUpi);
-      if (!snapUpi.empty) {
-        isDuplicateUpi = true;
-      }
-    }
+      // Number is available, reserve it
+      transaction.set(userEntryRef, {
+        giveawayId,
+        telegramId: String(telegramId),
+        username: username || "",
+        firstName: firstName || "",
+        selectedNumber: num,
+        reservedAt: new Date().toISOString(),
+        status: "PendingAd", // temporary reservation
+      }, { merge: true });
 
-    const userDocRef = doc(db, "users", String(telegramId));
-    const userDoc = await getDoc(userDocRef);
-    const isSb = userDoc.exists() && userDoc.data()?.shadowBanned === true;
-
-    // Store entry
-    const entryId = `${giveawayId}_${telegramId}`;
-    
-    // Generate unique ticket number
-    const countQuery = query(collection(db, "upi_giveaway_entries"), where("giveawayId", "==", giveawayId));
-    const countSnap = await getDocs(countQuery);
-    const count = countSnap.size + 1;
-    const ticketNumber = `RS${String(count).padStart(6, '0')}`;
-
-    const entryData = {
-      giveawayId,
-      telegramId: String(telegramId),
-      username: username || "",
-      firstName: firstName || "",
-      upiId: upiId || "",
-      qrUrl: qrUrl || "",
-      qrPath: qrPath || "",
-      entryTime: new Date().toISOString(),
-      status: "Pending", // Pending, Winner, Not Selected, Rejected
-      rewardAmount: 0,
-      paymentStatus: "Pending", // Pending, Paid, Rejected
-      isDuplicateUpi,
-      shadow_banned: isSb,
-      ticketNumber
-    };
-
-    await setDoc(doc(db, "upi_giveaway_entries", entryId), entryData);
-
-    // Increase Trust Score for Giveaway Participation (+5)
-    adjustTrustScore(String(telegramId), 5, "Giveaway Participation").catch(() => {});
-
-    // Audit Log
-    await writeAuditLog(giveawayId, giveaway.title, "Entry Submitted", {
-      telegramId: String(telegramId),
-      username,
-      firstName,
-      isDuplicateUpi
+      return { success: true };
     });
 
-    // Send confirmation bot message
-    const messageText = `✅ <b>Your UPI Giveaway entry has been received successfully.</b>\n\n` +
-      `Giveaway: <b>${giveaway.title}</b>\n` +
-      `Status: <b>Enrolled 🍀</b>\n\n` +
-      `Please wait for the live results. If you are randomly drawn as a winner, we will notify you automatically! Good luck! 🍀`;
-    
-    await sendTgMessage(String(telegramId), messageText);
-
-    return res.json({ success: true, message: "Entry submitted successfully!", ticketNumber });
+    return res.json(result);
 
   } catch (err: any) {
-    console.error("UPI Giveaway entry error:", err);
-    return res.status(500).json({ success: false, error: err.message || "Failed to submit entry" });
+    console.error("Reserve number error:", err);
+    return res.status(400).json({ success: false, error: err.message || "Failed to reserve number." });
   }
 });
 
-// 3. Create or Update Giveaway Campaign
+// 3. Confirm Number (Permanently confirmed after successful ad completion)
+router.post("/confirm-number", async (req: any, res: any) => {
+  try {
+    const { giveawayId, telegramId } = req.body;
+
+    if (!giveawayId || !telegramId) {
+      return res.status(400).json({ success: false, error: "Missing required parameters" });
+    }
+
+    const entryId = `${giveawayId}_${telegramId}`;
+    const entryRef = doc(db, "upi_giveaway_entries", entryId);
+    const entrySnap = await getDoc(entryRef);
+
+    if (!entrySnap.exists()) {
+      return res.status(400).json({ success: false, error: "No pending reservation found. Please select a number first." });
+    }
+
+    const entry = entrySnap.data();
+    if (entry.status !== "PendingAd") {
+      return res.status(400).json({ success: false, error: "This reservation is already confirmed or invalid." });
+    }
+
+    // Verify it hasn't timed out (60 seconds)
+    const reservedAt = new Date(entry.reservedAt).getTime();
+    const now = Date.now();
+    if (now - reservedAt > 60000) {
+      // Delete old timed out reservation
+      await deleteDoc(entryRef);
+      return res.status(400).json({ success: false, error: "Your session timed out. Please choose your number again." });
+    }
+
+    // Confirm selection permanently
+    await updateDoc(entryRef, {
+      status: "Confirmed",
+      entryTime: new Date().toISOString(),
+    });
+
+    // Write Audit Log
+    await writeAuditLog(giveawayId, "Lucky Number Giveaway", "Number Reserved Permanently", {
+      telegramId,
+      selectedNumber: entry.selectedNumber,
+      username: entry.username
+    });
+
+    return res.json({ success: true, message: "Number reserved permanently! Participation confirmed." });
+
+  } catch (err: any) {
+    console.error("Confirm number error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to confirm number selection" });
+  }
+});
+
+// 4. Release Number (If ad is closed or failed)
+router.post("/release-number", async (req: any, res: any) => {
+  try {
+    const { giveawayId, telegramId } = req.body;
+
+    if (!giveawayId || !telegramId) {
+      return res.status(400).json({ success: false, error: "Missing required parameters" });
+    }
+
+    const entryId = `${giveawayId}_${telegramId}`;
+    const entryRef = doc(db, "upi_giveaway_entries", entryId);
+    const entrySnap = await getDoc(entryRef);
+
+    if (entrySnap.exists()) {
+      const entry = entrySnap.data();
+      if (entry.status === "PendingAd") {
+        await deleteDoc(entryRef);
+        console.log(`[LuckyNumber] Released reservation for user ${telegramId} on number ${entry.selectedNumber}`);
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("Release number error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to release reservation" });
+  }
+});
+
+// 5. Create or Update Lucky Number Giveaway Campaign
 router.post("/save-giveaway", async (req: any, res: any) => {
   try {
-    const { id, title, description, bannerUrl, totalBudget, totalWinners, minReward, maxReward, endDate, status, entryRules, autoPostChannel } = req.body;
+    const { 
+      id, 
+      title, 
+      description, 
+      bannerUrl, 
+      prizeAmount, 
+      totalWinners, 
+      numberRange, 
+      minNumber, 
+      maxNumber, 
+      adsType, 
+      numberVisibility, 
+      endDate, 
+      status,
+      autoPostChannel
+    } = req.body;
     
-    if (!title || !bannerUrl || !totalBudget || !totalWinners || !endDate) {
+    if (!title || !bannerUrl || !prizeAmount || !totalWinners || !endDate || !numberRange) {
       return res.status(400).json({ success: false, error: "Missing required giveaway configurations" });
     }
 
     const giveawayId = id || `giveaway_${Date.now()}`;
     const isNew = !id;
 
-    // Check constraints
-    if (minReward * totalWinners > totalBudget) {
-      return res.status(400).json({ success: false, error: `Budget is too low! ₹${totalBudget} budget is insufficient for ${totalWinners} winners with ₹${minReward} minimum payout each. Minimum budget required is ₹${minReward * totalWinners}.` });
-    }
+    const minNum = numberRange === "Manual Range" ? Number(minNumber || 1) : 1;
+    let maxNum = 100;
+    if (numberRange === "1 to 50") maxNum = 50;
+    else if (numberRange === "1 to 100") maxNum = 100;
+    else if (numberRange === "1 to 200") maxNum = 200;
+    else if (numberRange === "1 to 300") maxNum = 300;
+    else if (numberRange === "1 to 500") maxNum = 500;
+    else if (numberRange === "1 to 600") maxNum = 600;
+    else if (numberRange === "Manual Range") maxNum = Number(maxNumber || 100);
 
-    const giveawayData = {
+    const totalBudget = Number(prizeAmount) * Number(totalWinners);
+
+    const giveawayData: any = {
       title,
       description: description || "",
       bannerUrl,
-      totalBudget: Number(totalBudget),
+      prizeAmount: Number(prizeAmount),
+      totalBudget: totalBudget, // stored for backward compatibility
       totalWinners: Number(totalWinners),
-      minReward: Number(minReward),
-      maxReward: Number(maxReward),
+      numberRange,
+      minNumber: minNum,
+      maxNumber: maxNum,
+      adsgramType: adsType || "Reward", // for backward compatibility/Adsgram Settings
+      adsType: adsType || "Reward",
+      numberVisibility: numberVisibility || "Show Remaining Numbers",
       endDate: Timestamp.fromDate(parseInKolkata(endDate)),
       status: status || "Draft",
-      entryRules: entryRules || {
-        telegramLoginRequired: true,
-        channelVerificationRequired: true,
-        groupVerificationRequired: true,
-        oneEntryPerTelegramAccount: true,
-        allowUpiId: true,
-        allowQrUpload: true,
-        warnDuplicateUpi: true
-      },
       createdAt: new Date().toISOString(),
       winnersDrawn: false,
-      previewWinners: []
     };
 
     // If updating, preserve existing draw outcomes
@@ -510,8 +580,12 @@ router.post("/save-giveaway", async (req: any, res: any) => {
       if (existingDoc.exists()) {
         const exData = existingDoc.data();
         giveawayData.createdAt = exData.createdAt || giveawayData.createdAt;
-        giveawayData.winnersDrawn = exData.winnersDrawn || false;
-        giveawayData.previewWinners = exData.previewWinners || [];
+        giveawayData.winnersDrawn = exData.winnersDrawn !== undefined ? exData.winnersDrawn : false;
+        giveawayData.winnerId = exData.winnerId || null;
+        giveawayData.winnerNumber = exData.winnerNumber || null;
+        giveawayData.winnerName = exData.winnerName || null;
+        giveawayData.winnerUsername = exData.winnerUsername || null;
+        giveawayData.winnerStatus = exData.winnerStatus || null;
       }
     }
 
@@ -523,7 +597,7 @@ router.post("/save-giveaway", async (req: any, res: any) => {
     // Auto post to channel if requested and status is "Live"
     let channelPostSuccess = false;
     if (autoPostChannel && status === "Live") {
-      channelPostSuccess = await postGiveawayToChannel(giveawayId, title, description, bannerUrl, Number(totalBudget), Number(totalWinners));
+      channelPostSuccess = await postGiveawayToChannel(giveawayId, title, description, bannerUrl, totalBudget, Number(totalWinners));
     }
 
     return res.json({ 
@@ -539,8 +613,8 @@ router.post("/save-giveaway", async (req: any, res: any) => {
   }
 });
 
-// 4. Generate Winner Preview (Temporary, unlimited regeneration)
-router.post("/preview-winners", async (req: any, res: any) => {
+// 6. Draw Winner (Select a random participant from Confirmed status)
+router.post("/draw-winner", async (req: any, res: any) => {
   try {
     const { giveawayId } = req.body;
     if (!giveawayId) {
@@ -554,97 +628,66 @@ router.post("/preview-winners", async (req: any, res: any) => {
     }
 
     const giveaway = giveawaySnap.data();
-    if (giveaway.winnersDrawn) {
-      return res.status(400).json({ success: false, error: "Winners have already been locked and confirmed for this giveaway!" });
-    }
 
-    // Fetch all entries that are NOT explicitly rejected
-    const entriesQuery = query(collection(db, "upi_giveaway_entries"), where("giveawayId", "==", giveawayId));
+    // Fetch all entries with status "Confirmed"
+    const entriesQuery = query(
+      collection(db, "upi_giveaway_entries"), 
+      where("giveawayId", "==", giveawayId),
+      where("status", "==", "Confirmed")
+    );
     const entriesSnap = await getDocs(entriesQuery);
-    const entries = entriesSnap.docs
-      .map(d => ({ id: d.id, ...d.data() } as any))
-      .filter((e: any) => e.status !== "Rejected");
+    const entries = entriesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
     if (entries.length === 0) {
-      return res.status(400).json({ success: false, error: "No entries found to pick winners from." });
+      return res.status(400).json({ success: false, error: "No confirmed entries found to pick a winner from." });
     }
 
-    const totalWinnersToSelect = Math.min(giveaway.totalWinners, entries.length);
-    const totalBudget = giveaway.totalBudget;
-    const minReward = giveaway.minReward;
-    const maxReward = giveaway.maxReward;
+    // Pick a random confirmed entry
+    const randomIndex = Math.floor(Math.random() * entries.length);
+    const winnerEntry = entries[randomIndex];
 
-    // Shuffle entries using standard Fisher-Yates
-    const shuffled = [...entries];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-
-    const selectedWinners = shuffled.slice(0, totalWinnersToSelect);
-    let remainingBudget = totalBudget;
-    const previewList: any[] = [];
-
-    // Assign rewards with dynamic recalculation & bounds protection
-    for (let i = 0; i < selectedWinners.length; i++) {
-      const winner = selectedWinners[i];
-      const positionsLeft = selectedWinners.length - i;
-
-      // Ensure minimum safety for future winners
-      const reserveForOthers = (positionsLeft - 1) * minReward;
-      const maxAllowedByBudget = remainingBudget - reserveForOthers;
-
-      const upperLimit = Math.min(maxReward, maxAllowedByBudget);
-      const lowerLimit = Math.min(minReward, upperLimit);
-
-      let reward = minReward;
-      if (upperLimit > lowerLimit) {
-        reward = Math.floor(Math.random() * (upperLimit - lowerLimit + 1)) + lowerLimit;
-      } else {
-        reward = lowerLimit;
-      }
-
-      remainingBudget -= reward;
-      previewList.push({
-        id: winner.id,
-        telegramId: winner.telegramId,
-        username: winner.username,
-        firstName: winner.firstName,
-        upiId: winner.upiId,
-        qrUrl: winner.qrUrl,
-        entryTime: winner.entryTime,
-        rewardAmount: reward,
-        isDuplicateUpi: winner.isDuplicateUpi || false
-      });
-    }
-
-    // Save temporary preview winners list to giveaway document
+    // Save winner details as Pending verification in giveaway document
     await updateDoc(giveawayDocRef, {
-      previewWinners: previewList,
+      winnerId: winnerEntry.telegramId,
+      winnerNumber: winnerEntry.selectedNumber,
+      winnerName: winnerEntry.firstName || "Anonymous User",
+      winnerUsername: winnerEntry.username || "",
+      winnerStatus: "Pending",
       status: "Drawing Winners"
     });
 
+    // Update individual entry status to Winner
+    await updateDoc(doc(db, "upi_giveaway_entries", winnerEntry.id), {
+      status: "Winner",
+      drawConfirmedAt: new Date().toISOString()
+    });
+
     // Write Audit Log
-    await writeAuditLog(giveawayId, giveaway.title, "Preview Generated", {
-      winnersCount: previewList.length,
-      totalDistributed: totalBudget - remainingBudget,
-      remainingBudget
+    await writeAuditLog(giveawayId, giveaway.title, "Winner Drawn", {
+      telegramId: winnerEntry.telegramId,
+      number: winnerEntry.selectedNumber,
+      name: winnerEntry.firstName
     });
 
     return res.json({
       success: true,
-      message: "Preview winners list generated!",
-      winners: previewList
+      message: "Winner drawn successfully!",
+      winner: {
+        telegramId: winnerEntry.telegramId,
+        number: winnerEntry.selectedNumber,
+        name: winnerEntry.firstName,
+        username: winnerEntry.username
+      }
     });
 
   } catch (err: any) {
-    console.error("Preview winners error:", err);
-    return res.status(500).json({ success: false, error: err.message || "Failed to generate winners preview" });
+    console.error("Draw winner error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to draw winner" });
   }
 });
 
-// 5. Confirm Winners Permanently
-router.post("/confirm-winners", async (req: any, res: any) => {
+// 7. Approve Winner (Credit Wallet automatically, mark complete, notify)
+router.post("/approve-winner", async (req: any, res: any) => {
   try {
     const { giveawayId } = req.body;
     if (!giveawayId) {
@@ -658,83 +701,231 @@ router.post("/confirm-winners", async (req: any, res: any) => {
     }
 
     const giveaway = giveawaySnap.data();
-    if (giveaway.winnersDrawn) {
-      return res.status(400).json({ success: false, error: "Winners have already been confirmed and locked." });
+    if (!giveaway.winnerId || giveaway.winnerStatus !== "Pending") {
+      return res.status(400).json({ success: false, error: "No pending winner to approve." });
     }
 
-    const previewList = giveaway.previewWinners || [];
-    if (previewList.length === 0) {
-      return res.status(400).json({ success: false, error: "No winner preview has been generated yet. Please generate a preview first." });
-    }
+    const prizeAmt = Number(giveaway.prizeAmount || 100);
 
-    // Save winner statuses to entry collection
-    const batch = writeBatch(db);
-
-    // Retrieve all entries to mark non-winners
-    const entriesQuery = query(collection(db, "upi_giveaway_entries"), where("giveawayId", "==", giveawayId));
-    const entriesSnap = await getDocs(entriesQuery);
-    const allEntries = entriesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-
-    const winnerIds = new Set(previewList.map((w: any) => w.id));
-
-    // Update each entry
-    for (const entry of allEntries) {
-      if (entry.status === "Rejected") continue; // keep rejected
-
-      const entryRef = doc(db, "upi_giveaway_entries", entry.id);
-      if (winnerIds.has(entry.id)) {
-        const winDetails = previewList.find((w: any) => w.id === entry.id);
-        batch.update(entryRef, {
-          status: "Winner",
-          rewardAmount: Number(winDetails.rewardAmount),
-          paymentStatus: "Pending",
-          drawConfirmedAt: new Date().toISOString()
-        });
-      } else {
-        batch.update(entryRef, {
-          status: "Not Selected",
-          rewardAmount: 0
-        });
+    // 1. Transaction to Credit Wallet
+    await runTransaction(db, async (transaction) => {
+      const userRef = doc(db, "users", String(giveaway.winnerId));
+      const userSnap = await transaction.get(userRef);
+      if (!userSnap.exists()) {
+        throw new Error(`User profile for Telegram ID ${giveaway.winnerId} not found. Cannot credit wallet.`);
       }
-    }
 
-    // Set Giveaway state as Completed
-    batch.update(giveawayDocRef, {
+      const userData = userSnap.data();
+      const currentBalance = Number(userData.balance || 0);
+      const newBalance = currentBalance + prizeAmt;
+
+      // Recalculate available balance
+      const fileEarnings = Number(userData.fileEarnings || 0);
+      const linkEarnings = Number(userData.linkEarnings || 0);
+      const referralEarnings = Number(userData.referralEarnings || 0);
+      const bonusBalance = Number(userData.bonusBalance || 0);
+      const rewardBalance = Number(userData.rewardBalance || 0);
+      const withdrawnAmount = Number(userData.withdrawnAmount || userData.totalWithdrawn || 0);
+      const pendingWithdrawals = Number(userData.pendingWithdrawals || 0);
+
+      const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + newBalance - withdrawnAmount - pendingWithdrawals;
+
+      // Update user wallet
+      transaction.update(userRef, {
+        balance: newBalance,
+        availableBalance: availableBalance
+      });
+
+      // Log transaction to activityLogs
+      const logRef = doc(collection(db, "activityLogs"));
+      transaction.set(logRef, {
+        adminId: "admin",
+        targetUserId: String(giveaway.winnerId),
+        action: "add_balance",
+        amount: prizeAmt,
+        reason: `Prize payout for Lucky Number Giveaway: ${giveaway.title}`,
+        createdAt: new Date()
+      });
+    });
+
+    // 2. Update Entry document
+    const entryId = `${giveawayId}_${giveaway.winnerId}`;
+    await updateDoc(doc(db, "upi_giveaway_entries", entryId), {
+      status: "Winner",
+      paymentStatus: "Paid",
+      rewardAmount: prizeAmt,
+      paidAt: new Date().toISOString()
+    });
+
+    // 3. Update giveaway document
+    await updateDoc(giveawayDocRef, {
+      winnerStatus: "Approved",
       status: "Completed",
       winnersDrawn: true
     });
 
-    await batch.commit();
+    // 4. Send Bot confirmation message
+    const botMsg = `🏆 <b>CONGRATULATIONS! You Won!</b> 🏆\n\n` +
+      `You are the lucky winner of our Lucky Number Giveaway campaign: <b>${giveaway.title}</b>!\n\n` +
+      `💰 Winning Amount: <b>₹${prizeAmt}</b>\n` +
+      `🍀 Your Lucky Number: <b>${giveaway.winnerNumber}</b>\n\n` +
+      `<b>₹${prizeAmt}</b> has been credited instantly to your Roy Share Wallet. You can withdraw it or check your balance anytime inside the app! 🎉`;
+    
+    await sendTgMessage(String(giveaway.winnerId), botMsg);
 
-    // Write Audit Log
-    await writeAuditLog(giveawayId, giveaway.title, "Winners Confirmed", {
-      winnersCount: previewList.length,
-      winners: previewList.map((w: any) => ({ name: w.firstName, reward: w.rewardAmount }))
+    // Audit Log
+    await writeAuditLog(giveawayId, giveaway.title, "Winner Approved", {
+      telegramId: giveaway.winnerId,
+      number: giveaway.winnerNumber,
+      amount: prizeAmt
     });
 
-    // Notify Winners Automatically
-    for (const winner of previewList) {
-      const messageText = `🏆 <b>CONGRATULATIONS! You Won!</b> 🏆\n\n` +
-        `You have been drawn as a lucky winner of <b>${giveaway.title}</b>!\n\n` +
-        `💰 Winning Amount: <b>₹${winner.rewardAmount}</b>\n` +
-        `🎁 Payout Method: <b>UPI / QR</b>\n\n` +
-        `Our team is verifying and processing the payment. You will receive a direct notification once the reward is approved! Thank you for participating. 🎉`;
-      
-      await sendTgMessage(winner.telegramId, messageText);
-    }
-
-    return res.json({
-      success: true,
-      message: `Winners successfully locked & confirmed! ${previewList.length} winner notifications dispatched via bot.`
-    });
+    return res.json({ success: true, message: "Winner approved! Wallet credited and notification sent successfully." });
 
   } catch (err: any) {
-    console.error("Confirm winners error:", err);
-    return res.status(500).json({ success: false, error: err.message || "Failed to confirm winners list" });
+    console.error("Approve winner error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to approve winner" });
   }
 });
 
-// 6. Reset Draw & Re-Open Giveaway
+// 8. Reject Winner (Reject drawn winner, clear winner fields)
+router.post("/reject-winner", async (req: any, res: any) => {
+  try {
+    const { giveawayId, reason } = req.body;
+    if (!giveawayId) {
+      return res.status(400).json({ success: false, error: "Missing giveawayId" });
+    }
+
+    const giveawayDocRef = doc(db, "upi_giveaways", giveawayId);
+    const giveawaySnap = await getDoc(giveawayDocRef);
+    if (!giveawaySnap.exists()) {
+      return res.status(404).json({ success: false, error: "Giveaway not found" });
+    }
+
+    const giveaway = giveawaySnap.data();
+    if (!giveaway.winnerId) {
+      return res.status(400).json({ success: false, error: "No winner drawn to reject." });
+    }
+
+    const winnerId = giveaway.winnerId;
+
+    // Update entry to Rejected
+    const entryId = `${giveawayId}_${winnerId}`;
+    await updateDoc(doc(db, "upi_giveaway_entries", entryId), {
+      status: "Rejected",
+      paymentStatus: "Rejected",
+      rejectionReason: reason || "Verification failed / Rule violation"
+    });
+
+    // Update giveaway document to reflect rejection
+    await updateDoc(giveawayDocRef, {
+      winnerStatus: "Rejected",
+    });
+
+    // Send Rejection Bot message
+    const botMsg = `❌ <b>Your Lucky Number Giveaway entry has been rejected.</b>\n\n` +
+      `Giveaway: <b>${giveaway.title}</b>\n` +
+      `Reason: <i>${reason || "Violation of campaign rules / verification failed."}</i>`;
+    await sendTgMessage(String(winnerId), botMsg);
+
+    // Write Audit Log
+    await writeAuditLog(giveawayId, giveaway.title, "Winner Rejected", {
+      telegramId: winnerId,
+      reason
+    });
+
+    return res.json({ success: true, message: "Winner successfully rejected." });
+
+  } catch (err: any) {
+    console.error("Reject winner error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to reject winner" });
+  }
+});
+
+// 9. Redraw Winner (Picks a different random Confirmed participant)
+router.post("/redraw-winner", async (req: any, res: any) => {
+  try {
+    const { giveawayId } = req.body;
+    if (!giveawayId) {
+      return res.status(400).json({ success: false, error: "Missing giveawayId" });
+    }
+
+    const giveawayDocRef = doc(db, "upi_giveaways", giveawayId);
+    const giveawaySnap = await getDoc(giveawayDocRef);
+    if (!giveawaySnap.exists()) {
+      return res.status(404).json({ success: false, error: "Giveaway not found" });
+    }
+
+    const giveaway = giveawaySnap.data();
+    const oldWinnerId = giveaway.winnerId;
+
+    // If there was a previous winner, mark their entry as Confirmed again (if they weren't rejected)
+    // so they are put back in the pool, unless they were rejected.
+    if (oldWinnerId && giveaway.winnerStatus !== "Rejected") {
+      await updateDoc(doc(db, "upi_giveaway_entries", `${giveawayId}_${oldWinnerId}`), {
+        status: "Confirmed"
+      });
+    }
+
+    // Fetch all confirmed entries EXCEPT the old winner (if they were rejected)
+    const qEntries = query(
+      collection(db, "upi_giveaway_entries"),
+      where("giveawayId", "==", giveawayId),
+      where("status", "==", "Confirmed")
+    );
+    const entriesSnap = await getDocs(qEntries);
+    const entries = entriesSnap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .filter(e => e.telegramId !== oldWinnerId);
+
+    if (entries.length === 0) {
+      return res.status(400).json({ success: false, error: "No other confirmed entries found to redraw a winner." });
+    }
+
+    // Pick new random winner
+    const randomIndex = Math.floor(Math.random() * entries.length);
+    const winnerEntry = entries[randomIndex];
+
+    // Save winner details as Pending verification in giveaway document
+    await updateDoc(giveawayDocRef, {
+      winnerId: winnerEntry.telegramId,
+      winnerNumber: winnerEntry.selectedNumber,
+      winnerName: winnerEntry.firstName || "Anonymous User",
+      winnerUsername: winnerEntry.username || "",
+      winnerStatus: "Pending"
+    });
+
+    // Update individual entry status to Winner
+    await updateDoc(doc(db, "upi_giveaway_entries", winnerEntry.id), {
+      status: "Winner",
+      drawConfirmedAt: new Date().toISOString()
+    });
+
+    // Write Audit Log
+    await writeAuditLog(giveawayId, giveaway.title, "Winner Redrawn", {
+      oldWinnerTelegramId: oldWinnerId,
+      newWinnerTelegramId: winnerEntry.telegramId,
+      number: winnerEntry.selectedNumber
+    });
+
+    return res.json({
+      success: true,
+      message: "Winner redrawn successfully!",
+      winner: {
+        telegramId: winnerEntry.telegramId,
+        number: winnerEntry.selectedNumber,
+        name: winnerEntry.firstName,
+        username: winnerEntry.username
+      }
+    });
+
+  } catch (err: any) {
+    console.error("Redraw winner error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to redraw winner" });
+  }
+});
+
+// 10. Reset Giveaway (Clear winner data, put everyone back to Confirmed)
 router.post("/reset-giveaway", async (req: any, res: any) => {
   try {
     const { giveawayId } = req.body;
@@ -750,24 +941,31 @@ router.post("/reset-giveaway", async (req: any, res: any) => {
 
     const giveaway = giveawaySnap.data();
 
-    // Reset entries back to Pending
+    // Reset entries back to Confirmed
     const entriesQuery = query(collection(db, "upi_giveaway_entries"), where("giveawayId", "==", giveawayId));
     const entriesSnap = await getDocs(entriesQuery);
     const batch = writeBatch(db);
 
     for (const docSnap of entriesSnap.docs) {
-      batch.update(doc(db, "upi_giveaway_entries", docSnap.id), {
-        status: "Pending",
-        rewardAmount: 0,
-        paymentStatus: "Pending"
-      });
+      const entry = docSnap.data();
+      if (entry.status !== "PendingAd") {
+        batch.update(doc(db, "upi_giveaway_entries", docSnap.id), {
+          status: "Confirmed",
+          rewardAmount: 0,
+          paymentStatus: "Pending"
+        });
+      }
     }
 
     // Reset giveaway state back to Live
     batch.update(giveawayDocRef, {
       status: "Live",
       winnersDrawn: false,
-      previewWinners: []
+      winnerId: null,
+      winnerNumber: null,
+      winnerName: null,
+      winnerUsername: null,
+      winnerStatus: null,
     });
 
     await batch.commit();
@@ -779,7 +977,7 @@ router.post("/reset-giveaway", async (req: any, res: any) => {
 
     return res.json({
       success: true,
-      message: "Giveaway successfully reset! All entry states cleared back to Pending."
+      message: "Giveaway successfully reset! All winner states cleared back to Confirmed."
     });
 
   } catch (err: any) {
@@ -788,144 +986,7 @@ router.post("/reset-giveaway", async (req: any, res: any) => {
   }
 });
 
-// 7. Mark Winner as Paid (Approve Payment)
-router.post("/mark-as-paid", async (req: any, res: any) => {
-  try {
-    const { entryId } = req.body;
-    if (!entryId) {
-      return res.status(400).json({ success: false, error: "Missing entryId" });
-    }
-
-    const entryRef = doc(db, "upi_giveaway_entries", entryId);
-    const entrySnap = await getDoc(entryRef);
-    if (!entrySnap.exists()) {
-      return res.status(404).json({ success: false, error: "Giveaway entry not found" });
-    }
-
-    const entry = entrySnap.data();
-    if (entry.status !== "Winner") {
-      return res.status(400).json({ success: false, error: "This entry is not a selected winner." });
-    }
-
-    if (entry.paymentStatus === "Paid") {
-      return res.status(400).json({ success: false, error: "This winner has already been marked as paid." });
-    }
-
-    const rawRewardAmount = Number(entry.rewardAmount) || 0;
-
-    // Evaluate Giveaway Reward via Economy Protection & Smart Reward Engine
-    const economyEval = await evaluateReward(String(entry.telegramId), rawRewardAmount, "giveaway");
-    if (!economyEval.allowed) {
-      return res.status(400).json({ success: false, error: economyEval.message || "Daily budget limit reached. Cannot approve payment." });
-    }
-
-    const finalRewardAmount = economyEval.finalAmount;
-    const isPendingGiveaway = economyEval.isPending;
-
-    // Update payment status
-    await updateDoc(entryRef, {
-      paymentStatus: isPendingGiveaway ? "Pending Review" : "Paid",
-      rewardAmount: finalRewardAmount,
-      paidAt: new Date().toISOString()
-    });
-
-    if (isPendingGiveaway) {
-      return res.json({
-        success: true,
-        message: "⏳ This payment has been placed in Pending Review under the Economy Protection check pipeline."
-      });
-    }
-
-    const isSb = entry.shadow_banned === true;
-    if (isSb) {
-      await addDoc(collection(db, "shadow_blocked_rewards"), {
-        userId: String(entry.telegramId),
-        username: entry.username || entry.firstName || "no_username",
-        amount: Number(entry.rewardAmount),
-        type: "upi_giveaway_reward",
-        createdAt: new Date().toISOString()
-      });
-    }
-
-    const giveawaySnap = await getDoc(doc(db, "upi_giveaways", entry.giveawayId));
-    const giveawayTitle = giveawaySnap.exists() ? giveawaySnap.data()?.title : "UPI Giveaway";
-
-    // Write Audit Log
-    await writeAuditLog(entry.giveawayId, giveawayTitle, "Payment Approved", {
-      entryId,
-      firstName: entry.firstName,
-      telegramId: entry.telegramId,
-      rewardAmount: entry.rewardAmount
-    });
-
-    // Send success bot message as strictly specified:
-    const messageText = `🎉 <b>Congratulations!</b>\n\n` +
-      `Your RoyShare UPI Giveaway reward has been approved.\n\n` +
-      `<b>Winning Amount:</b>\n` +
-      `₹${entry.rewardAmount}\n\n` +
-      `Thank you for participating!`;
-    
-    await sendTgMessage(entry.telegramId, messageText);
-
-    return res.json({ success: true, message: "Winner marked as Paid and notified!" });
-
-  } catch (err: any) {
-    console.error("UPI Giveaway payment status update error:", err);
-    return res.status(500).json({ success: false, error: err.message || "Failed to update payment status" });
-  }
-});
-
-// 8. Reject Payment / Entry
-router.post("/reject-payment", async (req: any, res: any) => {
-  try {
-    const { entryId, reason } = req.body;
-    if (!entryId) {
-      return res.status(400).json({ success: false, error: "Missing entryId" });
-    }
-
-    const entryRef = doc(db, "upi_giveaway_entries", entryId);
-    const entrySnap = await getDoc(entryRef);
-    if (!entrySnap.exists()) {
-      return res.status(404).json({ success: false, error: "Giveaway entry not found" });
-    }
-
-    const entry = entrySnap.data();
-
-    // Update status to Rejected
-    await updateDoc(entryRef, {
-      status: "Rejected",
-      paymentStatus: "Rejected",
-      rejectionReason: reason || "Violation of rules / suspicious duplicate entry"
-    });
-
-    const giveawaySnap = await getDoc(doc(db, "upi_giveaways", entry.giveawayId));
-    const giveawayTitle = giveawaySnap.exists() ? giveawaySnap.data()?.title : "UPI Giveaway";
-
-    // Write Audit Log
-    await writeAuditLog(entry.giveawayId, giveawayTitle, "Payment Rejected", {
-      entryId,
-      firstName: entry.firstName,
-      telegramId: entry.telegramId,
-      reason: reason || "Suspicious / Duplicate entry rules validation failure"
-    });
-
-    // Send Bot Rejection message
-    const messageText = `❌ <b>Your entry has been rejected.</b>\n\n` +
-      `Giveaway: <b>${giveawayTitle}</b>\n` +
-      `Reason: <i>${reason || "Rule violations or suspicious activities detected."}</i>\n\n` +
-      `If you think this is a mistake, please reach out to Customer Support.`;
-    
-    await sendTgMessage(entry.telegramId, messageText);
-
-    return res.json({ success: true, message: "Winner entry rejected successfully." });
-
-  } catch (err: any) {
-    console.error("UPI Giveaway reject error:", err);
-    return res.status(500).json({ success: false, error: err.message || "Failed to reject entry." });
-  }
-});
-
-// 9. Client Log Dispatcher (For actions like Export Downloaded)
+// 11. Client Log Dispatcher (For actions like Export Downloaded)
 router.post("/log-action", async (req: any, res: any) => {
   try {
     const { giveawayId, giveawayTitle, action, details } = req.body;
@@ -941,7 +1002,7 @@ router.post("/log-action", async (req: any, res: any) => {
   }
 });
 
-// 10. Fetch Audit Logs for Admin Manager
+// 12. Fetch Audit Logs for Admin Manager
 router.get("/audit-logs/:giveawayId", async (req: any, res: any) => {
   try {
     const { giveawayId } = req.params;
@@ -963,7 +1024,7 @@ router.get("/audit-logs/:giveawayId", async (req: any, res: any) => {
   }
 });
 
-// 11. Detailed Analytics
+// 13. Detailed Analytics for Lucky Number Giveaway
 router.get("/analytics/:giveawayId", async (req: any, res: any) => {
   try {
     const { giveawayId } = req.params;
@@ -985,44 +1046,33 @@ router.get("/analytics/:giveawayId", async (req: any, res: any) => {
 
     // Analytics breakdowns
     const totalEntries = entries.length;
-    const verifiedEntries = entries.filter(e => e.status !== "Rejected").length;
+    const confirmedEntries = entries.filter(e => e.status === "Confirmed").length;
+    const pendingAdEntries = entries.filter(e => e.status === "PendingAd").length;
+    const winnerEntries = entries.filter(e => e.status === "Winner").length;
+    const approvedEntries = entries.filter(e => e.status === "Winner" && e.paymentStatus === "Paid").length;
     const rejectedEntries = entries.filter(e => e.status === "Rejected").length;
 
-    const previewWinnersCount = giveaway.previewWinners?.length || 0;
-    const confirmedWinnersCount = entries.filter(e => e.status === "Winner").length;
-    const paidWinnersCount = entries.filter(e => e.status === "Winner" && e.paymentStatus === "Paid").length;
-
     // Budget math
-    let distributedBudget = 0;
-    if (giveaway.winnersDrawn) {
-      // confirmed
-      distributedBudget = entries
-        .filter(e => e.status === "Winner")
-        .reduce((sum, w) => sum + Number(w.rewardAmount || 0), 0);
-    } else {
-      // previewed
-      distributedBudget = (giveaway.previewWinners || [])
-        .reduce((sum: number, w: any) => sum + Number(w.rewardAmount || 0), 0);
-    }
-
-    const remainingBudget = Math.max(0, giveaway.totalBudget - distributedBudget);
+    const distributedBudget = approvedEntries * Number(giveaway.prizeAmount || 100);
+    const totalBudget = Number(giveaway.totalWinners || 10) * Number(giveaway.prizeAmount || 100);
+    const remainingBudget = Math.max(0, totalBudget - distributedBudget);
 
     // Fetch total system users to calculate actual participation rate
     const usersSnap = await getDocs(collection(db, "users"));
     const totalSystemUsers = Math.max(1, usersSnap.size);
 
-    // Rate = totalEntries / totalSystemUsers
-    const participationRate = Number(((totalEntries / totalSystemUsers) * 100).toFixed(1));
+    // Rate = confirmedEntries / totalSystemUsers
+    const participationRate = Number(((confirmedEntries / totalSystemUsers) * 100).toFixed(1));
 
     return res.json({
       success: true,
       analytics: {
         totalEntries,
-        verifiedEntries,
+        confirmedEntries,
+        pendingAdEntries,
+        winnerEntries,
+        approvedEntries,
         rejectedEntries,
-        previewWinners: previewWinnersCount,
-        confirmedWinners: confirmedWinnersCount,
-        paidWinners: paidWinnersCount,
         remainingBudget,
         distributedBudget,
         participationRate
@@ -1030,7 +1080,7 @@ router.get("/analytics/:giveawayId", async (req: any, res: any) => {
     });
 
   } catch (err: any) {
-    console.error("UPI Giveaway analytics error:", err);
+    console.error("Giveaway analytics error:", err);
     return res.status(500).json({ success: false, error: err.message || "Failed to retrieve analytics" });
   }
 });
