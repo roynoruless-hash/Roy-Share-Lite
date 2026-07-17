@@ -30,7 +30,10 @@ import {
   AlertCircle,
   FileSpreadsheet,
   Settings,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Copy,
+  ExternalLink,
+  Share2
 } from "lucide-react";
 import { LuckySpinEvent, LuckySpinParticipant, LuckySpinWinner } from "../types/LuckySpin";
 import { API_BASE } from "../config/api";
@@ -57,6 +60,16 @@ export const LuckySpinAdminView: React.FC = () => {
   const [participants, setParticipants] = useState<LuckySpinParticipant[]>([]);
   const [winners, setWinners] = useState<LuckySpinWinner[]>([]);
   const [viewersCount, setViewersCount] = useState(0);
+  const [tgSettings, setTgSettings] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/telegram-settings`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) setTgSettings(data.settings);
+      })
+      .catch((err) => console.error("Error loading telegram settings:", err));
+  }, []);
 
   // Form State
   const [name, setName] = useState("");
@@ -467,6 +480,133 @@ export const LuckySpinAdminView: React.FC = () => {
                     >
                       <StopCircle className="w-4 h-4" /> End & Close Event
                     </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* EVENT LINKS SECTION */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
+              <h3 className="font-black text-sm uppercase text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                <span className="text-indigo-400">🔗</span> Event Mini App Links
+              </h3>
+
+              <div className="space-y-4 divide-y divide-slate-800/60">
+                {/* 1. Event Join Link */}
+                <div className="pt-1.5">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Event Join Link
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      Users participate here
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`https://t.me/${tgSettings?.botUsername || "RoyShareBot"}/app?startapp=join_${selectedEvent.id}`}
+                      className="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 text-xs text-indigo-300 font-medium select-all focus:outline-none"
+                    />
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const url = `https://t.me/${tgSettings?.botUsername || "RoyShareBot"}/app?startapp=join_${selectedEvent.id}`;
+                          navigator.clipboard.writeText(url);
+                          alert("Join Link copied to clipboard!");
+                        }}
+                        className="flex-1 sm:flex-initial bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 border border-slate-800"
+                        title="Copy Link"
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Copy
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const url = `https://t.me/${tgSettings?.botUsername || "RoyShareBot"}/app?startapp=join_${selectedEvent.id}`;
+                          window.open(url, "_blank");
+                        }}
+                        className="flex-1 sm:flex-initial bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 border border-slate-800"
+                        title="Open Link"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" /> Open
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const url = `https://t.me/${tgSettings?.botUsername || "RoyShareBot"}/app?startapp=join_${selectedEvent.id}`;
+                          const text = `Join my Lucky Spin Live Event "${selectedEvent.name}" to win amazing prizes! 🎡✨`;
+                          const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+                          window.open(shareUrl, "_blank");
+                        }}
+                        className="flex-1 sm:flex-initial bg-indigo-650 hover:bg-indigo-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
+                        title="Share Link"
+                      >
+                        <Share2 className="w-3.5 h-3.5" /> Share
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Live Spin Link */}
+                <div className="pt-4">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Live Spin Link
+                    </span>
+                    <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                      Users watch live only
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`https://t.me/${tgSettings?.botUsername || "RoyShareBot"}/app?startapp=live_${selectedEvent.id}`}
+                      className="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 text-xs text-indigo-300 font-medium select-all focus:outline-none"
+                    />
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const url = `https://t.me/${tgSettings?.botUsername || "RoyShareBot"}/app?startapp=live_${selectedEvent.id}`;
+                          navigator.clipboard.writeText(url);
+                          alert("Live Spin Link copied to clipboard!");
+                        }}
+                        className="flex-1 sm:flex-initial bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 border border-slate-800"
+                        title="Copy Link"
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Copy
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const url = `https://t.me/${tgSettings?.botUsername || "RoyShareBot"}/app?startapp=live_${selectedEvent.id}`;
+                          window.open(url, "_blank");
+                        }}
+                        className="flex-1 sm:flex-initial bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 border border-slate-800"
+                        title="Open Link"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" /> Open
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const url = `https://t.me/${tgSettings?.botUsername || "RoyShareBot"}/app?startapp=live_${selectedEvent.id}`;
+                          const text = `Watch the Live Spin Draw for "${selectedEvent.name}" right now! Who will be the lucky winner? 🎡🔥`;
+                          const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+                          window.open(shareUrl, "_blank");
+                        }}
+                        className="flex-1 sm:flex-initial bg-indigo-650 hover:bg-indigo-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
+                        title="Share Link"
+                      >
+                        <Share2 className="w-3.5 h-3.5" /> Share
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

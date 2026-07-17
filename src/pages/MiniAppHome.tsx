@@ -505,11 +505,27 @@ export const MiniAppHome: React.FC = () => {
   }, [window.location.pathname]);
 
   const [hasCheckedDeepLink, setHasCheckedDeepLink] = useState(false);
+  const [luckySpinInitialEventId, setLuckySpinInitialEventId] = useState<string | null>(null);
+  const [luckySpinInitialMode, setLuckySpinInitialMode] = useState<"join" | "live" | null>(null);
 
   // Deep Link Handling
   useEffect(() => {
     if (activeUser?.membershipVerified && startParam && !hasCheckedDeepLink) {
-      if (startParam.startsWith("upi_")) {
+      if (startParam.startsWith("join_")) {
+        const eventId = startParam.replace("join_", "");
+        console.log(`[MiniAppHome] Deep link detected for lucky spin join: ${eventId}`);
+        setHasCheckedDeepLink(true);
+        setLuckySpinInitialEventId(eventId);
+        setLuckySpinInitialMode("join");
+        setCurrentView("lucky-spin");
+      } else if (startParam.startsWith("live_")) {
+        const eventId = startParam.replace("live_", "");
+        console.log(`[MiniAppHome] Deep link detected for lucky spin live: ${eventId}`);
+        setHasCheckedDeepLink(true);
+        setLuckySpinInitialEventId(eventId);
+        setLuckySpinInitialMode("live");
+        setCurrentView("lucky-spin");
+      } else if (startParam.startsWith("upi_")) {
         const giveawayId = startParam.replace("upi_", "");
         console.log(`[MiniAppHome] Deep link detected for lucky number giveaway: ${giveawayId}`);
         setHasCheckedDeepLink(true);
@@ -753,7 +769,17 @@ export const MiniAppHome: React.FC = () => {
   }
 
   if (currentView === "lucky-spin") {
-    return <LuckySpinUserView onBack={() => setCurrentView("home")} />;
+    return (
+      <LuckySpinUserView
+        onBack={() => setCurrentView("home")}
+        initialEventId={luckySpinInitialEventId}
+        initialMode={luckySpinInitialMode}
+        clearInitialParams={() => {
+          setLuckySpinInitialEventId(null);
+          setLuckySpinInitialMode(null);
+        }}
+      />
+    );
   }
 
   if (currentView === "dashboard") {

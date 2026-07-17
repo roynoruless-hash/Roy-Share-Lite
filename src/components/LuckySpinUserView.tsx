@@ -122,13 +122,49 @@ const playSound = (type: "countdown" | "spin" | "winner" | "celebration", isMute
 
 interface LuckySpinUserViewProps {
   onBack: () => void;
+  initialEventId?: string | null;
+  initialMode?: "join" | "live" | null;
+  clearInitialParams?: () => void;
 }
 
-export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({ onBack }) => {
+export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
+  onBack,
+  initialEventId,
+  initialMode,
+  clearInitialParams
+}) => {
   const { user, showAd } = useTelegramAuth();
   const [activeTab, setActiveTab] = useState<"events" | "history" | "global-winners">("events");
   const [events, setEvents] = useState<LuckySpinEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<LuckySpinEvent | null>(null);
+  const [viewMode, setViewMode] = useState<"regular" | "join" | "live">("regular");
+
+  // Deep Link specific event direct loader
+  useEffect(() => {
+    if (initialEventId) {
+      const docRef = doc(db, "lucky_spin_events", initialEventId);
+      getDoc(docRef).then((snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as LuckySpinEvent;
+          setSelectedEvent({ ...data, id: snap.id });
+          if (initialMode) {
+            setViewMode(initialMode);
+          }
+        }
+      }).catch(console.error);
+    }
+  }, [initialEventId, initialMode]);
+  const [tgSettings, setTgSettings] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/telegram-settings`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) setTgSettings(data.settings);
+      })
+      .catch((err) => console.error("Error loading telegram settings:", err));
+  }, []);
+
   const [participants, setParticipants] = useState<LuckySpinParticipant[]>([]);
   const [activities, setActivities] = useState<string[]>([]);
   const [viewersCount, setViewersCount] = useState(0);
@@ -276,6 +312,11 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({ onBack }) 
     };
   }, [selectedEvent?.id, user?.telegramId]);
 
+  const selectedEventRef = useRef(selectedEvent);
+  useEffect(() => {
+    selectedEventRef.current = selectedEvent;
+  }, [selectedEvent]);
+
   // Handle countdown/sound/animations synchronization based on active event spinState
   const lastStateRef = useRef<string>("");
   const lastReplayRef = useRef<number>(0);
@@ -386,6 +427,10 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({ onBack }) 
     const startTime = performance.now();
 
     const animateWheel = (now: number) => {
+      if (selectedEventRef.current?.status === "Paused" || selectedEventRef.current?.spinState?.status === "paused") {
+        isSpinningRef.current = false;
+        return;
+      }
       const elapsed = now - startTime;
       const progress = Math.min(elapsed / duration, 1);
 
@@ -641,6 +686,8 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({ onBack }) 
     }
   };
 
+  const isJoinMode = viewMode === "join" || (viewMode === "regular" && !userJoined);
+
   return (
     <div className="min-h-screen bg-[#020617] text-white font-sans selection:bg-indigo-500/30 overflow-y-auto pb-16">
       {/* HEADER SECTION */}
@@ -649,7 +696,10 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({ onBack }) 
           onClick={() => {
             if (selectedEvent) {
               setSelectedEvent(null);
+              setViewMode("regular");
+              if (clearInitialParams) clearInitialParams();
             } else {
+              if (clearInitialParams) clearInitialParams();
               onBack();
             }
           }}
@@ -909,81 +959,113 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({ onBack }) 
           </div>
 
           {/* RENDERING PARTICIPATION FLOW VS LIVE DRAW */}
-          {!userJoined && selectedEvent.status !== "Ended" && selectedEvent.spinState.status === "waiting" ? (
-            /* Participant Form */
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
-              <h3 className="font-black text-sm uppercase text-slate-400 flex items-center gap-2">
-                ✍️ Participate in Giveaway
-              </h3>
-              <p className="text-xs text-slate-500">
-                Enter your Real Name below to claim your spot inside the wheel. One Telegram Account = One Entry.
-              </p>
+          {isJoinMode ? (
+            /* JOIN PAGE */
+            <div className="space-y-6">
+              {!userJoined && selectedEvent.status !== "Ended" && selectedEvent.spinState.status === "waiting" ? (
+                /* Participant Form */
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
+                  <h3 className="font-black text-sm uppercase text-slate-400 flex items-center gap-2">
+                    ✍️ Participate in Giveaway
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Enter your Real Name below to claim your spot inside the wheel. One Telegram Account = One Entry.
+                  </p>
 
-              <form onSubmit={handleParticipate} className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Your Real Name (No special characters/emojis)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={realName}
-                    onChange={(e) => setRealName(e.target.value)}
-                    placeholder="Enter Real Name (e.g. Ritik Rai)"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-600 text-white font-medium"
-                  />
+                  <form onSubmit={handleParticipate} className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                        Your Real Name (No special characters/emojis)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={realName}
+                        onChange={(e) => setRealName(e.target.value)}
+                        placeholder="Enter Real Name (e.g. Ritik Rai)"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-600 text-white font-medium"
+                      />
+                    </div>
+
+                    {formError && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-bold flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4" /> {formError}
+                      </div>
+                    )}
+
+                    {joinSuccess && (
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs font-bold flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4" /> Successfully joined! Opening Live Spin lobby...
+                      </div>
+                    )}
+
+                    {selectedEvent.adsType !== "Disabled" && (
+                      <span className="text-[10px] text-slate-500 font-bold uppercase block text-center">
+                        ℹ️ Ads enabled. Ad will show before entry confirms.
+                      </span>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={joining || selectedEvent.participantsCount >= selectedEvent.maxParticipants}
+                      className="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-black py-3.5 rounded-2xl transition-all shadow-lg shadow-emerald-950/20 text-xs cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {joining ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          Processing Entry...
+                        </>
+                      ) : selectedEvent.participantsCount >= selectedEvent.maxParticipants ? (
+                        "Lobby Full"
+                      ) : (
+                        "Participate Now"
+                      )}
+                    </button>
+                  </form>
                 </div>
-
-                {formError && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-bold flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4" /> {formError}
+              ) : (
+                /* Registered Success block with "Watch Live Spin" button */
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center space-y-4 shadow-xl">
+                  <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center justify-center mx-auto text-emerald-400">
+                    <CheckCircle2 className="w-6 h-6" />
                   </div>
-                )}
-
-                {joinSuccess && (
-                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs font-bold flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" /> Successfully joined! Opening Live Spin lobby...
+                  <div className="space-y-1">
+                    <h3 className="text-base font-black text-white">🎉 You are Registered!</h3>
+                    <p className="text-xs text-slate-400">Your name has been added to the wheel. Get ready for the live draw!</p>
                   </div>
-                )}
-
-                {selectedEvent.adsType !== "Disabled" && (
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block text-center">
-                    ℹ️ Ads enabled. Ad will show before entry confirms.
-                  </span>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={joining || selectedEvent.participantsCount >= selectedEvent.maxParticipants}
-                  className="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-black py-3.5 rounded-2xl transition-all shadow-lg shadow-emerald-950/20 text-xs cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {joining ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Processing Entry...
-                    </>
-                  ) : selectedEvent.participantsCount >= selectedEvent.maxParticipants ? (
-                    "Lobby Full"
-                  ) : (
-                    "Participate Now"
-                  )}
-                </button>
-              </form>
+                  <button
+                    onClick={() => {
+                      const botUser = tgSettings?.botUsername || "RoyShareBot";
+                      const liveUrl = `https://t.me/${botUser}/app?startapp=live_${selectedEvent.id}`;
+                      const tgApp = (window as any).Telegram?.WebApp;
+                      if (tgApp?.openTelegramLink) {
+                        tgApp.openTelegramLink(liveUrl);
+                      } else {
+                        window.open(liveUrl, "_blank");
+                      }
+                      setViewMode("live");
+                    }}
+                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black py-3.5 rounded-2xl transition-all shadow-lg shadow-indigo-950/20 text-xs cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    🎡 Watch Live Spin
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
-            /* LIVE PAGE / WAITING LOBBY SCREEN */
+            /* LIVE WATCH ONLY PAGE */
             <div className="space-y-6">
               {/* STATUS INDICATOR CARD */}
               <div className="bg-gradient-to-r from-slate-900 to-indigo-950/40 border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xl">
                 <div>
                   <span className="text-[9px] text-slate-500 font-bold uppercase block">Current Event Status</span>
-                  <p className="font-black text-white text-base mt-0.5">
-                    {selectedEvent.spinState.status === "waiting" && "⏳ Waiting for Admin to Start"}
+                  <p className="font-black text-white text-base mt-0.5 animate-pulse">
+                    {(selectedEvent.status === "Paused" || selectedEvent.spinState.status === "paused") && "⏸ Event Paused"}
+                    {selectedEvent.spinState.status === "waiting" && selectedEvent.status !== "Paused" && "⏳ Waiting for Admin to Start"}
                     {selectedEvent.spinState.status === "countdown" && "⚡ Starting Countdown!"}
                     {selectedEvent.spinState.status === "spinning" && "🎡 Wheel Spinning Live!"}
-                    {selectedEvent.spinState.status === "paused" && "⏸ Event Paused"}
                     {selectedEvent.spinState.status === "winner_selected" && "🎉 Winner Selected!"}
-                    {selectedEvent.spinState.status === "ended" && "🏁 Event Finished"}
+                    {(selectedEvent.status === "Ended" || selectedEvent.spinState.status === "ended") && "🏁 Event Finished"}
                   </p>
                 </div>
 
@@ -994,88 +1076,160 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({ onBack }) 
                 )}
               </div>
 
-              {/* LIVE WHEEL CANVAS */}
-              {participants.length > 0 && selectedEvent.spinState.status !== "ended" && (
+              {/* WAITING STATE SCREEN */}
+              {selectedEvent.spinState.status === "waiting" && selectedEvent.status !== "Paused" && (
+                <div className="bg-gradient-to-b from-slate-900 via-slate-950 to-indigo-950 border border-slate-800 p-8 rounded-3xl text-center space-y-6 shadow-2xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-600/10 rounded-full filter blur-xl pointer-events-none animate-pulse" />
+                  <div className="absolute bottom-0 left-0 w-24 h-24 bg-purple-600/10 rounded-full filter blur-xl pointer-events-none animate-pulse" />
+                  
+                  <div className="w-20 h-20 bg-indigo-500/10 border border-indigo-500/30 rounded-full flex items-center justify-center mx-auto animate-[spin_12s_linear_infinite]">
+                    <Sparkles className="w-10 h-10 text-indigo-400 animate-pulse" />
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-black text-white tracking-wide uppercase bg-gradient-to-r from-amber-400 to-indigo-400 bg-clip-text text-transparent">
+                      🎡 Lucky Spin Live
+                    </h3>
+                    <p className="text-sm font-bold text-slate-300">
+                      Waiting for Admin
+                    </p>
+                    <p className="text-xs text-slate-500 leading-relaxed max-w-xs mx-auto">
+                      Please stay connected. Your spin will automatically begin.
+                    </p>
+                  </div>
+
+                  <div className="flex justify-center gap-1.5 py-2">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce delay-75"></span>
+                    <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce delay-150"></span>
+                    <span className="w-2 h-2 rounded-full bg-indigo-300 animate-bounce delay-300"></span>
+                  </div>
+                </div>
+              )}
+
+              {/* EVENT PAUSED SCREEN */}
+              {(selectedEvent.status === "Paused" || selectedEvent.spinState.status === "paused") && (
+                <div className="bg-slate-900 border-2 border-amber-500/20 p-8 rounded-3xl text-center space-y-4 shadow-xl">
+                  <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mx-auto text-amber-400">
+                    <span className="text-2xl">⏸</span>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-lg font-black text-white">Event Paused</h3>
+                    <p className="text-xs text-slate-400">Waiting for Admin...</p>
+                  </div>
+                  <p className="text-[10px] text-slate-500 italic">The live wheel is temporarily frozen.</p>
+                </div>
+              )}
+
+              {/* CONCLUDED EVENT SCREEN */}
+              {(selectedEvent.status === "Ended" || selectedEvent.spinState.status === "ended") && (
+                <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800 p-8 rounded-3xl text-center space-y-6 shadow-2xl">
+                  <div className="w-16 h-16 bg-indigo-500/10 border border-indigo-500/20 rounded-full flex items-center justify-center mx-auto text-indigo-400">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-black text-white">Event Finished</h3>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Thank you for participating in our Lucky Spin Live Event.
+                    </p>
+                  </div>
+                  {winnerDetails ? (
+                    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-900 text-left space-y-3">
+                      <div>
+                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Winner Drawn</span>
+                        <p className="text-base font-black text-amber-400 mt-1">{winnerDetails.winnerName}</p>
+                        <p className="text-xs text-slate-400">@{winnerDetails.username}</p>
+                      </div>
+                      <div className="border-t border-slate-900/60 pt-2 flex justify-between items-center">
+                        <span className="text-xs font-black text-emerald-400">Prize: ₹{winnerDetails.prize}</span>
+                        <span className="text-[9px] text-slate-500">{new Date(winnerDetails.winningTime).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-600 italic">No winners drawn for this event.</p>
+                  )}
+                </div>
+              )}
+
+              {/* LIVE WHEEL CANVAS (ONLY SHOW IF NOT WAITING/PAUSED/ENDED) */}
+              {selectedEvent.spinState.status !== "waiting" && 
+               selectedEvent.status !== "Paused" && 
+               selectedEvent.spinState.status !== "paused" && 
+               selectedEvent.status !== "Ended" && 
+               selectedEvent.spinState.status !== "ended" && 
+               participants.length > 0 && (
                 <div className="flex flex-col items-center justify-center bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl relative shadow-2xl">
-                  {/* Wheel container wrapper */}
                   <div className="relative w-72 h-72">
                     <canvas ref={canvasRef} width={288} height={288} className="w-full h-full" />
                   </div>
-
                   <p className="text-slate-500 text-[10px] font-black uppercase tracking-wider mt-4">
                     Live Draw Slices • {participants.length} Participants Inside
                   </p>
                 </div>
               )}
 
-              {/* SHOW REPLAY OPTION IF ENDED */}
-              {selectedEvent.spinState.status === "ended" && winnerDetails && (
+              {/* SHOW REPLAY OPTION IF EVENT HAS ENDED OR IS WINNER_SELECTED */}
+              {selectedEvent.spinState.status === "winner_selected" && winnerDetails && (
                 <div className="p-5 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-4 shadow-xl">
-                  <h3 className="font-black text-sm uppercase text-slate-400">Event Concluded</h3>
+                  <h3 className="font-black text-sm uppercase text-slate-400">Winner Drawn!</h3>
                   <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800/60">
-                    <p className="text-xs text-slate-500 uppercase font-bold">Winner Draw</p>
+                    <p className="text-xs text-slate-500 uppercase font-bold">Winner</p>
                     <p className="text-lg font-black text-amber-400 mt-1">{winnerDetails.winnerName}</p>
                     <p className="text-[10px] text-slate-500">@{winnerDetails.username}</p>
                     <p className="text-xs font-black text-emerald-400 mt-2">Prize: ₹{winnerDetails.prize}</p>
                   </div>
-
-                  <button
-                    onClick={() => startSpinAnimation(winnerDetails.telegramId)}
-                    className="w-full bg-slate-850 border border-slate-700 hover:bg-slate-800 text-white font-black py-3 rounded-2xl text-xs cursor-pointer transition-all flex items-center justify-center gap-2"
-                  >
-                    <PlayCircle className="w-4 h-4 text-indigo-400" /> Replay Winner Draw
-                  </button>
                 </div>
               )}
 
               {/* REAL-TIME LOBBY FEED & PARTICIPANTS GRID */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Lobby Activity Feed */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                  <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-1">
-                    ⚡ Live Activity
-                  </h4>
-                  <div className="h-36 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
-                    {activities.length === 0 ? (
-                      <p className="text-[11px] text-slate-600 font-bold italic text-center pt-8">
-                        Lobby is quiet... waiting for join activities.
-                      </p>
-                    ) : (
-                      activities.map((act, i) => (
-                        <div key={i} className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                          <span>{act}</span>
-                        </div>
-                      ))
-                    )}
+              {selectedEvent.status !== "Ended" && selectedEvent.spinState.status !== "ended" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Lobby Activity Feed */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-1">
+                      ⚡ Live Activity
+                    </h4>
+                    <div className="h-36 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                      {activities.length === 0 ? (
+                        <p className="text-[11px] text-slate-600 font-bold italic text-center pt-8">
+                          Lobby is quiet... waiting for live activities.
+                        </p>
+                      ) : (
+                        activities.map((act, i) => (
+                          <div key={i} className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                            <span>{act}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {/* Joined Participants Grid */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                  <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-1 flex items-center justify-between">
-                    <span>👥 Lobby Entries</span>
-                    <span className="text-indigo-400 font-black">{participants.length}</span>
-                  </h4>
-                  <div className="h-36 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
-                    {participants.length === 0 ? (
-                      <p className="text-[11px] text-slate-600 font-bold italic text-center pt-8">
-                        No participants yet.
-                      </p>
-                    ) : (
-                      participants.map((p, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between p-1.5 bg-slate-950/50 rounded-lg text-xs"
-                        >
-                          <span className="font-bold text-slate-200">{p.realName}</span>
-                          <span className="text-[10px] text-slate-500">@{p.username}</span>
-                        </div>
-                      ))
-                    )}
+                  {/* Joined Participants Grid */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-1 flex items-center justify-between">
+                      <span>👥 Lobby Entries</span>
+                      <span className="text-indigo-400 font-black">{participants.length}</span>
+                    </h4>
+                    <div className="h-36 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                      {participants.length === 0 ? (
+                        <p className="text-[11px] text-slate-600 font-bold italic text-center pt-8">
+                          No participants yet.
+                        </p>
+                      ) : (
+                        participants.map((p, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between p-1.5 bg-slate-950/50 rounded-lg text-xs"
+                          >
+                            <span className="font-bold text-slate-200">{p.realName}</span>
+                            <span className="text-[10px] text-slate-500">@{p.username}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
