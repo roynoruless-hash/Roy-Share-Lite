@@ -274,6 +274,12 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
       console.error("[Withdrawal Ad] Ad presentation failed or skipped:", adError);
       const errStr = typeof adError === "object" ? (adError?.message || adError?.description || JSON.stringify(adError)) : String(adError);
       
+      if (errStr === "NOT_IN_TELEGRAM") {
+        setError("Please open this app inside Telegram to view ads and submit your withdrawal.");
+        setAdLoading(false);
+        return;
+      }
+
       // If we are in real Telegram app, require complete view
       if (isInsideTelegram) {
         setError(`Security verification failed: Please watch the full sponsored ad to verify and submit your withdrawal. (Detail: ${errStr || "ad closed"})`);

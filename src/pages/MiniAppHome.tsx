@@ -1,6 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from "react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
-import YouTubeTasksPage from "./YouTubeTasksPage";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Wallet, 
@@ -713,9 +712,6 @@ export const MiniAppHome: React.FC = () => {
   }
 
   // Render Sub-Views
-  if (currentView === "youtube-tasks") {
-    return <YouTubeTasksPage onBack={() => setCurrentView("home")} />;
-  }
 
   if (currentView === "my-content") {
     return (
@@ -820,7 +816,6 @@ export const MiniAppHome: React.FC = () => {
     { id: "url-shortener", label: "URL Shortener", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
     { id: "my-content", label: "My Content", icon: FolderOpen, color: "bg-sky-500", shadow: "shadow-sky-500/20" },
     { id: "my-links", label: "My Links", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
-    { id: "youtube-tasks", label: "YouTube Tasks", icon: Youtube, color: "bg-red-500", shadow: "shadow-red-500/20" },
     { id: "withdraw", label: "Withdraw", icon: CreditCard, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
     { id: "refer", label: "Refer & Earn", icon: Users, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
     { id: "earn-rewards", label: "Reward Tasks", icon: ClipboardList, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
@@ -838,10 +833,6 @@ export const MiniAppHome: React.FC = () => {
     if (id === "refer") {
       console.log("[MiniAppHome] handleAction MATCHED 'refer'. Setting view to 'referral'.");
       setCurrentView("referral");
-      return;
-    }
-    if (id === "youtube-tasks") {
-      setCurrentView("youtube-tasks");
       return;
     }
     if (id === "self-earning") {

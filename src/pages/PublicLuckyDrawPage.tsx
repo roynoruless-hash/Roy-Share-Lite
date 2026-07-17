@@ -328,7 +328,11 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     } catch (err: any) {
       console.error("[LuckyDraw] Adsgram flow failed:", err);
       const errStr = typeof err === "object" ? (err?.message || err?.description || JSON.stringify(err)) : String(err);
-      setEnrollError(`Please watch the full ad to participate. Detail: ${errStr || "Ad closed or failed"}`);
+      if (errStr === "NOT_IN_TELEGRAM") {
+        setEnrollError("Please open this app inside Telegram to participate in the lucky draw.");
+      } else {
+        setEnrollError(`Please watch the full ad to participate. Detail: ${errStr || "Ad closed or failed"}`);
+      }
       setEnrolling(false);
     }
   };

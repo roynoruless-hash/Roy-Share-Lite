@@ -247,7 +247,11 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
         });
 
         const errMsg = typeof adError === "object" ? (adError?.message || adError?.description || JSON.stringify(adError)) : String(adError);
-        setEnrollError(`Please watch the sponsored ad completely to secure your lucky number! (${errMsg})`);
+        if (errMsg === "NOT_IN_TELEGRAM") {
+          setEnrollError("Please open this app inside Telegram to participate in the giveaway.");
+        } else {
+          setEnrollError(`Please watch the sponsored ad completely to secure your lucky number! (${errMsg})`);
+        }
         setEnrolling(false);
       }
 

@@ -322,7 +322,6 @@ const DashboardPage = ({
             {!isTelegram && <ActionButton title="Upload File" icon={Upload} color="bg-blue-600" onClick={() => onNavigate?.("upload")} delay={0.1} />}
             {!isTelegram && <ActionButton title="Create Smart Link" icon={LinkIcon} color="bg-purple-600" onClick={() => onNavigate?.("my-links")} delay={0.2} />}
             {!isTelegram && <ActionButton title="Connect Drive" icon={Plus} color="bg-emerald-600" onClick={() => onNavigate?.("upload")} delay={0.3} />}
-            <ActionButton title="YouTube Tasks" icon={Youtube} color="bg-red-600" onClick={() => onNavigate?.("youtube-tasks")} delay={0.4} />
             <ActionButton title="Withdraw" icon={Wallet} color="bg-orange-600" onClick={() => onNavigate?.("withdraw")} delay={0.5} />
             <ActionButton title="Refer & Earn" icon={Share2} color="bg-indigo-600" onClick={() => onNavigate?.("referral")} delay={0.6} />
           </div>

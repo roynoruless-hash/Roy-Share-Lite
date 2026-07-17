@@ -287,6 +287,11 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         userId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || userId;
       }
 
+      if (!hasInitData) {
+        console.warn("[Adsgram Shared] Cannot load Adsgram: Not inside Telegram environment or missing initData.");
+        throw new Error("NOT_IN_TELEGRAM");
+      }
+
       console.log("[Adsgram Shared] [Debug] initData present:", hasInitData);
       console.log("[Adsgram Shared] [Debug] Telegram User ID:", userId);
 
