@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { db } from "../lib/firebase";
@@ -191,6 +191,27 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
   const [isWinnerPopupOpen, setIsWinnerPopupOpen] = useState(false);
   const [replayEvent, setReplayEvent] = useState<boolean>(false);
 
+  const activeWinner = useMemo(() => {
+    if (!selectedEvent) return null;
+    const { winnerId, winnerName } = selectedEvent.spinState;
+    if (!winnerId) return null;
+
+    const matchedParticipant = participants.find((p) => String(p.telegramId) === String(winnerId));
+    
+    return {
+      id: `${selectedEvent.id}_${winnerId}`,
+      eventId: selectedEvent.id,
+      eventName: selectedEvent.name,
+      telegramId: winnerId,
+      username: matchedParticipant?.username || "user",
+      winnerName: winnerName || matchedParticipant?.realName || "Participant",
+      prize: Number(selectedEvent.prizePerWinner || 0),
+      winningTime: new Date().toISOString(),
+      walletStatus: "Credited",
+      creditStatus: "Wallet Balance Incremented"
+    };
+  }, [selectedEvent, participants]);
+
   // Share Card download ref
   const shareCardRef = useRef<HTMLDivElement | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -321,29 +342,40 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
   // Handle countdown/sound/animations synchronization based on active event spinState
   const lastStateRef = useRef<string>("");
   const lastReplayRef = useRef<number>(0);
+  const lastSpunIdRef = useRef<string>("");
 
   useEffect(() => {
     if (!selectedEvent) return;
     const { status, countdown, winnerId, replayCount } = selectedEvent.spinState;
+
+    if (status !== "spinning" && status !== "paused") {
+      spinElapsedRef.current = 0;
+    }
 
     if (status === "countdown" && countdown > 0) {
       playSound("countdown", isMuted);
       setActivities((prev) => [`Countdown: ${countdown}...`, ...prev.slice(0, 15)]);
     }
 
-    // Trigger spin wheel on transition to spinning
-    if (status === "spinning" && lastStateRef.current !== "spinning") {
-      setActivities((prev) => ["Live Wheel Started Spinning! 🎡", ...prev.slice(0, 15)]);
-      startSpinAnimation(winnerId);
+    // Reset lastSpunId on transition out of spinning
+    if (status !== "spinning") {
+      lastSpunIdRef.current = "";
     }
 
-    // If Admin trigger a manual replay, run the spin animation again
+    // If Admin trigger a manual replay, reset lastSpunId so we can spin again
     if (replayCount !== undefined && replayCount > (lastReplayRef.current || 0)) {
       lastReplayRef.current = replayCount;
+      lastSpunIdRef.current = "";
       if (winnerId) {
         setActivities((prev) => ["Replaying Spin Event...", ...prev.slice(0, 15)]);
-        startSpinAnimation(winnerId);
       }
+    }
+
+    // Trigger spin wheel if status is spinning, we haven't successfully spun for this winnerId yet, and participants list is loaded
+    if (status === "spinning" && winnerId && lastSpunIdRef.current !== winnerId && participants.length > 0) {
+      setActivities((prev) => ["Live Wheel Started Spinning! 🎡", ...prev.slice(0, 15)]);
+      startSpinAnimation(winnerId);
+      lastSpunIdRef.current = winnerId;
     }
 
     if (status === "winner_selected" && lastStateRef.current !== "winner_selected") {
@@ -359,7 +391,7 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
     }
 
     lastStateRef.current = status;
-  }, [selectedEvent?.spinState, isMuted]);
+  }, [selectedEvent?.spinState, isMuted, participants, selectedEvent?.id]);
 
   // Load User History & Global Winners
   useEffect(() => {
@@ -400,6 +432,9 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
   // Wheel Physics & Drawing
   const spinAngleRef = useRef(0);
   const isSpinningRef = useRef(false);
+  const startRotationRef = useRef(0);
+  const finalAngleRef = useRef(0);
+  const spinElapsedRef = useRef(0);
 
   const startSpinAnimation = (winnerId?: string) => {
     if (!canvasRef.current || participants.length === 0 || isSpinningRef.current) return;
@@ -420,9 +455,10 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
     // rotation = 1.5 * Math.PI - (sliceIdx + 0.5) * sliceAngle
     const targetAngle = 1.5 * Math.PI - (winnerIdx + 0.5) * sliceAngle;
 
-    // Fast spin: add 8 to 12 full rotations
-    const startRotation = spinAngleRef.current % (2 * Math.PI);
-    const finalAngle = targetAngle + 10 * 2 * Math.PI;
+    if (spinElapsedRef.current === 0) {
+      startRotationRef.current = spinAngleRef.current % (2 * Math.PI);
+      finalAngleRef.current = targetAngle + 10 * 2 * Math.PI;
+    }
 
     const duration = 6000; // 6 seconds spin
     const startTime = performance.now();
@@ -430,16 +466,17 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
     const animateWheel = (now: number) => {
       if (selectedEventRef.current?.status === "Paused" || selectedEventRef.current?.spinState?.status === "paused") {
         isSpinningRef.current = false;
+        spinElapsedRef.current += now - startTime;
         return;
       }
-      const elapsed = now - startTime;
+      const elapsed = (now - startTime) + spinElapsedRef.current;
       const progress = Math.min(elapsed / duration, 1);
 
       // Ease out cubic function for smooth slow down
       const easeOut = (t: number) => 1 - Math.pow(1 - t, 4);
       const easeValue = easeOut(progress);
 
-      spinAngleRef.current = startRotation + easeValue * (finalAngle - startRotation);
+      spinAngleRef.current = startRotationRef.current + easeValue * (finalAngleRef.current - startRotationRef.current);
 
       // Draw Wheel
       drawWheel(ctx, canvas, numSlices, spinAngleRef.current);
@@ -455,6 +492,7 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
         requestAnimationFrame(animateWheel);
       } else {
         isSpinningRef.current = false;
+        spinElapsedRef.current = 0; // Reset for next spin
         // Winner finalized! Trigger confetti & sound
         playSound("winner", isMuted);
         triggerConfettiFanfare();
@@ -1064,6 +1102,7 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                     {(selectedEvent.status === "Paused" || selectedEvent.spinState.status === "paused") && "⏸ Event Paused"}
                     {selectedEvent.spinState.status === "waiting" && selectedEvent.status !== "Paused" && "⏳ Waiting for Admin to Start"}
                     {selectedEvent.spinState.status === "countdown" && "⚡ Starting Countdown!"}
+                    {selectedEvent.spinState.status === "ready" && "🎯 Wheel Ready to Spin!"}
                     {selectedEvent.spinState.status === "spinning" && "🎡 Wheel Spinning Live!"}
                     {selectedEvent.spinState.status === "winner_selected" && "🎉 Winner Selected!"}
                     {(selectedEvent.status === "Ended" || selectedEvent.spinState.status === "ended") && "🏁 Event Finished"}
@@ -1076,6 +1115,33 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* IMMERSIVE BIG COUNTDOWN SCREEN */}
+              {selectedEvent.spinState.status === "countdown" && (
+                <div className="bg-gradient-to-b from-slate-900 via-slate-950 to-indigo-950 border-2 border-indigo-500/20 p-12 rounded-3xl text-center space-y-6 shadow-2xl relative overflow-hidden flex flex-col items-center justify-center min-h-[300px]">
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.15)_0,transparent_60%)] pointer-events-none" />
+                  
+                  {/* Outer circle glow */}
+                  <div className="relative w-36 h-36 flex items-center justify-center">
+                    <div className="absolute inset-0 rounded-full border-4 border-indigo-500/10 animate-ping" />
+                    <div className="absolute inset-2 rounded-full border-2 border-indigo-500/20 animate-pulse" />
+                    
+                    {/* Big pulsing number */}
+                    <span className="text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-500 select-none filter drop-shadow-[0_0_15px_rgba(245,158,11,0.5)] animate-bounce">
+                      {selectedEvent.spinState.countdown}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-black text-white tracking-widest uppercase">
+                      🚀 GET READY!
+                    </h3>
+                    <p className="text-xs text-slate-400 font-medium">
+                      The Live Lucky Spin will be READY in a few moments...
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* WAITING STATE SCREEN */}
               {selectedEvent.spinState.status === "waiting" && selectedEvent.status !== "Paused" && (
@@ -1115,9 +1181,9 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                   </div>
                   <div className="space-y-1">
                     <h3 className="text-lg font-black text-white">Event Paused</h3>
-                    <p className="text-xs text-slate-400">Waiting for Admin...</p>
+                    <p className="text-xs text-slate-400">Waiting for Admin to Resume...</p>
                   </div>
-                  <p className="text-[10px] text-slate-500 italic">The live wheel is temporarily frozen.</p>
+                  <p className="text-[10px] text-slate-500 italic">The live wheel or countdown is temporarily frozen.</p>
                 </div>
               )}
 
@@ -1133,16 +1199,16 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                       Thank you for participating in our Lucky Spin Live Event.
                     </p>
                   </div>
-                  {winnerDetails ? (
+                   {activeWinner ? (
                     <div className="bg-slate-950 p-4 rounded-2xl border border-slate-900 text-left space-y-3">
                       <div>
                         <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Winner Drawn</span>
-                        <p className="text-base font-black text-amber-400 mt-1">{winnerDetails.winnerName}</p>
-                        <p className="text-xs text-slate-400">@{winnerDetails.username}</p>
+                        <p className="text-base font-black text-amber-400 mt-1">{activeWinner.winnerName}</p>
+                        <p className="text-xs text-slate-400">@{activeWinner.username}</p>
                       </div>
                       <div className="border-t border-slate-900/60 pt-2 flex justify-between items-center">
-                        <span className="text-xs font-black text-emerald-400">Prize: ₹{winnerDetails.prize}</span>
-                        <span className="text-[9px] text-slate-500">{new Date(winnerDetails.winningTime).toLocaleDateString()}</span>
+                        <span className="text-xs font-black text-emerald-400">Prize: ₹{activeWinner.prize}</span>
+                        <span className="text-[9px] text-slate-500">{new Date(activeWinner.winningTime).toLocaleDateString()}</span>
                       </div>
                     </div>
                   ) : (
@@ -1151,32 +1217,42 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                 </div>
               )}
 
-              {/* LIVE WHEEL CANVAS (ONLY SHOW IF NOT WAITING/PAUSED/ENDED) */}
+              {/* LIVE WHEEL CANVAS (ONLY SHOW IF ACTIVE AND NOT COUNTDOWN / WAITING / PAUSED / ENDED) */}
               {selectedEvent.spinState.status !== "waiting" && 
                selectedEvent.status !== "Paused" && 
                selectedEvent.spinState.status !== "paused" && 
                selectedEvent.status !== "Ended" && 
                selectedEvent.spinState.status !== "ended" && 
+               selectedEvent.spinState.status !== "countdown" && 
                participants.length > 0 && (
-                <div className="flex flex-col items-center justify-center bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl relative shadow-2xl">
+                <div className="flex flex-col items-center justify-center bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl relative shadow-2xl space-y-4">
                   <div className="relative w-72 h-72">
                     <canvas ref={canvasRef} width={288} height={288} className="w-full h-full" />
                   </div>
-                  <p className="text-slate-500 text-[10px] font-black uppercase tracking-wider mt-4">
+
+                  {/* If status is "ready", show "Waiting for Admin to Spin" card inside the wheel container */}
+                  {selectedEvent.spinState.status === "ready" && (
+                    <div className="w-full bg-emerald-950/40 border border-emerald-900/40 p-3 rounded-2xl text-center space-y-1 animate-pulse">
+                      <p className="text-xs font-black text-emerald-400">🎯 WHEEL IS READY!</p>
+                      <p className="text-[10px] text-slate-300 font-bold">Waiting for Admin to Spin...</p>
+                    </div>
+                  )}
+
+                  <p className="text-slate-500 text-[10px] font-black uppercase tracking-wider">
                     Live Draw Slices • {participants.length} Participants Inside
                   </p>
                 </div>
               )}
 
               {/* SHOW REPLAY OPTION IF EVENT HAS ENDED OR IS WINNER_SELECTED */}
-              {selectedEvent.spinState.status === "winner_selected" && winnerDetails && (
+              {selectedEvent.spinState.status === "winner_selected" && activeWinner && (
                 <div className="p-5 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-4 shadow-xl">
                   <h3 className="font-black text-sm uppercase text-slate-400">Winner Drawn!</h3>
                   <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800/60">
                     <p className="text-xs text-slate-500 uppercase font-bold">Winner</p>
-                    <p className="text-lg font-black text-amber-400 mt-1">{winnerDetails.winnerName}</p>
-                    <p className="text-[10px] text-slate-500">@{winnerDetails.username}</p>
-                    <p className="text-xs font-black text-emerald-400 mt-2">Prize: ₹{winnerDetails.prize}</p>
+                    <p className="text-lg font-black text-amber-400 mt-1">{activeWinner.winnerName}</p>
+                    <p className="text-[10px] text-slate-500">@{activeWinner.username}</p>
+                    <p className="text-xs font-black text-emerald-400 mt-2">Prize: ₹{activeWinner.prize}</p>
                   </div>
                 </div>
               )}
@@ -1241,7 +1317,7 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
 
       {/* FULL SCREEN WINNER CELEBRATION POPUP */}
       <AnimatePresence>
-        {isWinnerPopupOpen && winnerDetails && (
+        {isWinnerPopupOpen && activeWinner && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1262,17 +1338,17 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                 <p className="text-sm font-black tracking-widest uppercase text-amber-400 animate-pulse">
                   🏆 Lucky Draw Winner
                 </p>
-                <h2 className="text-2xl font-black text-white">{winnerDetails.winnerName}</h2>
-                <p className="text-slate-400 text-xs">@{winnerDetails.username}</p>
+                <h2 className="text-2xl font-black text-white">{activeWinner.winnerName}</h2>
+                <p className="text-slate-400 text-xs">@{activeWinner.username}</p>
               </div>
 
               {/* USER RESULT CONDITIONAL CARD */}
-              {user && String(user.telegramId) === String(winnerDetails.telegramId) ? (
+              {user && String(user.telegramId) === String(activeWinner.telegramId) ? (
                 <div className="bg-emerald-500/10 border border-emerald-500/20 p-5 rounded-3xl space-y-3">
                   <span className="text-lg font-black text-emerald-400 block">🎉 Congratulations!</span>
                   <p className="text-xs text-slate-300">
                     You won the Lucky Spin Event prize of{" "}
-                    <span className="font-black text-white text-base block mt-1">₹{winnerDetails.prize}</span>
+                    <span className="font-black text-white text-base block mt-1">₹{activeWinner.prize}</span>
                   </p>
                   <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/25 border border-emerald-500/40 px-3 py-1 rounded-full inline-block">
                     ✅ Wallet Credited Successfully
@@ -1288,7 +1364,7 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
               )}
 
               {/* BEAUTIFUL PROFESSIONAL SHARE CARD */}
-              {user && String(user.telegramId) === String(winnerDetails.telegramId) && (
+              {user && String(user.telegramId) === String(activeWinner.telegramId) && (
                 <div className="space-y-3">
                   <div
                     ref={shareCardRef}
@@ -1314,18 +1390,18 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                     <div className="space-y-4">
                       <div>
                         <span className="text-[9px] text-slate-500 uppercase font-black block">Winner Name</span>
-                        <p className="text-lg font-black text-white">{winnerDetails.winnerName}</p>
+                        <p className="text-lg font-black text-white">{activeWinner.winnerName}</p>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <span className="text-[9px] text-slate-500 uppercase font-black block">Prize Amount</span>
-                          <p className="text-base font-black text-emerald-400">₹{winnerDetails.prize}</p>
+                          <p className="text-base font-black text-emerald-400">₹{activeWinner.prize}</p>
                         </div>
                         <div>
                           <span className="text-[9px] text-slate-500 uppercase font-black block">Draw Date</span>
                           <p className="text-xs font-bold text-slate-300">
-                            {new Date(winnerDetails.winningTime).toLocaleDateString()}
+                            {new Date(activeWinner.winningTime).toLocaleDateString()}
                           </p>
                         </div>
                       </div>
@@ -1341,7 +1417,7 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                   <div className="grid grid-cols-3 gap-2 max-w-sm mx-auto">
                     <button
                       onClick={() => {
-                        const winText = `I won ₹${winnerDetails.prize} in Roy Share Lucky Spin Live Event! 🎡 Join and earn now!`;
+                        const winText = `I won ₹${activeWinner.prize} in Roy Share Lucky Spin Live Event! 🎡 Join and earn now!`;
                         window.open(`https://t.me/share/url?url=https://t.me/Roysharearn_bot&text=${encodeURIComponent(winText)}`);
                       }}
                       className="bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs py-2.5 rounded-xl font-bold transition-all cursor-pointer flex flex-col items-center gap-1 text-slate-300 hover:text-white"
@@ -1350,7 +1426,7 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                     </button>
                     <button
                       onClick={() => {
-                        const winText = `I won ₹${winnerDetails.prize} in Roy Share Lucky Spin Live Event! 🎡 Join and earn now!`;
+                        const winText = `I won ₹${activeWinner.prize} in Roy Share Lucky Spin Live Event! 🎡 Join and earn now!`;
                         window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(winText)}`);
                       }}
                       className="bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs py-2.5 rounded-xl font-bold transition-all cursor-pointer flex flex-col items-center gap-1 text-slate-300 hover:text-white"

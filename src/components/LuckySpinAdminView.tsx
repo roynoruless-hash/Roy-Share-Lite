@@ -503,16 +503,28 @@ export const LuckySpinAdminView: React.FC = () => {
 
                     <button
                       onClick={() => handlePauseResumeWheel(selectedEvent.spinState.status === "paused" ? "resume" : "pause")}
-                      disabled={selectedEvent.spinState.status !== "spinning" && selectedEvent.spinState.status !== "paused"}
+                      disabled={
+                        selectedEvent.spinState.status !== "countdown" &&
+                        selectedEvent.spinState.status !== "spinning" &&
+                        selectedEvent.spinState.status !== "paused"
+                      }
                       className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white py-3 px-4 rounded-xl text-xs font-black cursor-pointer flex items-center justify-center gap-2 transition-all"
                     >
-                      <Pause className="w-4 h-4 fill-white" /> {selectedEvent.spinState.status === "paused" ? "Resume Wheel" : "Pause Wheel"}
+                      {selectedEvent.spinState.status === "paused" ? (
+                        <>
+                          <Play className="w-4 h-4 fill-white" /> Resume Draw
+                        </>
+                      ) : (
+                        <>
+                          <Pause className="w-4 h-4 fill-white" /> Pause Draw
+                        </>
+                      )}
                     </button>
 
                     <button
                       onClick={handleManualSpin}
                       disabled={
-                        (selectedEvent.spinState.status !== "waiting" && selectedEvent.spinState.status !== "winner_selected") ||
+                        selectedEvent.spinState.status !== "ready" ||
                         participants.length === 0 ||
                         winners.length >= selectedEvent.totalWinners
                       }

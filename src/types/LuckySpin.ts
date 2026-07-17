@@ -12,7 +12,7 @@ export interface LuckySpinEvent {
   remainingSlots: number;
   adsType: "Disabled" | "Reward Ad" | "Interstitial Ad" | "Task Ad";
   spinState: {
-    status: "waiting" | "countdown" | "spinning" | "paused" | "winner_selected" | "ended";
+    status: "waiting" | "countdown" | "ready" | "spinning" | "paused" | "winner_selected" | "ended";
     countdown: number;
     startedAt?: string;
     pausedAt?: string;

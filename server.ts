@@ -1841,8 +1841,12 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
             "spinState.countdown": count
           });
         } else {
-          // Trigger spin
-          await triggerSpinLogic(eventId);
+          // Transition to ready state. Do NOT automatically spin!
+          await updateDoc(eventRef, {
+            "spinState.status": "ready",
+            "spinState.countdown": 0
+          });
+          await addEventActivity(eventId, "🎯 Countdown complete! Wheel is READY. Waiting for Admin to Spin...");
         }
       }
       
@@ -1859,15 +1863,74 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
     
     try {
       const eventRef = doc(db, "lucky_spin_events", eventId);
-      await updateDoc(eventRef, {
-        "spinState.status": action === "pause" ? "paused" : "spinning"
-      });
-      await addEventActivity(eventId, `⏸ Wheel ${action === "pause" ? "PAUSED" : "RESUMED"} by Admin.`);
+      const eventSnap = await firestoreGetDoc(eventRef);
+      if (!eventSnap.exists()) return res.status(404).json({ error: "Event not found" });
+      
+      const eventData = eventSnap.data();
+      
+      if (action === "pause") {
+        const currentStatus = eventData.spinState.status;
+        await updateDoc(eventRef, {
+          "spinState.status": "paused",
+          "spinState.pausedFrom": currentStatus
+        });
+        await addEventActivity(eventId, `⏸ Wheel/Countdown PAUSED by Admin (Paused from: ${currentStatus}).`);
+      } else {
+        const pausedFrom = eventData.spinState.pausedFrom || (eventData.spinState.countdown > 0 ? "countdown" : "spinning");
+        
+        if (pausedFrom === "countdown") {
+          const currentCountdown = eventData.spinState.countdown || 10;
+          await updateDoc(eventRef, {
+            "spinState.status": "countdown"
+          });
+          await addEventActivity(eventId, `▶️ Countdown RESUMED by Admin at ${currentCountdown}...`);
+          
+          // Trigger the countdown continuation in background
+          triggerResumedCountdown(eventId, currentCountdown);
+        } else {
+          await updateDoc(eventRef, {
+            "spinState.status": "spinning"
+          });
+          await addEventActivity(eventId, `▶️ Wheel RESUMED by Admin.`);
+        }
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // Helper to resume countdown asynchronously
+  async function triggerResumedCountdown(eventId: string, startFrom: number) {
+    try {
+      const eventRef = doc(db, "lucky_spin_events", eventId);
+      for (let count = startFrom - 1; count >= 0; count--) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        
+        const checkSnap = await firestoreGetDoc(eventRef);
+        if (checkSnap.exists()) {
+          const checkData = checkSnap.data();
+          if (checkData.spinState.status !== "countdown") {
+            break;
+          }
+        }
+
+        if (count > 0) {
+          await updateDoc(eventRef, {
+            "spinState.countdown": count
+          });
+        } else {
+          await updateDoc(eventRef, {
+            "spinState.status": "ready",
+            "spinState.countdown": 0
+          });
+          await addEventActivity(eventId, "🎯 Countdown complete! Wheel is READY. Waiting for Admin to Spin...");
+        }
+      }
+    } catch (err) {
+      console.error("Error in resumed countdown loop:", err);
+    }
+  }
 
   // 7. Manual Trigger Spin (Alternative or next winner)
   app.post("/api/admin/lucky-spin/trigger-spin", async (req, res) => {
@@ -2008,14 +2071,15 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         });
         
         // 3. Create Transaction history record
-        await addDoc(collection(db, "transactions"), {
-          userId: winner.telegramId,
-          type: "Lucky Spin Prize",
+        await recordWalletTransaction({
+          userId: String(winner.telegramId),
           amount: prizeAmt,
-          date: new Date().toLocaleDateString(),
-          time: new Date().toLocaleTimeString(),
-          createdAt: new Date().toISOString(),
-          eventName: eventData.name
+          creditDebit: "Credit",
+          source: "🎡 Lucky Spin Winner",
+          description: `Won Lucky Spin live event: ${eventData.name}`,
+          eventName: eventData.name,
+          status: "Completed",
+          skipNotification: true // Telegram notification is sent manually below
         });
       }
       
