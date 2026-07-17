@@ -10082,8 +10082,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   };
 
-  app.get("/api/adsgram/reward", handleAdsgramReward);
-  app.post("/api/adsgram/reward", handleAdsgramReward);
+  app.get("/reward", handleAdsgramReward);
+  app.post("/reward", handleAdsgramReward);
 
   // ==========================================
   // ADS.TXT MANAGER

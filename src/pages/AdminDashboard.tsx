@@ -480,7 +480,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setTestLoading(true);
     setTestStatus("Sending test callback request...");
     try {
-      const testUrl = `/api/adsgram/reward?userid=${testUserId}&id=test_event_${Date.now()}`;
+      const testUrl = `/reward?userid=${testUserId}&id=test_event_${Date.now()}`;
       const res = await fetch(testUrl);
       const text = await res.text();
       if (res.ok) {
@@ -17523,12 +17523,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                 Reward Callback URL (Auto-Generated)
                               </span>
                               <code className="text-xs font-mono text-slate-300 block select-all break-all bg-slate-950 p-2.5 rounded border border-slate-850">
-                                https://royshare.online/api/adsgram/reward?userid=[userid]
+                                https://royshare.online/reward?userid=[userid]
                               </code>
                             </div>
                             <button
                               onClick={() => {
-                                const url = "https://royshare.online/api/adsgram/reward?userid=[userid]";
+                                const url = "https://royshare.online/reward?userid=[userid]";
                                 navigator.clipboard.writeText(url);
                                 alert("Reward Callback URL copied to clipboard!");
                               }}
