@@ -553,6 +553,88 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
       });
   };
 
+  /**
+   * Helper to record a structured wallet transaction permanently.
+   * Automatically updates history and sends a Telegram notification if enabled.
+   */
+  const recordWalletTransaction = async (params: {
+    userId: string;
+    amount: number;
+    creditDebit: "Credit" | "Debit";
+    source: string;
+    description: string;
+    eventName?: string;
+    status?: string;
+    adminNotes?: string;
+    transactionId?: string;
+    skipNotification?: boolean;
+  }) => {
+    try {
+      const { userId, amount, creditDebit, source, description, eventName, status = "Completed", adminNotes, transactionId, skipNotification = false } = params;
+      
+      // Fetch user details for username and notification preferences
+      const userRef = doc(db, "users", String(userId));
+      const userSnap = await getDoc(userRef);
+      let username = "no_username";
+      let isNotifEnabled = true;
+
+      if (userSnap.exists()) {
+        const uData = userSnap.data();
+        username = uData.username || uData.firstName || "no_username";
+        if (uData.notificationsEnabled !== undefined) {
+          isNotifEnabled = uData.notificationsEnabled;
+        }
+      }
+
+      const txData: any = {
+        userId: String(userId),
+        telegramUsername: username,
+        amount: Number(amount),
+        creditDebit,
+        source,
+        description,
+        createdAt: new Date().toISOString(),
+        status
+      };
+
+      if (eventName) txData.eventName = eventName;
+      if (adminNotes) txData.adminNotes = adminNotes;
+
+      let docId = transactionId;
+      if (!docId) {
+        const newRef = doc(collection(db, "transactions"));
+        docId = newRef.id;
+      }
+      txData.transactionId = docId;
+
+      await setDoc(doc(db, "transactions", docId), txData, { merge: true });
+      console.log(`[recordWalletTransaction] Recorded ${creditDebit} tx: ${docId} of ₹${amount} for user ${userId} (${source})`);
+
+      // Send Telegram Notification (if enabled and not skipped)
+      if (isNotifEnabled && !skipNotification) {
+        const typeIcon = creditDebit === "Credit" ? "🟢" : "🔴";
+        const sign = creditDebit === "Credit" ? "+" : "-";
+        const formattedAmount = source.toLowerCase().includes("usdt") ? `${amount} USDT` : `₹${amount}`;
+        const tgMsg = `${typeIcon} <b>Wallet Transaction Alert</b>\n\n` +
+                      `<b>Type:</b> ${creditDebit}\n` +
+                      `<b>Source:</b> ${source}\n` +
+                      `<b>Amount:</b> ${sign}${formattedAmount}\n` +
+                      `<b>Description:</b> ${description}\n` +
+                      (eventName ? `<b>Event:</b> ${eventName}\n` : "") +
+                      `<b>Status:</b> ${status}\n` +
+                      `<b>Transaction ID:</b> <code>${docId}</code>\n\n` +
+                      `Thank you for using RoyShare!`;
+        await sendTgMessage(String(userId), tgMsg).catch((err) => {
+          console.error(`[recordWalletTransaction] Failed to send Telegram notification to ${userId}:`, err);
+        });
+      }
+
+      return docId;
+    } catch (e) {
+      console.error("[recordWalletTransaction] Error recording transaction:", e);
+    }
+  };
+
   const verifyTelegramInitData = (initData: string, botToken: string): { isValid: boolean; user?: any } => {
     try {
       if (!initData) return { isValid: false };
@@ -772,6 +854,63 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
     }
   });
 
+  // Get all transactions for a specific user (Client-side)
+  app.get("/api/user/transactions/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const q = query(
+        collection(db, "transactions"),
+        where("userId", "==", String(userId))
+      );
+      const snap = await getDocs(q);
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // Sort in-memory to avoid requiring index for other fields unless needed, but createdAt descending is standard.
+      list.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      
+      res.json({ success: true, transactions: list });
+    } catch (e: any) {
+      console.error("Error fetching user transactions:", e);
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Get all transactions for a specific user (Admin-side)
+  app.get("/api/admin/users/:userId/transactions", requireAdminDb, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const q = query(
+        collection(db, "transactions"),
+        where("userId", "==", String(userId))
+      );
+      const snap = await getDocs(q);
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      list.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      
+      res.json({ success: true, transactions: list });
+    } catch (e: any) {
+      console.error("Error fetching admin user transactions:", e);
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Update admin notes for a specific transaction
+  app.put("/api/admin/transactions/:id/notes", requireAdminDb, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      
+      const txRef = doc(db, "transactions", id);
+      await setDoc(txRef, { adminNotes }, { merge: true });
+      
+      res.json({ success: true, message: "Admin notes updated successfully" });
+    } catch (e: any) {
+      console.error("Error updating transaction notes:", e);
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   app.post("/api/user/complete-profile", async (req, res) => {
     try {
       const { userId, details } = req.body;
@@ -839,6 +978,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         approvedAt: updateTime,
         updatedAt: updateTime
       });
+      await updateDoc(doc(db, "transactions", id), { status: "Approved" }).catch(() => {});
       
       debugLog(`[Admin Withdrawal] Status updated to Approved for ${id}`);
 
@@ -897,6 +1037,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         status: "Processing", 
         processingAt: new Date().toISOString() 
       }, { merge: true });
+      await updateDoc(doc(db, "transactions", id), { status: "Processing" }).catch(() => {});
       
       await sendTgMessage(wData.userId, `⏳ <b>Withdrawal Processing</b>
 \nAmount: ₹${wData.amount}\nStatus: Processing\n\nYour withdrawal is being processed by the finance department.`);
@@ -931,6 +1072,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         paidAt: new Date().toISOString(), 
         transactionReference 
       }, { merge: true });
+      await updateDoc(doc(db, "transactions", id), { status: "Completed", adminNotes: transactionReference ? `Reference: ${transactionReference}` : undefined }).catch(() => {});
       
       // 2. Adjust User parameters (deduct pending, increment total withdrawn)
       const userRef = doc(db, "users", wData.userId);
@@ -1041,6 +1183,11 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
 
         // Transaction History Record
         console.log(`[Admin] Creating rejection transaction record for user ${wData.userId}...`);
+        await updateDoc(doc(db, "transactions", id), {
+          status: "Rejected",
+          adminNotes: finalReason
+        }).catch(() => {});
+
         await addDoc(collection(db, "transactions"), {
           userId: wData.userId,
           type: "Withdrawal Rejected",
@@ -1124,6 +1271,11 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         }, { merge: true });
 
         // Transaction History Record
+        await updateDoc(doc(db, "transactions", id), {
+          status: "Failed",
+          adminNotes: finalReason
+        }).catch(() => {});
+
         await addDoc(collection(db, "transactions"), {
           userId: wData.userId,
           type: "Withdrawal Failed",
@@ -1179,6 +1331,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         failedAt: deleteField(),
         processingAt: deleteField()
       }, { merge: true });
+      await updateDoc(doc(db, "transactions", id), { status: "Pending", adminNotes: deleteField() }).catch(() => {});
 
       // Update user balances depending on what the previous status was
       const userRef = doc(db, "users", wData.userId);
@@ -3316,6 +3469,19 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
             createdAt: new Date()
         });
       });
+      
+      // After transaction completes successfully, record structured transaction
+      if (['add_balance', 'deduct_balance', 'add_bonus', 'add_reward'].includes(action)) {
+        await recordWalletTransaction({
+          userId: id,
+          amount: numAmount,
+          creditDebit: action === "deduct_balance" ? "Debit" : "Credit",
+          source: action === "add_bonus" ? "🎁 Promotional Bonus" : "🛠 Admin Wallet Adjustment",
+          description: reason || `Admin balance update: ${action.replace('_', ' ')}`,
+          status: "Completed",
+          adminNotes: reason
+        });
+      }
       
       res.json({ success: true, message: "Wallet updated successfully" });
     } catch (e: any) {
@@ -6241,23 +6407,16 @@ User: " + user.first_name + " (" + user.id + ")");
           }, { merge: true });
 
           // Record Transaction
-          const { dateStr, timeStr } = formatTransactionDateTimeLocal(new Date());
-          const txData = {
-            amount: rewardValue,
-            type: isPendingReferral ? "Referral Commission (Pending)" : "Referral Commission",
-            date: dateStr,
-            time: timeStr,
+          await recordWalletTransaction({
             userId: String(referrerId),
-            createdAt: new Date().toISOString(),
-            details: isPendingReferral
+            amount: rewardValue,
+            creditDebit: "Credit",
+            source: "👥 Referral Bonus",
+            description: isPendingReferral
               ? `Pending Review commission for referring ${userData.enteredName || userData.firstName || "Friend"} (Level: ${matchedLevel.name}) due to economy protection checks.`
-              : `Commission for referring ${userData.enteredName || userData.firstName || "Friend"} (Level: ${matchedLevel.name})`
-          };
-
-          await Promise.all([
-            addDoc(collection(db, "transactionHistory"), txData),
-            addDoc(collection(db, "transactions"), txData)
-          ]);
+              : `Commission for referring ${userData.enteredName || userData.firstName || "Friend"} (Level: ${matchedLevel.name})`,
+            status: isPendingReferral ? "Pending" : "Completed"
+          });
 
           // Evaluate Milestones
           for (const milestone of milestones) {
@@ -6280,20 +6439,14 @@ User: " + user.first_name + " (" + user.id + ")");
                   totalEarnings: finalTotalEarnings
                 }, { merge: true });
 
-                const milestoneTx = {
-                  amount: milestone.reward,
-                  type: "Milestone Reward",
-                  date: dateStr,
-                  time: timeStr,
+                await recordWalletTransaction({
                   userId: String(referrerId),
-                  createdAt: new Date().toISOString(),
-                  details: `Reward for reaching ${milestone.referrals} successful referrals!`
-                };
-
-                await Promise.all([
-                  addDoc(collection(db, "transactionHistory"), milestoneTx),
-                  addDoc(collection(db, "transactions"), milestoneTx)
-                ]);
+                  amount: milestone.reward,
+                  creditDebit: "Credit",
+                  source: "👥 Referral Bonus",
+                  description: `Reward for reaching ${milestone.referrals} successful referrals!`,
+                  status: "Completed"
+                });
 
                 // Notify referrer of Milestone
                 const milestoneNotify = `🏆 *Milestone Unlocked!*
@@ -8721,7 +8874,18 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
         is_flagged: isFlagged
       });
 
-      // Format transaction date & time
+      // Log Transaction History
+      const taskName = tSnap.exists() ? (tSnap.data().name || tSnap.data().title || "Task") : "Task";
+      await recordWalletTransaction({
+        userId: String(userId),
+        amount,
+        creditDebit: "Credit",
+        source: "🎯 Task Reward",
+        description: `Completed task: ${taskName}`,
+        status: isFlagged ? "Pending Review" : "Completed"
+      });
+
+      // Format transaction date & time for legacy logs if needed
       const now = new Date();
       const dateStr = now.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
       const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" });
@@ -8739,7 +8903,6 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
       };
 
       await Promise.all([
-        addDoc(collection(db, "transactions"), txData),
         addDoc(collection(db, "transactionHistory"), txData)
       ]);
 
@@ -10310,6 +10473,18 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
         tgMsg = `💸 <b>UPI Withdrawal Request Submitted</b>
 \n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>UPI ID:</b> <code>${upiId.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
       }
+
+      // Log Transaction History
+      await recordWalletTransaction({
+        userId: String(userId),
+        amount: requestedAmount,
+        creditDebit: "Debit",
+        source: "💸 Withdrawal",
+        description: `${method === "UPI ID" ? "UPI Transfer" : method === "Bank Account" ? "Bank Transfer" : "USDT Transfer"}`,
+        status: withdrawalStatus === "Approved" ? "Completed" : withdrawalStatus,
+        transactionId: withdrawalId,
+        skipNotification: true // Already sending custom detailed bot message
+      });
 
       await sendTgMessage(String(userId), tgMsg);
 

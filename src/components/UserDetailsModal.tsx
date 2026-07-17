@@ -1,10 +1,57 @@
-import { useState } from "react";
-import { X, Shield, ShieldAlert, Ban, MessageSquare, Wallet, History, FileText, Link as LinkIcon, Users, Calendar, Phone, AtSign, Plus, Minus, Gift, CreditCard, Lock, Unlock } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Shield, ShieldAlert, Ban, MessageSquare, Wallet, History, FileText, Link as LinkIcon, Users, Calendar, Phone, AtSign, Plus, Minus, Gift, CreditCard, Lock, Unlock, Edit, Check, AlertCircle, RefreshCw } from "lucide-react";
 
 export default function UserDetailsModal({ user, onClose, onAction }: { user: any, onClose: () => void, onAction: (id: string, action: string, input?: any) => void }) {
   const [activeTab, setActiveTab] = useState("Details");
   const [modalInput, setModalInput] = useState<{ amount: number, reason: string }>({ amount: 0, reason: "" });
   const [showConfirm, setShowConfirm] = useState<string | null>(null);
+
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [editingTxId, setEditingTxId] = useState<string | null>(null);
+  const [editingNotes, setEditingNotes] = useState("");
+  const [savingNotesId, setSavingNotesId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab === "History") {
+      setLoadingHistory(true);
+      fetch(`/api/admin/users/${user.id}/transactions`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setTransactions(data.transactions || []);
+          }
+          setLoadingHistory(false);
+        })
+        .catch(err => {
+          console.error("Error loading user history:", err);
+          setLoadingHistory(false);
+        });
+    }
+  }, [activeTab, user.id]);
+
+  const handleSaveNotes = async (txId: string) => {
+    setSavingNotesId(txId);
+    try {
+      const res = await fetch(`/api/admin/transactions/${txId}/notes`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminNotes: editingNotes })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTransactions(prev => prev.map(t => t.transactionId === txId ? { ...t, adminNotes: editingNotes } : t));
+        setEditingTxId(null);
+      } else {
+        alert(data.error || "Failed to update notes");
+      }
+    } catch (e: any) {
+      console.error("Error saving notes:", e);
+      alert("Error saving notes: " + e.message);
+    } finally {
+      setSavingNotesId(null);
+    }
+  };
 
   if (!user) return null;
 
@@ -124,8 +171,144 @@ export default function UserDetailsModal({ user, onClose, onAction }: { user: an
             </div>
         )}
 
-        {/* Simplified History/Files tab */}
-        {activeTab !== "Details" && activeTab !== "Wallet" && <div className="text-slate-500 text-sm italic">Feature under development.</div>}
+        {activeTab === "History" && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                <History size={16} className="text-indigo-400" /> Transaction Ledger
+              </h4>
+              <button 
+                onClick={() => {
+                  setLoadingHistory(true);
+                  fetch(`/api/admin/users/${user.id}/transactions`)
+                    .then(res => res.json())
+                    .then(data => {
+                      if (data.success) setTransactions(data.transactions || []);
+                      setLoadingHistory(false);
+                    })
+                    .catch(() => setLoadingHistory(false));
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg transition"
+              >
+                <RefreshCw size={12} className={loadingHistory ? "animate-spin" : ""} /> Refresh
+              </button>
+            </div>
+
+            {loadingHistory ? (
+              <div className="flex justify-center py-8">
+                <RefreshCw size={24} className="animate-spin text-indigo-500" />
+              </div>
+            ) : transactions.length === 0 ? (
+              <div className="text-center py-12 bg-slate-950 rounded-2xl border border-slate-800">
+                <AlertCircle size={32} className="mx-auto text-slate-600 mb-2" />
+                <p className="text-slate-500 text-sm italic">No wallet transactions found for this user.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+                {transactions.map((tx) => {
+                  const isCredit = tx.creditDebit === "Credit";
+                  const formattedDate = tx.createdAt ? new Date(tx.createdAt).toLocaleString() : "N/A";
+                  
+                  return (
+                    <div key={tx.transactionId} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 hover:border-slate-700 transition flex flex-col md:flex-row justify-between gap-4">
+                      <div className="space-y-2 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                            isCredit ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"
+                          }`}>
+                            {isCredit ? "Credit" : "Debit"}
+                          </span>
+                          <span className="text-xs font-semibold text-white bg-slate-800 px-2 py-1 rounded-lg">
+                            {tx.source || "Transaction"}
+                          </span>
+                          {tx.eventName && (
+                            <span className="text-xs text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-lg border border-indigo-500/20">
+                              🎡 {tx.eventName}
+                            </span>
+                          )}
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            tx.status === "Completed" ? "bg-emerald-500/20 text-emerald-400" :
+                            tx.status === "Pending" || tx.status === "Processing" ? "bg-amber-500/20 text-amber-400" :
+                            "bg-red-500/20 text-red-400"
+                          }`}>
+                            {tx.status || "Completed"}
+                          </span>
+                        </div>
+
+                        <p className="text-sm text-slate-300 font-medium">{tx.description}</p>
+                        
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                          <span><b>ID:</b> <code className="text-slate-400">{tx.transactionId}</code></span>
+                          <span><b>Date:</b> {formattedDate}</span>
+                        </div>
+
+                        {/* Admin Notes Box */}
+                        <div className="mt-2 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80 text-xs">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-[10px] uppercase font-bold text-slate-500">Admin Notes</span>
+                            {editingTxId === tx.transactionId ? (
+                              <div className="flex gap-1.5">
+                                <button 
+                                  onClick={() => handleSaveNotes(tx.transactionId)}
+                                  disabled={savingNotesId === tx.transactionId}
+                                  className="text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 font-semibold animate-none"
+                                >
+                                  {savingNotesId === tx.transactionId ? "Saving..." : <span className="flex items-center gap-0.5"><Check size={12} /> Save</span>}
+                                </button>
+                                <button 
+                                  onClick={() => setEditingTxId(null)}
+                                  className="text-slate-400 hover:text-slate-300 font-semibold"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button 
+                                onClick={() => {
+                                  setEditingTxId(tx.transactionId);
+                                  setEditingNotes(tx.adminNotes || "");
+                                }}
+                                className="text-indigo-400 hover:text-indigo-300 flex items-center gap-0.5"
+                              >
+                                <Edit size={10} /> Edit Notes
+                              </button>
+                            )}
+                          </div>
+
+                          {editingTxId === tx.transactionId ? (
+                            <input 
+                              type="text"
+                              value={editingNotes}
+                              onChange={(e) => setEditingNotes(e.target.value)}
+                              placeholder="Add admin notes (e.g. payout reference or review details)..."
+                              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-xs"
+                            />
+                          ) : (
+                            <p className={`${tx.adminNotes ? "text-slate-300" : "text-slate-600 italic"}`}>
+                              {tx.adminNotes || "No admin notes recorded."}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end justify-center min-w-[80px]">
+                        <span className={`text-lg font-black ${isCredit ? "text-emerald-400" : "text-rose-400"}`}>
+                          {isCredit ? "+" : "-"}₹{tx.amount}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "Files/Links" && (
+          <div className="text-slate-400 text-sm italic bg-slate-950 p-6 rounded-2xl border border-slate-800 text-center">
+            No files or custom links created by this user yet.
+          </div>
+        )}
 
         <div className="border-t border-slate-800 pt-4 flex gap-3">
             <button onClick={() => onAction(user.id, user.status === "Banned" ? "unban_user" : "ban_user")} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl font-bold ${user.status === "Banned" ? "bg-emerald-600" : "bg-red-600"}`}>

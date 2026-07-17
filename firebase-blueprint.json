@@ -16,14 +16,19 @@
       "description": "User earnings/withdrawal transaction record",
       "type": "object",
       "properties": {
-        "amount": { "type": "number" },
-        "type": { "type": "string" },
-        "date": { "type": "string" },
-        "time": { "type": "string" },
+        "transactionId": { "type": "string" },
         "userId": { "type": "string" },
-        "createdAt": { "type": "string" }
+        "telegramUsername": { "type": "string" },
+        "amount": { "type": "number" },
+        "creditDebit": { "type": "string", "enum": ["Credit", "Debit"] },
+        "source": { "type": "string" },
+        "description": { "type": "string" },
+        "eventName": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string" },
+        "adminNotes": { "type": "string" }
       },
-      "required": ["amount", "type", "date", "time", "userId", "createdAt"]
+      "required": ["userId", "amount", "creditDebit", "source", "description", "createdAt", "status"]
     },
     "referral": {
       "title": "Referral",
