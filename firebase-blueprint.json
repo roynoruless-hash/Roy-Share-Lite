@@ -193,9 +193,45 @@
         "rewardAmount": { "type": "number" }
       },
       "required": ["userId", "taskId", "status", "startedAt"]
+    },
+    "adsgram_setting": {
+      "title": "Adsgram Setting",
+      "description": "Configuration for Adsgram Integration",
+      "type": "object",
+      "properties": {
+        "adsgramAppId": { "type": "string" },
+        "adsgramBlockId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["adsgramAppId", "adsgramBlockId", "updatedAt"]
+    },
+    "adsgram_reward": {
+      "title": "Adsgram Reward",
+      "description": "Reward history log for Adsgram callbacks",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "method": { "type": "string" },
+        "ip": { "type": "string" },
+        "params": { "type": "object" },
+        "status": { "type": "string" },
+        "rewardAmount": { "type": "number" },
+        "error": { "type": "string" },
+        "adEventId": { "type": "string" }
+      },
+      "required": ["userId", "timestamp", "status", "rewardAmount"]
     }
   },
   "firestore": {
+    "/settings/adsgram": {
+      "schema": "adsgram_setting",
+      "description": "Settings for Adsgram integration"
+    },
+    "/adsgram_rewards/{rewardId}": {
+      "schema": "adsgram_reward",
+      "description": "Collection tracking user rewards from Adsgram callbacks"
+    },
     "/admins/{adminId}": {
       "schema": "admin",
       "description": "Admins collection"

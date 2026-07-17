@@ -308,14 +308,27 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     setEnrolling(true);
     setEnrollError("");
     
-    const blockId = "3856"; // Recommended Adsgram test block ID for rewarded videos
+    let activeBlockId = "3856"; // Default/fallback to Adsgram test block ID
+    try {
+      const configRes = await fetch("/api/adsgram-settings");
+      if (configRes.ok) {
+        const configData = await configRes.json();
+        if (configData.success && configData.settings?.adsgramBlockId) {
+          activeBlockId = configData.settings.adsgramBlockId;
+          console.log("[LuckyDraw] Loaded active Adsgram block ID from database:", activeBlockId);
+        }
+      }
+    } catch (e) {
+      console.error("[LuckyDraw] Error loading Adsgram config, using default:", e);
+    }
+    
     const adsgram = (window as any).Adsgram;
     
     if (adsgram) {
       console.log("[LuckyDraw] Adsgram SDK is initialized correctly in the window scope.");
       try {
-        console.log("[Adsgram] Callback: loaded | Initializing ad controller with blockId:", blockId);
-        const adController = adsgram.init({ blockId });
+        console.log("[Adsgram] Callback: loaded | Initializing ad controller with blockId:", activeBlockId);
+        const adController = adsgram.init({ blockId: activeBlockId });
         console.log("[Adsgram] Ad controller initialized:", adController);
         
         console.log("[Adsgram] Callback: opened | Displaying rewarded video ad...");

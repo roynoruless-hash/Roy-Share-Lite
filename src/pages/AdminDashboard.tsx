@@ -405,6 +405,99 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [editThumbnailUploading, setEditThumbnailUploading] = useState(false);
   const [editThumbnailUploadProgress, setEditThumbnailUploadProgress] = useState(0);
 
+  // Adsgram Settings State
+  const [adsgramSettings, setAdsgramSettings] = useState<any>({
+    adsgramAppId: "",
+    adsgramBlockId: "",
+    lastCallbackTime: ""
+  });
+  const [adsgramLoading, setAdsgramLoading] = useState(false);
+  const [adsgramSaving, setAdsgramSaving] = useState(false);
+  const [adsgramSuccess, setAdsgramSuccess] = useState("");
+  const [adsgramError, setAdsgramError] = useState("");
+  const [testUserId, setTestUserId] = useState("");
+  const [testStatus, setTestStatus] = useState("");
+  const [testLoading, setTestLoading] = useState(false);
+
+  const fetchAdsgramSettings = async () => {
+    setAdsgramLoading(true);
+    setAdsgramError("");
+    try {
+      const res = await authenticatedFetch("/api/admin/adsgram-settings");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.settings) {
+          setAdsgramSettings({
+            adsgramAppId: data.settings.adsgramAppId || "",
+            adsgramBlockId: data.settings.adsgramBlockId || "",
+            lastCallbackTime: data.settings.lastCallbackTime || ""
+          });
+        }
+      } else {
+        setAdsgramError("Failed to fetch Adsgram settings");
+      }
+    } catch (err: any) {
+      console.error("Error fetching Adsgram settings:", err);
+      setAdsgramError(err.message || "Failed to fetch Adsgram settings");
+    } finally {
+      setAdsgramLoading(false);
+    }
+  };
+
+  const saveAdsgramSettings = async () => {
+    setAdsgramSaving(true);
+    setAdsgramSuccess("");
+    setAdsgramError("");
+    try {
+      const res = await authenticatedFetch("/api/admin/adsgram-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adsgramAppId: adsgramSettings.adsgramAppId,
+          adsgramBlockId: adsgramSettings.adsgramBlockId
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAdsgramSuccess("Adsgram settings saved successfully!");
+        fetchAdsgramSettings();
+      } else {
+        setAdsgramError(data.error || "Failed to save Adsgram settings");
+      }
+    } catch (err: any) {
+      console.error("Error saving Adsgram settings:", err);
+      setAdsgramError(err.message || "Failed to save Adsgram settings");
+    } finally {
+      setAdsgramSaving(false);
+    }
+  };
+
+  const handleTestCallback = async () => {
+    if (!testUserId) {
+      alert("Please enter a User ID to test the callback.");
+      return;
+    }
+    setTestLoading(true);
+    setTestStatus("Sending test callback request...");
+    try {
+      const testUrl = `/api/adsgram/reward?userid=${testUserId}&id=test_event_${Date.now()}`;
+      const res = await fetch(testUrl);
+      const text = await res.text();
+      if (res.ok) {
+        setTestStatus(`Success: ${text}`);
+        alert(`Test callback successful! Server response: ${text}`);
+      } else {
+        setTestStatus(`Failed: ${text}`);
+        alert(`Test callback failed. Server response: ${text}`);
+      }
+    } catch (err: any) {
+      setTestStatus(`Error: ${err.message}`);
+      alert(`Test callback error: ${err.message}`);
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
   // Telegram Official Settings State (Requested Section)
   const [telegramOfficialSettings, setTelegramOfficialSettings] = useState<any>({
     botToken: "",
@@ -3568,6 +3661,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchSupportSettings();
       fetchBonusSettings();
       fetchImgbbConfig();
+      fetchAdsgramSettings();
     } else if (activeTab === "🛡 Security Center") {
       fetchSecurityData();
     } else if (activeTab === "📜 Activity Logs") {
@@ -14821,6 +14915,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       "🤖 AI Settings",
                       "🔗 URL Shortener",
                       "🖼 Image Hosting (ImgBB)",
+                      "📢 Adsgram Integration",
                       "🔄 Maintenance Mode",
                     ].map((tab) => (
                       <button
@@ -17352,6 +17447,170 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                 </div>
                               </div>
                             )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsTab === "📢 Adsgram Integration" && (
+                      <div className="space-y-6">
+                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-4">
+                          <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                            📢 Adsgram Configuration
+                          </h4>
+                          
+                          {adsgramSuccess && (
+                            <div className="p-4 bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 rounded-xl text-sm">
+                              {adsgramSuccess}
+                            </div>
+                          )}
+                          {adsgramError && (
+                            <div className="p-4 bg-rose-500/10 border border-rose-500/25 text-rose-400 rounded-xl text-sm">
+                              {adsgramError}
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                                Adsgram App ID
+                              </label>
+                              <input
+                                type="text"
+                                value={adsgramSettings.adsgramAppId || ""}
+                                onChange={(e) => setAdsgramSettings({ ...adsgramSettings, adsgramAppId: e.target.value })}
+                                placeholder="e.g. 12345"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                                Adsgram Block ID
+                              </label>
+                              <input
+                                type="text"
+                                value={adsgramSettings.adsgramBlockId || ""}
+                                onChange={(e) => setAdsgramSettings({ ...adsgramSettings, adsgramBlockId: e.target.value })}
+                                placeholder="e.g. 3856"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="pt-2">
+                            <button
+                              onClick={saveAdsgramSettings}
+                              disabled={adsgramSaving}
+                              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition-all disabled:opacity-50"
+                            >
+                              {adsgramSaving ? "Saving..." : "💾 Save Settings"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Generated Callback URL Panel */}
+                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-4">
+                          <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                            🔗 Reward Callback URL
+                          </h4>
+                          <p className="text-slate-400 text-sm">
+                            Register this callback URL in your Adsgram dashboard under the Block configurations. Adsgram will trigger this endpoint to grant users real-time balance credits after successful ad completion.
+                          </p>
+                          
+                          <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div className="flex-1 w-full min-w-0">
+                              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block mb-1">
+                                Reward Callback URL (Auto-Generated)
+                              </span>
+                              <code className="text-xs font-mono text-slate-300 block select-all break-all bg-slate-950 p-2.5 rounded border border-slate-850">
+                                {`${window.location.origin}/api/adsgram/reward?userid=[userid]`}
+                              </code>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const url = `${window.location.origin}/api/adsgram/reward?userid=[userid]`;
+                                navigator.clipboard.writeText(url);
+                                alert("Reward Callback URL copied to clipboard!");
+                              }}
+                              className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold rounded-xl transition-all border border-slate-700 shrink-0"
+                            >
+                              📋 Copy URL
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Test Callback Panel */}
+                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-4">
+                          <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                            🧪 Test Callback
+                          </h4>
+                          <p className="text-slate-400 text-sm">
+                            Simulate an Adsgram server-to-server callback request to verify your backend endpoints are fully operational.
+                          </p>
+
+                          <div className="flex flex-col sm:flex-row gap-3 items-end">
+                            <div className="flex-1 w-full">
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                                Test Telegram User ID (Numeric ID)
+                              </label>
+                              <input
+                                type="text"
+                                value={testUserId}
+                                onChange={(e) => setTestUserId(e.target.value)}
+                                placeholder="e.g. 123456789"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-sm"
+                              />
+                            </div>
+                            <button
+                              onClick={handleTestCallback}
+                              disabled={testLoading}
+                              className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition-all disabled:opacity-50 shrink-0"
+                            >
+                              {testLoading ? "Testing..." : "🧪 Test Callback"}
+                            </button>
+                          </div>
+
+                          {testStatus && (
+                            <div className="mt-2 text-xs font-mono p-3 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400">
+                              {testStatus}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Adsgram Connection Status Card */}
+                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 space-y-4">
+                          <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                            📊 Adsgram Status
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                              <span className="text-slate-500 text-xs block mb-1">Connection State</span>
+                              <div className="flex items-center gap-2">
+                                {adsgramSettings.adsgramAppId && adsgramSettings.adsgramBlockId ? (
+                                  <>
+                                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                    <span className="text-emerald-400 text-sm font-bold">Connected</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                                    <span className="text-rose-400 text-sm font-bold">Not Configured</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                              <span className="text-slate-500 text-xs block mb-1">Active Blocks</span>
+                              <span className="text-white text-sm font-semibold">
+                                {adsgramSettings.adsgramBlockId ? `Block #${adsgramSettings.adsgramBlockId}` : "None"}
+                              </span>
+                            </div>
+                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                              <span className="text-slate-500 text-xs block mb-1">Last S2S Callback</span>
+                              <span className="text-white text-sm font-semibold block truncate">
+                                {adsgramSettings.lastCallbackTime ? new Date(adsgramSettings.lastCallbackTime).toLocaleString() : "Never"}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>

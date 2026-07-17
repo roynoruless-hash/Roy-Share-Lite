@@ -9914,6 +9914,178 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   });
 
   // ==========================================
+  // ADSGRAM INTEGRATION ENDPOINTS
+  // ==========================================
+
+  // Admin endpoint to get Adsgram settings
+  app.get("/api/admin/adsgram-settings", requireAdminDb, async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "adsgram");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        res.json({ success: true, settings: snap.data() });
+      } else {
+        res.json({ success: true, settings: null });
+      }
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Admin endpoint to update Adsgram settings
+  app.put("/api/admin/adsgram-settings", requireAdminDb, async (req, res) => {
+    try {
+      const { adsgramAppId, adsgramBlockId } = req.body;
+      const docRef = doc(db, "settings", "adsgram");
+      const snap = await getDoc(docRef);
+      const existingData = snap.exists() ? snap.data() : {};
+
+      const saveData = {
+        ...existingData,
+        adsgramAppId: String(adsgramAppId || "").trim(),
+        adsgramBlockId: String(adsgramBlockId || "").trim(),
+        updatedAt: new Date().toISOString()
+      };
+
+      await setDoc(docRef, saveData, { merge: true });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Public endpoint for Adsgram settings (used by frontend pages)
+  app.get("/api/adsgram-settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "adsgram");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        res.json({ success: true, settings: snap.data() });
+      } else {
+        res.json({ success: true, settings: null });
+      }
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Shared Adsgram callback handler
+  const handleAdsgramReward = async (req: any, res: any) => {
+    const method = req.method;
+    const params = method === "GET" ? req.query : req.body;
+    
+    console.log(`[ADSGRAM CALLBACK] Received ${method} request at ${new Date().toISOString()}`);
+    console.log(`[ADSGRAM CALLBACK] Full Raw Params:`, JSON.stringify(params, null, 2));
+
+    const userid = params.userid || params.user_id;
+
+    if (!userid) {
+      console.error(`[ADSGRAM CALLBACK] FAILURE: Missing userid parameter.`);
+      return res.status(400).send("Missing userid");
+    }
+
+    const rewardLogRef = collection(db, "adsgram_rewards");
+    const logEntry: any = {
+      userId: String(userid),
+      timestamp: new Date().toISOString(),
+      method,
+      ip: req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown",
+      params: { ...params },
+      status: "pending",
+      rewardAmount: 0.15,
+      adEventId: String(params.id || params.event_id || params.track_id || params.transaction_id || params.click_id || params.ad_id || params.uuid || "")
+    };
+
+    try {
+      // Check if user exists
+      const userRef = doc(db, "users", String(userid));
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        console.error(`[ADSGRAM CALLBACK] FAILURE: User ${userid} not found in database.`);
+        logEntry.status = "failed";
+        logEntry.error = "User not found";
+        await addDoc(rewardLogRef, logEntry);
+        return res.status(404).send("User not found");
+      }
+
+      const userData = userSnap.data() || {};
+
+      // Check duplicate by event ID
+      let isDuplicate = false;
+      if (logEntry.adEventId) {
+        const q = query(rewardLogRef, where("adEventId", "==", logEntry.adEventId), where("status", "==", "success"));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          isDuplicate = true;
+        }
+      }
+
+      // Time-based throttle fallback: prevent duplicate requests for the same user in under 5 seconds
+      if (!isDuplicate) {
+        const fiveSecAgo = new Date(Date.now() - 5000).toISOString();
+        const qUser = query(rewardLogRef, where("userId", "==", String(userid)), where("timestamp", ">=", fiveSecAgo), where("status", "==", "success"));
+        const snapUser = await getDocs(qUser);
+        if (!snapUser.empty) {
+          isDuplicate = true;
+        }
+      }
+
+      if (isDuplicate) {
+        console.warn(`[ADSGRAM CALLBACK] Warning: Duplicate callback detected for user ${userid}`);
+        logEntry.status = "failed";
+        logEntry.error = "Duplicate callback";
+        await addDoc(rewardLogRef, logEntry);
+        return res.status(200).send("Duplicate postback already processed");
+      }
+
+      // Success: Credit user balance
+      const currentBalance = Number(userData.balance || 0);
+      const currentAvailable = Number(userData.availableBalance || userData.balance || 0);
+      const currentTotalEarnings = Number(userData.totalEarnings || 0);
+      const currentRewardBalance = Number(userData.rewardBalance || 0);
+      const rewardAmount = 0.15;
+
+      await updateDoc(userRef, {
+        balance: currentBalance + rewardAmount,
+        availableBalance: currentAvailable + rewardAmount,
+        totalEarnings: currentTotalEarnings + rewardAmount,
+        rewardBalance: currentRewardBalance + rewardAmount,
+        lastActive: new Date().toISOString()
+      });
+
+      // Insert transaction log
+      await addDoc(collection(db, "transactions"), {
+        userId: String(userid),
+        amount: rewardAmount,
+        type: "adsgram_reward",
+        description: "Adsgram Video Ad Reward",
+        status: "completed",
+        createdAt: new Date().toISOString()
+      });
+
+      // Update Adsgram Settings collection with last callback timestamp
+      const adsgramSettingsRef = doc(db, "settings", "adsgram");
+      await setDoc(adsgramSettingsRef, { lastCallbackTime: new Date().toISOString() }, { merge: true }).catch(() => {});
+
+      logEntry.status = "success";
+      await addDoc(rewardLogRef, logEntry);
+
+      console.log(`[ADSGRAM CALLBACK] SUCCESS: Balance credited and callback logged for user ${userid}`);
+      return res.status(200).send("OK");
+    } catch (e: any) {
+      console.error("[ADSGRAM CALLBACK] Fatal Error:", e);
+      logEntry.status = "failed";
+      logEntry.error = e.message;
+      await addDoc(rewardLogRef, logEntry).catch(() => {});
+      return res.status(500).send("Internal Server Error");
+    }
+  };
+
+  app.get("/api/adsgram/reward", handleAdsgramReward);
+  app.post("/api/adsgram/reward", handleAdsgramReward);
+
+  // ==========================================
   // ADS.TXT MANAGER
   // ==========================================
 
