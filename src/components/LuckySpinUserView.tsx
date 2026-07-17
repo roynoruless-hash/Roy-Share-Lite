@@ -259,14 +259,15 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
     // Listen to participants
     const participantsQuery = query(
       collection(db, "lucky_spin_participants"),
-      where("eventId", "==", selectedEvent.id),
-      orderBy("joinTime", "asc")
+      where("eventId", "==", selectedEvent.id)
     );
     const unsubParticipants = onSnapshot(participantsQuery, (snapshot) => {
       const parts: LuckySpinParticipant[] = [];
       snapshot.forEach((doc) => {
         parts.push(doc.data() as LuckySpinParticipant);
       });
+      // Sort participants locally in memory
+      parts.sort((a, b) => new Date(a.joinTime).getTime() - new Date(b.joinTime).getTime());
       setParticipants(parts);
 
       // Check if current user is in participants
@@ -1181,28 +1182,30 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
               )}
 
               {/* REAL-TIME LOBBY FEED & PARTICIPANTS GRID */}
-              {selectedEvent.status !== "Ended" && selectedEvent.spinState.status !== "ended" && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Lobby Activity Feed */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-1">
-                      ⚡ Live Activity
-                    </h4>
-                    <div className="h-36 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
-                      {activities.length === 0 ? (
-                        <p className="text-[11px] text-slate-600 font-bold italic text-center pt-8">
-                          Lobby is quiet... waiting for live activities.
-                        </p>
-                      ) : (
-                        activities.map((act, i) => (
-                          <div key={i} className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                            <span>{act}</span>
-                          </div>
-                        ))
-                      )}
+              {selectedEvent.status !== "Ended" && selectedEvent.spinState.status !== "ended" && (() => {
+                const displayActivities = (selectedEvent as any).activities || activities;
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Lobby Activity Feed */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                      <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-1">
+                        ⚡ Live Activity
+                      </h4>
+                      <div className="h-36 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                        {displayActivities.length === 0 ? (
+                          <p className="text-[11px] text-slate-600 font-bold italic text-center pt-8">
+                            Lobby is quiet... waiting for live activities.
+                          </p>
+                        ) : (
+                          displayActivities.map((act: string, i: number) => (
+                            <div key={i} className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                              <span>{act}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
-                  </div>
 
                   {/* Joined Participants Grid */}
                   <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
@@ -1229,7 +1232,8 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
           )}
         </div>

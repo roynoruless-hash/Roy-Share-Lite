@@ -84,6 +84,11 @@ export const LuckySpinAdminView: React.FC = () => {
   const [formSuccess, setFormSuccess] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Diagnostics States
+  const [lastWriteTime, setLastWriteTime] = useState<Date | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
+  const [syncError, setSyncError] = useState<string | null>(null);
+
   // Fetch all events
   useEffect(() => {
     const eventsQuery = query(collection(db, "lucky_spin_events"), orderBy("createdAt", "desc"));
@@ -93,12 +98,16 @@ export const LuckySpinAdminView: React.FC = () => {
         list.push({ ...docSnap.data() as LuckySpinEvent, id: docSnap.id });
       });
       setEvents(list);
+      setLastSyncTime(new Date());
 
       // Keep active control event updated in real-time
       if (selectedEvent) {
         const updated = list.find((e) => e.id === selectedEvent.id);
         if (updated) setSelectedEvent(updated);
       }
+    }, (err) => {
+      console.error("Events sync error:", err);
+      setSyncError("Events subscription: " + err.message);
     });
 
     return () => unsubscribe();
@@ -108,18 +117,23 @@ export const LuckySpinAdminView: React.FC = () => {
   useEffect(() => {
     if (!selectedEvent) return;
 
-    // Listen to participants of this event
+    // Listen to participants of this event - NO ORDERBY in Firestore to avoid index requirement
     const participantsQuery = query(
       collection(db, "lucky_spin_participants"),
-      where("eventId", "==", selectedEvent.id),
-      orderBy("joinTime", "asc")
+      where("eventId", "==", selectedEvent.id)
     );
     const unsubParticipants = onSnapshot(participantsQuery, (snapshot) => {
       const list: LuckySpinParticipant[] = [];
       snapshot.forEach((docSnap) => {
         list.push(docSnap.data() as LuckySpinParticipant);
       });
+      // Sort participants locally in memory
+      list.sort((a, b) => new Date(a.joinTime).getTime() - new Date(b.joinTime).getTime());
       setParticipants(list);
+      setLastSyncTime(new Date());
+    }, (err) => {
+      console.error("Participants sync error:", err);
+      setSyncError("Participants subscription: " + err.message);
     });
 
     // Listen to viewers count
@@ -134,20 +148,29 @@ export const LuckySpinAdminView: React.FC = () => {
         if (data.lastActive) activeCount++;
       });
       setViewersCount(Math.max(activeCount, 0));
+      setLastSyncTime(new Date());
+    }, (err) => {
+      console.error("Viewers sync error:", err);
+      setSyncError("Viewers subscription: " + err.message);
     });
 
-    // Listen to winners of this event
+    // Listen to winners of this event - NO ORDERBY in Firestore
     const winnersQuery = query(
       collection(db, "lucky_spin_winners"),
-      where("eventId", "==", selectedEvent.id),
-      orderBy("winningTime", "desc")
+      where("eventId", "==", selectedEvent.id)
     );
     const unsubWinners = onSnapshot(winnersQuery, (snapshot) => {
       const list: LuckySpinWinner[] = [];
       snapshot.forEach((docSnap) => {
         list.push(docSnap.data() as LuckySpinWinner);
       });
+      // Sort winners locally in memory by winningTime desc
+      list.sort((a, b) => new Date(b.winningTime).getTime() - new Date(a.winningTime).getTime());
       setWinners(list);
+      setLastSyncTime(new Date());
+    }, (err) => {
+      console.error("Winners sync error:", err);
+      setSyncError("Winners subscription: " + err.message);
     });
 
     return () => {
@@ -240,39 +263,63 @@ export const LuckySpinAdminView: React.FC = () => {
   const handleUpdateStatus = async (status: "Draft" | "Live" | "Paused" | "Ended") => {
     if (!selectedEvent) return;
     try {
-      await fetch(`${API_BASE}/api/admin/lucky-spin/update-status`, {
+      setSyncError(null);
+      const res = await fetch(`${API_BASE}/api/admin/lucky-spin/update-status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ eventId: selectedEvent.id, status })
       });
-    } catch (err) {
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to update status");
+      }
+      setLastWriteTime(new Date());
+    } catch (err: any) {
       console.error("Failed to update status", err);
+      setSyncError("Update Status Error: " + err.message);
+      alert("Database error: " + err.message);
     }
   };
 
   const handleStartCountdown = async () => {
     if (!selectedEvent) return;
     try {
-      await fetch(`${API_BASE}/api/admin/lucky-spin/trigger-countdown`, {
+      setSyncError(null);
+      const res = await fetch(`${API_BASE}/api/admin/lucky-spin/trigger-countdown`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ eventId: selectedEvent.id })
       });
-    } catch (err) {
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to start countdown");
+      }
+      setLastWriteTime(new Date());
+    } catch (err: any) {
       console.error("Failed to start countdown", err);
+      setSyncError("Start Countdown Error: " + err.message);
+      alert("Database error: " + err.message);
     }
   };
 
   const handlePauseResumeWheel = async (action: "pause" | "resume") => {
     if (!selectedEvent) return;
     try {
-      await fetch(`${API_BASE}/api/admin/lucky-spin/pause-resume`, {
+      setSyncError(null);
+      const res = await fetch(`${API_BASE}/api/admin/lucky-spin/pause-resume`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ eventId: selectedEvent.id, action })
       });
-    } catch (err) {
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to pause/resume wheel");
+      }
+      setLastWriteTime(new Date());
+    } catch (err: any) {
       console.error("Failed to pause/resume wheel", err);
+      setSyncError("Pause/Resume Wheel Error: " + err.message);
+      alert("Database error: " + err.message);
     }
   };
 
@@ -283,26 +330,42 @@ export const LuckySpinAdminView: React.FC = () => {
       return;
     }
     try {
-      await fetch(`${API_BASE}/api/admin/lucky-spin/trigger-spin`, {
+      setSyncError(null);
+      const res = await fetch(`${API_BASE}/api/admin/lucky-spin/trigger-spin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ eventId: selectedEvent.id })
       });
-    } catch (err) {
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to trigger spin");
+      }
+      setLastWriteTime(new Date());
+    } catch (err: any) {
       console.error("Failed to trigger spin", err);
+      setSyncError("Trigger Spin Error: " + err.message);
+      alert("Database error: " + err.message);
     }
   };
 
   const handleReplayDraw = async () => {
     if (!selectedEvent) return;
     try {
-      await fetch(`${API_BASE}/api/admin/lucky-spin/replay`, {
+      setSyncError(null);
+      const res = await fetch(`${API_BASE}/api/admin/lucky-spin/replay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ eventId: selectedEvent.id })
       });
-    } catch (err) {
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to replay draw");
+      }
+      setLastWriteTime(new Date());
+    } catch (err: any) {
       console.error("Failed to replay draw", err);
+      setSyncError("Replay Draw Error: " + err.message);
+      alert("Database error: " + err.message);
     }
   };
 
@@ -659,6 +722,52 @@ export const LuckySpinAdminView: React.FC = () => {
 
           {/* Winner Logs Panel */}
           <div className="space-y-6">
+            {/* ADMIN DIAGNOSTICS PANEL */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
+              <h3 className="font-black text-sm uppercase text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                <span className="text-blue-400">🛡️</span> Admin Diagnostics
+              </h3>
+              
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Participants (DB)</span>
+                  <span className="font-black text-white">{participants.length}</span>
+                </div>
+                
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Viewers (Live)</span>
+                  <span className="font-black text-white">{viewersCount}</span>
+                </div>
+                
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40 col-span-2">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Last Sync Time</span>
+                  <span className="font-black text-slate-300 font-mono">
+                    {lastSyncTime ? lastSyncTime.toLocaleTimeString() : "Never"}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40 col-span-2">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Last DB Write</span>
+                  <span className="font-black text-slate-300 font-mono">
+                    {lastWriteTime ? lastWriteTime.toLocaleTimeString() : "No writes yet"}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40 col-span-2">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Event State</span>
+                  <span className="font-black text-indigo-400 font-mono">
+                    {selectedEvent.spinState.status.toUpperCase()}
+                  </span>
+                </div>
+              </div>
+
+              {syncError && (
+                <div className="p-3 bg-red-950/20 border border-red-900/40 rounded-2xl text-[10px] text-red-400 font-medium">
+                  ⚠️ {syncError}
+                </div>
+              )}
+            </div>
+
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
               <h3 className="font-black text-sm uppercase text-white flex items-center gap-2 border-b border-slate-800 pb-3">
                 <Award className="w-4 h-4 text-amber-400" /> Draw Winner Logs

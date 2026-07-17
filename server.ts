@@ -1484,6 +1484,23 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
   });
 
   // 🎡 LUCKY SPIN EVENT ENDPOINTS
+
+  async function addEventActivity(eventId: string, text: string) {
+    try {
+      const eventRef = doc(db, "lucky_spin_events", eventId);
+      const snap = await firestoreGetDoc(eventRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        const acts = data.activities || [];
+        acts.unshift(text); // newest at the front
+        await updateDoc(eventRef, {
+          activities: acts.slice(0, 30) // keep last 30 activities
+        });
+      }
+    } catch (err) {
+      console.error("Failed to append activity:", err);
+    }
+  }
   
   // 1. User Participate
   app.post("/api/lucky-spin/participate", async (req, res) => {
@@ -1503,8 +1520,8 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       if (eventData.status !== "Live") {
         return res.status(400).json({ success: false, error: "This event is not accepting entries." });
       }
-      if (eventData.spinState.status !== "waiting") {
-        return res.status(400).json({ success: false, error: "Draw has already started." });
+      if (eventData.spinState.status !== "waiting" && eventData.spinState.status !== "winner_selected") {
+        return res.status(400).json({ success: false, error: "Draw is currently in progress." });
       }
       if (Number(eventData.participantsCount || 0) >= Number(eventData.maxParticipants || 50)) {
         return res.status(400).json({ success: false, error: "This event is full!" });
@@ -1528,11 +1545,15 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       });
       
       // Increment participants count
+      const updatedCount = (eventData.participantsCount || 0) + 1;
       await updateDoc(eventRef, {
-        participantsCount: (eventData.participantsCount || 0) + 1,
-        remainingSlots: Math.max(0, (eventData.maxParticipants || 50) - (eventData.participantsCount || 0) - 1)
+        participantsCount: updatedCount,
+        remainingSlots: Math.max(0, (eventData.maxParticipants || 50) - updatedCount)
       });
       
+      // Append Live Activity
+      await addEventActivity(eventId, `👋 ${realName} (@${username || "user"}) joined the lobby!`);
+
       // Send Telegram notification
       try {
         await sendTgMessage(telegramId, `✅ <b>Successfully Joined Lucky Spin Event</b>\n\nEvent: <b>${eventData.name}</b>\nName inside wheel: <b>${realName}</b>\n\nPlease wait inside the Live Event page. Only the Admin can spin the wheel! Watch live to win!`);
@@ -1569,6 +1590,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         participantsCount: 0,
         remainingSlots: Number(maxParticipants || 50),
         adsType: adsType || "Disabled",
+        activities: ["✨ Lucky Spin Event Created!"],
         spinState: {
           status: "waiting",
           countdown: 10
@@ -1602,7 +1624,14 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
     
     try {
       const eventRef = doc(db, "lucky_spin_events", eventId);
-      await updateDoc(eventRef, { status });
+      const updates: any = { status };
+      if (status === "Ended") {
+        updates["spinState.status"] = "ended";
+      } else if (status === "Live") {
+        updates["spinState.status"] = "waiting";
+      }
+      await updateDoc(eventRef, updates);
+      await addEventActivity(eventId, `🏁 Event status updated to: ${status}`);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1626,6 +1655,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         "spinState.status": "countdown",
         "spinState.countdown": 10
       });
+      await addEventActivity(eventId, "⚠️ Live Draw Countdown Started! Spin in 10 seconds...");
 
       // Broadcast start message to all joined participants
       try {
@@ -1638,26 +1668,32 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         console.error("Failed to broadcast start message", tgErr);
       }
 
-      // Backend Countdown interval
-      let currentCount = 10;
-      const intervalId = setInterval(async () => {
-        currentCount--;
-        if (currentCount > 0) {
-          await updateDoc(eventRef, {
-            "spinState.countdown": currentCount
-          });
-        } else {
-          clearInterval(intervalId);
-          // Auto trigger spin when countdown reaches 0
-          try {
-            await triggerSpinLogic(eventId);
-          } catch (spinErr) {
-            console.error("Error auto-triggering spin:", spinErr);
+      // Keep connection open and decrement countdown synchronously to keep CPU active in Cloud Run
+      let cancelled = false;
+      for (let count = 9; count >= 0; count--) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        
+        // Double check status to see if admin paused/cancelled it
+        const checkSnap = await firestoreGetDoc(eventRef);
+        if (checkSnap.exists()) {
+          const checkData = checkSnap.data();
+          if (checkData.spinState.status !== "countdown") {
+            cancelled = true;
+            break;
           }
         }
-      }, 1000);
+
+        if (count > 0) {
+          await updateDoc(eventRef, {
+            "spinState.countdown": count
+          });
+        } else {
+          // Trigger spin
+          await triggerSpinLogic(eventId);
+        }
+      }
       
-      res.json({ success: true });
+      res.json({ success: true, message: cancelled ? "Countdown interrupted" : "Countdown complete" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1673,6 +1709,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       await updateDoc(eventRef, {
         "spinState.status": action === "pause" ? "paused" : "spinning"
       });
+      await addEventActivity(eventId, `⏸ Wheel ${action === "pause" ? "PAUSED" : "RESUMED"} by Admin.`);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1708,13 +1745,14 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       await updateDoc(eventRef, {
         "spinState.replayCount": currentReplayCount + 1
       });
+      await addEventActivity(eventId, "🔁 Admin triggered an animation replay!");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // HELPER TRIGGER SPIN LOGIC
+  // HELPER TRIGGER SPIN LOGIC - Keeps request synchronous to keep container alive
   async function triggerSpinLogic(eventId: string) {
     const eventRef = doc(db, "lucky_spin_events", eventId);
     const eventSnap = await firestoreGetDoc(eventRef);
@@ -1731,6 +1769,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       await updateDoc(eventRef, {
         "spinState.status": "waiting"
       });
+      await addEventActivity(eventId, "⚠️ Spin Cancelled: Lobby is empty.");
       return;
     }
     
@@ -1756,79 +1795,94 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       "spinState.winnerName": winner.realName
     });
     
-    // Server-side buffer: wait 7 seconds (matching 6-second canvas wheel spin), then credit wallet and select winner
-    setTimeout(async () => {
-      try {
-        const doubleCheckWinnerSnap = await firestoreGetDoc(doc(db, "lucky_spin_winners", `${eventId}_${winner.telegramId}`));
-        if (doubleCheckWinnerSnap.exists()) {
-          console.log(`[Double Credit Guard] User ${winner.telegramId} already registered as winner of ${eventId}.`);
+    await addEventActivity(eventId, `🎡 Live wheel is spinning! Let's see who wins...`);
+
+    // Synchronously sleep 7 seconds on server side to hold the HTTP thread open and keep CPU awake
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+
+    try {
+      // Re-fetch event to make sure state wasn't changed/reset during spin
+      const checkSnap = await firestoreGetDoc(eventRef);
+      if (checkSnap.exists()) {
+        const checkData = checkSnap.data();
+        if (checkData.spinState.status !== "spinning") {
+          console.log(`[Spin cancelled] Event state changed from spinning to ${checkData.spinState.status}`);
           return;
         }
-
-        // 1. Create Winner document
-        const winnerId = `${eventId}_${winner.telegramId}`;
-        const winnerRef = doc(db, "lucky_spin_winners", winnerId);
-        
-        await setDoc(winnerRef, {
-          id: winnerId,
-          eventId,
-          eventName: eventData.name,
-          telegramId: winner.telegramId,
-          username: winner.username,
-          winnerName: winner.realName,
-          prize: Number(eventData.prizePerWinner),
-          winningTime: new Date().toISOString(),
-          walletStatus: "Credited",
-          creditStatus: "Wallet Balance Incremented",
-          bannerUrl: eventData.bannerUrl || ""
-        });
-        
-        // 2. Securely Credit Winner's Wallet Balance
-        const userRef = doc(db, "users", String(winner.telegramId));
-        const userSnap = await firestoreGetDoc(userRef);
-        if (userSnap.exists()) {
-          const userData = userSnap.data();
-          const currentBalance = Number(userData.balance || 0);
-          const currentAvailable = Number(userData.availableBalance || 0);
-          const currentTotal = Number(userData.totalEarnings || 0);
-          const currentToday = Number(userData.todayEarnings || 0);
-          const prizeAmt = Number(eventData.prizePerWinner);
-          
-          await updateDoc(userRef, {
-            balance: currentBalance + prizeAmt,
-            availableBalance: currentAvailable + prizeAmt,
-            totalEarnings: currentTotal + prizeAmt,
-            todayEarnings: currentToday + prizeAmt,
-            updatedAt: new Date().toISOString()
-          });
-          
-          // 3. Create Transaction history record
-          await addDoc(collection(db, "transactions"), {
-            userId: winner.telegramId,
-            type: "Lucky Spin Prize",
-            amount: prizeAmt,
-            date: new Date().toLocaleDateString(),
-            time: new Date().toLocaleTimeString(),
-            createdAt: new Date().toISOString(),
-            eventName: eventData.name
-          });
-        }
-        
-        // 4. Update Event State to Winner Selected
-        await updateDoc(eventRef, {
-          "spinState.status": "winner_selected"
-        });
-        
-        // 5. Send Telegram notification to the winner
-        try {
-          await sendTgMessage(winner.telegramId, `🏆 <b>CONGRATULATIONS! YOU WON!</b>\n\nEvent: <b>${eventData.name}</b>\nPrize won: <b>₹${eventData.prizePerWinner}</b>\n\nYour wallet balance has been successfully credited with ₹${eventData.prizePerWinner}.\n\nThank you for participating! Check out your custom Share Card in the app.`);
-        } catch (tgErr) {
-          console.error("Failed to send winning telegram message:", tgErr);
-        }
-      } catch (err) {
-        console.error("Failed to resolve winner credit on timeout", err);
       }
-    }, 7000);
+
+      const doubleCheckWinnerSnap = await firestoreGetDoc(doc(db, "lucky_spin_winners", `${eventId}_${winner.telegramId}`));
+      if (doubleCheckWinnerSnap.exists()) {
+        console.log(`[Double Credit Guard] User ${winner.telegramId} already registered as winner of ${eventId}.`);
+        return;
+      }
+
+      // 1. Create Winner document
+      const winnerId = `${eventId}_${winner.telegramId}`;
+      const winnerRef = doc(db, "lucky_spin_winners", winnerId);
+      
+      await setDoc(winnerRef, {
+        id: winnerId,
+        eventId,
+        eventName: eventData.name,
+        telegramId: winner.telegramId,
+        username: winner.username,
+        winnerName: winner.realName,
+        prize: Number(eventData.prizePerWinner),
+        winningTime: new Date().toISOString(),
+        walletStatus: "Credited",
+        creditStatus: "Wallet Balance Incremented",
+        bannerUrl: eventData.bannerUrl || ""
+      });
+      
+      // 2. Securely Credit Winner's Wallet Balance
+      const userRef = doc(db, "users", String(winner.telegramId));
+      const userSnap = await firestoreGetDoc(userRef);
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        const currentBalance = Number(userData.balance || 0);
+        const currentAvailable = Number(userData.availableBalance || 0);
+        const currentTotal = Number(userData.totalEarnings || 0);
+        const currentToday = Number(userData.todayEarnings || 0);
+        const prizeAmt = Number(eventData.prizePerWinner);
+        
+        await updateDoc(userRef, {
+          balance: currentBalance + prizeAmt,
+          availableBalance: currentAvailable + prizeAmt,
+          totalEarnings: currentTotal + prizeAmt,
+          todayEarnings: currentToday + prizeAmt,
+          updatedAt: new Date().toISOString()
+        });
+        
+        // 3. Create Transaction history record
+        await addDoc(collection(db, "transactions"), {
+          userId: winner.telegramId,
+          type: "Lucky Spin Prize",
+          amount: prizeAmt,
+          date: new Date().toLocaleDateString(),
+          time: new Date().toLocaleTimeString(),
+          createdAt: new Date().toISOString(),
+          eventName: eventData.name
+        });
+      }
+      
+      // 4. Update Event State to Winner Selected
+      await updateDoc(eventRef, {
+        "spinState.status": "winner_selected"
+      });
+
+      // Append Activity log
+      await addEventActivity(eventId, `🏆 CONGRATULATIONS to ${winner.realName} (@${winner.username}) for winning ₹${eventData.prizePerWinner}! 🎉`);
+      
+      // 5. Send Telegram notification to the winner
+      try {
+        await sendTgMessage(winner.telegramId, `🏆 <b>CONGRATULATIONS! YOU WON!</b>\n\nEvent: <b>${eventData.name}</b>\nPrize won: <b>₹${eventData.prizePerWinner}</b>\n\nYour wallet balance has been successfully credited with ₹${eventData.prizePerWinner}.\n\nThank you for participating! Check out your custom Share Card in the app.`);
+      } catch (tgErr) {
+        console.error("Failed to send winning telegram message:", tgErr);
+      }
+    } catch (err) {
+      console.error("Failed to resolve winner credit on timeout", err);
+    }
   }
 
   // 🍀 Lucky Draw Enrollment Endpoint
