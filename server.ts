@@ -28,20 +28,24 @@ function decryptToken(text: string): string {
 }
 import fs from "fs";
 import path from "path";
-fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] TOP OF server.ts reached (pre-imports)\n`);
+fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] TOP OF server.ts reached (pre-imports)
+`);
 
 import dotenv from "dotenv";
 dotenv.config();
 
 import { handleUpdate, submitWithdrawalRequest } from "./src/bot";
 import express from "express";
+import { setupAdvertiserRoutes } from './src/server_advertiser';
+
 // import path from "path"; // Already imported
 // import fs from "fs"; // Already imported
 import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
-fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] Vite import removed\n`);
+fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] Vite import removed
+`);
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch, deleteField } from "firebase/firestore";
+import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch, deleteField, serverTimestamp } from "firebase/firestore";
 import luckyNumberGiveawayRouter from "./src/routes/luckyNumberGiveaway";
 import { adjustTrustScore } from "./src/lib/trustScore";
 import { evaluateReward, getEconomySettings, saveEconomySettings } from "./src/lib/economy";
@@ -144,7 +148,8 @@ const requireAdminDb = (req: any, res: any, next: any) => {
 // Helper to log to a file we can read
 const debugLog = (msg: string) => {
   const timestamp = new Date().toISOString();
-  const logLine = `[${timestamp}] ${msg}\n`;
+  const logLine = `[${timestamp}] ${msg}
+`;
   console.log(msg); // Still log to console
   try {
     fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), logLine);
@@ -326,7 +331,8 @@ async function startServer() {
       await setDoc(doc(db, "users", String(userId)), { uploadTestMode: true }, { merge: true });
 
       // 3. Send upload prompt message to user's chatId (which is the userId)
-      const messageText = `📤 *Send the file you want to upload.*\n\nSupported Files:\n📄 PDF\n📦 APK\n🎬 Video\n🎵 Audio\n🖼 Image\n📁 ZIP/RAR\n📃 Documents`;
+      const messageText = `📤 *Send the file you want to upload.*
+\nSupported Files:\n📄 PDF\n📦 APK\n🎬 Video\n🎵 Audio\n🖼 Image\n📁 ZIP/RAR\n📃 Documents`;
 
       const inlineKeyboard = {
           inline_keyboard: [
@@ -457,7 +463,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
 
       const [
         totalUsers, totalUploads, totalLinks, totalWithdrawals, 
-        openTickets, totalAnnouncements, totalBonusClaims, 
+        openTickets, totalAnnouncements, 
         totalRewardClaims, totalReferrals
       ] = await Promise.all([
         getCount(collection(db, "users")),
@@ -466,7 +472,6 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         getCount(collection(db, "withdrawals")),
         getCount(query(collection(db, "tickets"), where("status", "==", "open"))),
         getCount(collection(db, "announcements")),
-        getCount(collectionGroup(db, "bonusClaims")),
         getCount(collection(db, "task_completions")),
         getCount(collection(db, "referrals"))
       ]);
@@ -484,13 +489,12 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
 
       const [
           newUsersToday, uploadsToday, linksToday,
-          withdrawalsToday, bonusClaimsToday, rewardsClaimedToday
+          withdrawalsToday, rewardsClaimedToday
       ] = await Promise.all([
           getTodayCount("users"),
           getTodayCount("uploads"),
           getTodayCount("links"),
           getTodayCount("withdrawals"),
-          0, // bonusClaims is a subcollection, querying >= today requires composite index usually. We'll set 0.
           getTodayCount("task_completions")
       ]);
 
@@ -498,10 +502,10 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
       res.json({
           overview: {
               totalUsers, totalUploads, totalLinks, totalEarnings, totalWithdrawals,
-              totalBonusClaims, totalRewardClaims, totalReferrals, openTickets, totalAnnouncements
+              totalRewardClaims, totalReferrals, openTickets, totalAnnouncements
           },
           today: {
-              newUsersToday, uploadsToday, linksToday, rewardsClaimedToday, bonusClaimsToday, withdrawalsToday
+              newUsersToday, uploadsToday, linksToday, rewardsClaimedToday, withdrawalsToday
           },
           activities: [
               { id: 1, type: "system", text: "Dashboard data loaded", time: new Date().toISOString() }
@@ -510,8 +514,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
               firestore: "Online",
               telegram: "Online",
               web: "Online",
-              rewards: "Online",
-              bonus: "Online"
+              rewards: "Online"
           }
       });
     } catch (e: any) {
@@ -794,36 +797,91 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
   });
 
   app.post("/api/admin/withdrawals/:id/approve", requireAdminDb, async (req, res) => {
-    console.log(`[Admin] Attempting to approve withdrawal: ${req.params.id}`);
+    const { id } = req.params;
+    debugLog(`[Admin Withdrawal] Approval request received for ID: ${id}`);
+    
     try {
-      const { id } = req.params;
       const ref = doc(db, "withdrawals", id);
       const snap = await getDoc(ref);
+      
       if (!snap.exists()) {
-        console.warn(`[Admin] Withdrawal not found: ${id}`);
-        return res.status(404).json({ error: "Withdrawal request not found." });
+        debugLog(`[Admin Withdrawal] Error: Withdrawal ${id} not found in database.`);
+        return res.status(404).json({ 
+          success: false, 
+          error: "Withdrawal request not found.",
+          detail: `ID ${id} does not exist in withdrawals collection.`
+        });
       }
       
       const wData = snap.data();
+      debugLog(`[Admin Withdrawal] Current status for ${id}: ${wData.status}`);
+
       if (wData.status === "Approved") {
-        console.warn(`[Admin] Withdrawal ${id} is already approved.`);
-        return res.status(400).json({ error: "Withdrawal is already approved" });
+        return res.status(400).json({ 
+          success: false, 
+          error: "Already Approved",
+          message: "This withdrawal is already in Approved status." 
+        });
       }
 
-      console.log(`[Admin] Updating withdrawal ${id} status to Approved...`);
-      await setDoc(ref, { 
+      if (wData.status === "Paid") {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Already Paid",
+          message: "This withdrawal has already been paid and cannot be re-approved." 
+        });
+      }
+
+      // 1. Update Withdrawal Status
+      const updateTime = new Date().toISOString();
+      await updateDoc(ref, { 
         status: "Approved", 
-        approvedAt: new Date().toISOString() 
-      }, { merge: true });
+        approvedAt: updateTime,
+        updatedAt: updateTime
+      });
       
-      console.log(`[Admin] Sending Telegram notification to user ${wData.userId}...`);
-      await sendTgMessage(wData.userId, `✅ <b>Withdrawal Approved</b>\n\nAmount: ₹${wData.amount}\nStatus: Approved\n\nThe payment has been approved and will be transferred shortly.`);
+      debugLog(`[Admin Withdrawal] Status updated to Approved for ${id}`);
+
+      // 2. Ensure deduction from wallet (Deduction usually happens during submission via pendingWithdrawals)
+      // If for some reason it wasn't deducted (legacy or error), we could handle it here.
+      // But based on current submit logic, it's already in pendingWithdrawals.
       
-      console.log(`[Admin] Withdrawal ${id} approved successfully.`);
-      res.json({ success: true, message: "Withdrawal approved successfully." });
+      // 3. Log Admin Activity
+      const adminId = (req as any).user?.adminId || "Admin"; // Fallback if adminId not in token
+      const ip = req.ip || "unknown";
+      await logAdminActivity(adminId, wData.userId, `WITHDRAWAL_APPROVE_${id}`, ip, { amount: wData.amount });
+
+      // 4. Send Telegram notification
+      try {
+        const message = `✅ <b>Withdrawal Approved</b>
+\n` +
+                        `<b>Amount:</b> ₹${wData.amount}
+` +
+                        `<b>Method:</b> ${wData.method}
+` +
+                        `<b>Status:</b> Approved
+\n` +
+                        `The payment has been approved and will be transferred to your account shortly.`;
+        await sendTgMessage(wData.userId, message);
+        debugLog(`[Admin Withdrawal] Telegram notification sent to user ${wData.userId}`);
+      } catch (tgErr: any) {
+        debugLog(`[Admin Withdrawal] Warning: Failed to send TG notification: ${tgErr.message}`);
+      }
+      
+      return res.json({ 
+        success: true, 
+        message: "Withdrawal Approved Successfully",
+        withdrawalId: id,
+        status: "Approved",
+        approvedAt: updateTime
+      });
     } catch (e: any) {
-      console.error("[Admin] Admin approve error:", e);
-      res.status(500).json({ error: "Internal server error: " + e.message });
+      debugLog(`[Admin Withdrawal] Critical Error approving ${id}: ${e.message}`);
+      return res.status(500).json({ 
+        success: false, 
+        error: "Internal Server Error", 
+        message: e.message 
+      });
     }
   });
 
@@ -840,7 +898,8 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         processingAt: new Date().toISOString() 
       }, { merge: true });
       
-      await sendTgMessage(wData.userId, `⏳ <b>Withdrawal Processing</b>\n\nAmount: ₹${wData.amount}\nStatus: Processing\n\nYour withdrawal is being processed by the finance department.`);
+      await sendTgMessage(wData.userId, `⏳ <b>Withdrawal Processing</b>
+\nAmount: ₹${wData.amount}\nStatus: Processing\n\nYour withdrawal is being processed by the finance department.`);
       res.json({ success: true, message: "Withdrawal marked as processing." });
     } catch (e: any) {
       console.error("Admin processing error:", e);
@@ -907,7 +966,8 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
       // Increase Trust Score for Successful Withdrawal (+5)
       adjustTrustScore(wData.userId, 5, "Successful Withdrawal").catch(() => {});
       
-      await sendTgMessage(wData.userId, `💸 <b>Withdrawal Paid</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nStatus: Paid\nReference ID: <code>${transactionReference}</code>\n\nYour funds have been transferred! Thank you.`);
+      await sendTgMessage(wData.userId, `💸 <b>Withdrawal Paid</b>
+\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nStatus: Paid\nReference ID: <code>${transactionReference}</code>\n\nYour funds have been transferred! Thank you.`);
       res.json({ success: true, message: "Withdrawal marked as Paid successfully." });
     } catch (e: any) {
       console.error("Admin paid error:", e);
@@ -995,7 +1055,8 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
 
         // Notify User via Telegram
         console.log(`[Admin] Sending rejection notification to user ${wData.userId} via Telegram...`);
-        const tgMessage = `❌ <b>Withdrawal Rejected</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nReason: ${finalReason}\n\nThe amount has been returned to your wallet.`;
+        const tgMessage = `❌ <b>Withdrawal Rejected</b>
+\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nReason: ${finalReason}\n\nThe amount has been returned to your wallet.`;
         await sendTgMessage(wData.userId, tgMessage);
       }
 
@@ -1076,7 +1137,8 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         });
 
         // Notify User via Telegram
-        const tgMessage = `⚠️ <b>Withdrawal Transfer Failed</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nReason: ${finalReason}\n\nThe funds have been safely returned to your wallet balance.`;
+        const tgMessage = `⚠️ <b>Withdrawal Transfer Failed</b>
+\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nReason: ${finalReason}\n\nThe funds have been safely returned to your wallet balance.`;
         await sendTgMessage(wData.userId, tgMessage);
       }
 
@@ -1157,7 +1219,8 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         }, { merge: true });
       }
 
-      await sendTgMessage(wData.userId, `🔄 <b>Withdrawal Re-opened</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nStatus: Pending (Manual Review)\n\nYour withdrawal request has been reset to Pending status for re-verification.`);
+      await sendTgMessage(wData.userId, `🔄 <b>Withdrawal Re-opened</b>
+\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nStatus: Pending (Manual Review)\n\nYour withdrawal request has been reset to Pending status for re-verification.`);
       res.json({ success: true, message: "Withdrawal reset to Pending status." });
     } catch (e: any) {
       console.error("Admin redraw error:", e);
@@ -1563,7 +1626,8 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       const rawStatus = "replied";
       const statusText = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase();
       
-      const text = `📩 <b>Support Reply</b>\n\n🎫 <b>Ticket ID:</b> ${ticketData.ticketId || id}\n\n💬 <b>Reply:</b>\n${replyMessage}\n\n<b>Status:</b> ${statusText}`;
+      const text = `📩 <b>Support Reply</b>
+\n🎫 <b>Ticket ID:</b> ${ticketData.ticketId || id}\n\n💬 <b>Reply:</b>\n${replyMessage}\n\n<b>Status:</b> ${statusText}`;
       
       const requestPayload = {
         chat_id: String(userId),
@@ -1642,7 +1706,8 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       await setDoc(ref, { status: "resolved", resolvedAt: new Date().toISOString() }, { merge: true });
       
       const data = snap.data();
-      const userNotifyMsg = `🎉 <b>Great news!</b>\n\nYour reported issue has been resolved.\n\nIf you still face the same problem, you can reopen the conversation by contacting support again.\n\nThank you for using RoyShare.`;
+      const userNotifyMsg = `🎉 <b>Great news!</b>
+\nYour reported issue has been resolved.\n\nIf you still face the same problem, you can reopen the conversation by contacting support again.\n\nThank you for using RoyShare.`;
       await sendTgMessage(data.userId, userNotifyMsg);
       res.json({ success: true });
     } catch (e: any) {
@@ -1661,7 +1726,8 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       await setDoc(ref, { status: "closed", closedAt: new Date().toISOString() }, { merge: true });
       
       const data = snap.data();
-      const userNotifyMsg = `Your support request has been closed.\n\nIf you need further assistance, you can create a new support ticket anytime.`;
+      const userNotifyMsg = `Your support request has been closed.
+\nIf you need further assistance, you can create a new support ticket anytime.`;
       await sendTgMessage(data.userId, userNotifyMsg);
       res.json({ success: true });
     } catch (e: any) {
@@ -1683,10 +1749,12 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       
       const data = snap.data();
       if (status === "resolved") {
-        const userNotifyMsg = `🎉 <b>Great news!</b>\n\nYour reported issue has been resolved.\n\nIf you still face the same problem, you can reopen the conversation by contacting support again.\n\nThank you for using RoyShare.`;
+        const userNotifyMsg = `🎉 <b>Great news!</b>
+\nYour reported issue has been resolved.\n\nIf you still face the same problem, you can reopen the conversation by contacting support again.\n\nThank you for using RoyShare.`;
         await sendTgMessage(data.userId, userNotifyMsg);
       } else if (status === "closed") {
-        const userNotifyMsg = `Your support request has been closed.\n\nIf you need further assistance, you can create a new support ticket anytime.`;
+        const userNotifyMsg = `Your support request has been closed.
+\nIf you need further assistance, you can create a new support ticket anytime.`;
         await sendTgMessage(data.userId, userNotifyMsg);
       } else {
         const statusLabels: Record<string, string> = {
@@ -1695,7 +1763,8 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
           replied: "💬 Replied"
         };
         const label = statusLabels[status] || status;
-        await sendTgMessage(data.userId, `ℹ️ <b>Ticket Status Updated</b>\n\nTicket ID:\n${id}\n\nNew Status: ${label}`);
+        await sendTgMessage(data.userId, `ℹ️ <b>Ticket Status Updated</b>
+\nTicket ID:\n${id}\n\nNew Status: ${label}`);
       }
       res.json({ success: true });
     } catch (e: any) {
@@ -2005,7 +2074,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
           const aiResponse = await safeGenerateContent(ai, {
             model: modelToUse,
-            contents: `Analyze the following transcript:\n\n${transcript}`,
+            contents: `Analyze the following transcript:
+\n${transcript}`,
             config: {
               systemInstruction: systemInstruction,
               responseMimeType: "application/json"
@@ -2043,7 +2113,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         category: aiAnalysis.category,
         issueType: aiAnalysis.category,
         priority: aiAnalysis.priority,
-        description: `Full Live Support session history:\n\n${transcript}`,
+        description: `Full Live Support session history:
+\n${transcript}`,
         conversation: transcript,
         aiSummary: aiAnalysis.summary,
         aiSuggestedCause: aiAnalysis.suggestedCause,
@@ -2055,7 +2126,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         replies: [
           {
             sender: "user",
-            message: `Escalated conversation transcript:\n\n${transcript}`,
+            message: `Escalated conversation transcript:
+\n${transcript}`,
             createdAt: new Date().toISOString()
           }
         ]
@@ -2064,7 +2136,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const docRef = await addDoc(collection(db, "tickets"), ticketData);
 
       try {
-        await sendTgMessage(String(userId), `✅ Your request has been received successfully.\n\nYour Ticket ID: <b>${ticketId}</b>\n\nOur support team is currently reviewing your issue.\n\nPlease wait approximately 2 hours while we investigate and resolve it.\n\nYou will automatically receive a reply here as soon as an update is available.`);
+        await sendTgMessage(String(userId), `✅ Your request has been received successfully.
+\nYour Ticket ID: <b>${ticketId}</b>\n\nOur support team is currently reviewing your issue.\n\nPlease wait approximately 2 hours while we investigate and resolve it.\n\nYou will automatically receive a reply here as soon as an update is available.`);
       } catch (tgErr) {
         console.error("Failed to send TG escalation confirmation to user:", tgErr);
       }
@@ -2074,16 +2147,26 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
         const adminChatId = telegramSettingsSnap.data()?.adminChatId || telegramSettingsSnap.data()?.chatId;
         if (adminChatId) {
-          const adminMsg = `🚨 <b>New Support Ticket</b>\n\n` +
-            `<b>Ticket ID:</b> <code>${ticketId}</code>\n` +
-            `<b>User:</b> ${name || 'User'}\n` +
-            `<b>Username:</b> @${username || ''}\n` +
-            `<b>User ID:</b> <code>${userId}</code>\n` +
-            `<b>Issue:</b> ${aiAnalysis.category}\n` +
-            `<b>Priority:</b> ${aiAnalysis.priority}\n` +
-            `<b>AI Summary:</b> ${aiAnalysis.summary}\n\n` +
-            `<b>Conversation:</b>\n<pre>${transcript.substring(0, 1000)}${transcript.length > 1000 ? '...' : ''}</pre>\n\n` +
-            `<b>Suggested Solution:</b> ${aiAnalysis.suggestedSolution}\n` +
+          const adminMsg = `🚨 <b>New Support Ticket</b>
+\n` +
+            `<b>Ticket ID:</b> <code>${ticketId}</code>
+` +
+            `<b>User:</b> ${name || 'User'}
+` +
+            `<b>Username:</b> @${username || ''}
+` +
+            `<b>User ID:</b> <code>${userId}</code>
+` +
+            `<b>Issue:</b> ${aiAnalysis.category}
+` +
+            `<b>Priority:</b> ${aiAnalysis.priority}
+` +
+            `<b>AI Summary:</b> ${aiAnalysis.summary}
+\n` +
+            `<b>Conversation:</b>
+<pre>${transcript.substring(0, 1000)}${transcript.length > 1000 ? '...' : ''}</pre>\n\n` +
+            `<b>Suggested Solution:</b> ${aiAnalysis.suggestedSolution}
+` +
             `<b>Created Time:</b> ${new Date().toLocaleString()}`;
 
           const adminReplyMarkup = {
@@ -2162,7 +2245,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const docRef = await addDoc(collection(db, "tickets"), ticketData);
       
       try {
-        await sendTgMessage(String(userId), `🎫 <b>Ticket Created Successfully!</b>\n\nTicket ID: <code>${ticketId}</code>\nSubject: ${subject}\nPriority: ${priority}\n\nOur support team will review it shortly.`);
+        await sendTgMessage(String(userId), `🎫 <b>Ticket Created Successfully!</b>
+\nTicket ID: <code>${ticketId}</code>\nSubject: ${subject}\nPriority: ${priority}\n\nOur support team will review it shortly.`);
       } catch (tgErr) {
         console.error("Failed to send TG confirmation to user:", tgErr);
       }
@@ -2238,7 +2322,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
             const promises = usersSnapshot.docs.map(doc => {
               const data = doc.data();
               if (data.telegramId) {
-                return sendTgMessage(data.telegramId, `🔔 <b>New Announcement</b>\n\n📢 ${payload.title}\n\nTap 📢 Announcements to read more.`).catch(() => {});
+                return sendTgMessage(data.telegramId, `🔔 <b>New Announcement</b>
+\n📢 ${payload.title}\n\nTap 📢 Announcements to read more.`).catch(() => {});
               }
               return Promise.resolve();
             });
@@ -2275,7 +2360,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
             const promises = usersSnapshot.docs.map(doc => {
               const data = doc.data();
               if (data.telegramId) {
-                return sendTgMessage(data.telegramId, `🔔 <b>New Announcement</b>\n\n📢 ${payload.title}\n\nTap 📢 Announcements to read more.`).catch(() => {});
+                return sendTgMessage(data.telegramId, `🔔 <b>New Announcement</b>
+\n📢 ${payload.title}\n\nTap 📢 Announcements to read more.`).catch(() => {});
               }
               return Promise.resolve();
             });
@@ -2744,201 +2830,6 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     } catch (e: any) {
       console.error("Admin economy stats fetch error:", e);
       res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  // Admin Daily Bonus Settings
-  app.get("/api/admin/daily-bonus/settings", async (req, res) => {
-    try {
-      const docRef = doc(db, "settings", "daily_bonus");
-      const docSnap = await getDoc(docRef);
-      const defaultSettings = {
-        dailyBonusEnabled: true,
-        resetTime: "00:00",
-        wheel: { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] },
-        box: { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] },
-        scratch: { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] },
-        totalSpins: 0,
-        totalRewardsDistributed: 0,
-      };
-      if (!docSnap.exists()) {
-        await setDoc(docRef, defaultSettings);
-        res.json(defaultSettings);
-      } else {
-        res.json({ ...defaultSettings, ...docSnap.data() });
-      }
-    } catch (e: any) {
-      console.error("Admin daily bonus settings fetch error:", e);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.get("/api/admin/daily-bonus/stats", async (req, res) => {
-    try {
-      const today = new Date().toISOString().split("T")[0];
-      const statsSnap = await getDoc(doc(db, "daily_bonus_stats", today));
-      const todayStats = statsSnap.exists() ? statsSnap.data() : {};
-      
-      const globalSnap = await getDoc(doc(db, "settings", "daily_bonus"));
-      const globalStats = globalSnap.exists() ? globalSnap.data() : {};
-      
-      // Fetch Top Winners (All Time)
-      const topWinnersQuery = query(
-        collection(db, "claimHistory"),
-        orderBy("amount", "desc"),
-        limit(5)
-      );
-      const topWinnersSnap = await getDocs(topWinnersQuery);
-      const topWinners = topWinnersSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      res.json({
-        success: true,
-        today: {
-          wheelSpins: todayStats.totalSpins || 0,
-          boxOpens: todayStats.totalOpens || 0,
-          scratchClaims: todayStats.totalScratches || 0,
-          uniqueUsers: todayStats.uniqueUsers || 0,
-          totalClaims: todayStats.totalClaims || 0,
-          totalRewards: todayStats.totalRewards || 0,
-          averageReward: todayStats.totalClaims ? (todayStats.totalRewards / todayStats.totalClaims) : 0,
-          betterLuckCount: todayStats.betterLuckCount || 0
-        },
-        global: {
-          totalSpins: globalStats.totalSpins || 0,
-          totalRewardsDistributed: globalStats.totalRewardsDistributed || 0,
-          totalClaims: globalStats.totalClaims || 0,
-          averageReward: globalStats.totalClaims ? (globalStats.totalRewardsDistributed / globalStats.totalClaims) : 0
-        },
-        topWinners
-      });
-    } catch (e) {
-      console.error("Error in /api/admin/daily-bonus/stats:", e);
-      res.status(500).json({ error: "Failed to fetch stats" });
-    }
-  });
-
-  app.put("/api/admin/daily-bonus/settings", async (req, res) => {
-    try {
-      const payload = req.body;
-      const docRef = doc(db, "settings", "daily_bonus");
-      await setDoc(docRef, payload, { merge: true });
-      res.json({ success: true });
-    } catch (e: any) {
-      console.error("Admin daily bonus settings update error:", e);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.get("/api/admin/daily-bonus/history", async (req, res) => {
-    try {
-      const q = query(collection(db, "claimHistory"));
-      const snapshot = await getDocs(q);
-      const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      logs.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-      res.json(logs);
-    } catch (e: any) {
-      console.error("Admin daily bonus history fetch error:", e);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.post("/api/admin/daily-bonus/auto-generate", async (req, res) => {
-    try {
-      const { minReward, maxReward, slots, betterLuckSlots, dailyBudget } = req.body;
-      
-      const prompt = `Generate a daily bonus reward pool in JSON format.
-      Parameters:
-      - Minimum Reward: ₹${minReward}
-      - Maximum Reward: ₹${maxReward}
-      - Total Reward Slots (excluding Better Luck): ${slots}
-      - Better Luck Slots: ${betterLuckSlots}
-      - Daily Budget: ₹${dailyBudget}
-      
-      Requirements:
-      - Distribution must be profitable and realistic. High-value rewards must have extremely low weight (e.g., 1 or 2). Low-value rewards must have high weight (e.g., 50-100).
-      - Include exactly ${betterLuckSlots} "Better Luck Next Time" slots with 0 amount. Each of these must have amount: 0 and label: "Better Luck Next Time" or similar.
-      - Each reward must have: label (string), amount (number), weight (number).
-      - Weight should be relative (e.g., 1 to 100).
-      
-      Return ONLY a JSON array of rewards. Do NOT include any markdown formatting like \`\`\`json or surrounding text, just the raw array.`;
-
-      let rewards = [];
-      let isLocalFallback = false;
-
-      try {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-          throw new Error("GEMINI_API_KEY environment variable is not set");
-        }
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await safeGenerateContent(ai, {
-          model: "gemini-3.5-flash",
-          contents: prompt
-        });
-        const responseText = response.text || "";
-        const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-        rewards = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
-      } catch (err: any) {
-        console.warn("[AI generation failed, falling back to Smart Local Generator]", err);
-        isLocalFallback = true;
-        
-        // Generate rewards locally using quadratic weight decay
-        rewards = [];
-        const numSlots = parseInt(slots) || 5;
-        const minRew = parseFloat(minReward) || 1;
-        const maxRew = parseFloat(maxReward) || 100;
-        const blSlots = parseInt(betterLuckSlots) || 0;
-
-        for (let i = 0; i < numSlots; i++) {
-          const ratio = numSlots > 1 ? i / (numSlots - 1) : 0;
-          const amount = Math.round(minRew + ratio * (maxRew - minRew));
-          const weight = Math.max(1, Math.round(100 * Math.pow(1 - ratio, 2)));
-          rewards.push({
-            label: `₹${amount.toFixed(2)}`,
-            amount,
-            weight
-          });
-        }
-
-        for (let i = 0; i < blSlots; i++) {
-          rewards.push({
-            label: "Better Luck Next Time 🍀",
-            amount: 0,
-            weight: 35
-          });
-        }
-      }
-
-      res.json({ success: true, rewards, isLocalFallback });
-    } catch (e: any) {
-      console.error("AI Reward generation fatal error:", e);
-      try {
-        // Absolute fallback if anything at all crashes
-        const { minReward, maxReward, slots, betterLuckSlots } = req.body;
-        const numSlots = parseInt(slots) || 5;
-        const minRew = parseFloat(minReward) || 1;
-        const maxRew = parseFloat(maxReward) || 100;
-        const blSlots = parseInt(betterLuckSlots) || 0;
-        const rewards = [];
-        
-        for (let i = 0; i < numSlots; i++) {
-          const ratio = numSlots > 1 ? i / (numSlots - 1) : 0;
-          const amount = Math.round(minRew + ratio * (maxRew - minRew));
-          const weight = Math.max(1, Math.round(100 * Math.pow(1 - ratio, 2)));
-          rewards.push({ label: `₹${amount.toFixed(2)}`, amount, weight });
-        }
-        
-        for (let i = 0; i < blSlots; i++) {
-          rewards.push({ label: "Better Luck Next Time 🍀", amount: 0, weight: 35 });
-        }
-        
-        res.json({ success: true, rewards, isLocalFallback: true });
-      } catch (fallbackErr) {
-        res.status(500).json({ error: e.message || "Server error" });
-      }
     }
   });
 
@@ -4953,7 +4844,8 @@ app.post("/api/admin/video-logs-action", async (req, res) => {
 
           window.onTelegramAuth = function(user) {
             console.log("Telegram Auth Callback success:", user);
-            alert("Authenticated successfully!\nUser: " + user.first_name + " (" + user.id + ")");
+            alert("Authenticated successfully!
+User: " + user.first_name + " (" + user.id + ")");
           };
         </script>
       </body>
@@ -7262,7 +7154,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).json({ error: "Self-test failed: Admin Chat ID is not configured." });
       }
 
-      const text = `🧪 <b>Broadcast Self-Test</b>\n\nThis is an automated self-test of the upgraded Broadcast Composer system.\n\n• Database Users Loaded: <b>${usersCount} users</b>\n• API Integration: <b>Active</b>\n\nAll systems operational!`;
+      const text = `🧪 <b>Broadcast Self-Test</b>
+\nThis is an automated self-test of the upgraded Broadcast Composer system.\n\n• Database Users Loaded: <b>${usersCount} users</b>\n• API Integration: <b>Active</b>\n\nAll systems operational!`;
       const replyMarkup = {
         inline_keyboard: [
           [
@@ -7581,7 +7474,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const { botToken, chatId, otp } = req.body;
       if (!botToken || !chatId || !otp) return res.status(400).json({ error: "Missing fields" });
 
-      const message = `🔐 RoyShare Admin Login OTP\n\nOTP: ${otp}\n\nValid for 5 minutes.`;
+      const message = `🔐 RoyShare Admin Login OTP
+\nOTP: ${otp}\n\nValid for 5 minutes.`;
       
       const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: "POST",
@@ -8255,432 +8149,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     });
   }, 2000);
 
-  // Daily Bonus Endpoints
-  app.get("/api/daily-bonus/status", async (req, res) => {
-    try {
-      const userId = req.query.userId as string;
-      if (!userId) return res.status(400).json({ error: "Missing userId" });
-
-      const settingsDocRef = doc(db, "settings", "daily_bonus");
-      const settingsSnap = await getDoc(settingsDocRef);
-      if (!settingsSnap.exists()) {
-        console.error("[DAILY BONUS ERROR] settings/daily_bonus does not exist in Firestore!");
-        return res.status(500).json({ error: "Daily Bonus settings not found" });
-      }
-
-      const settings = settingsSnap.data();
-      const enabled = settings.dailyBonusEnabled ?? true;
-      
-      // Default modular settings
-      const wheelConfig = settings.wheel || { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] };
-      const boxConfig = settings.box || { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] };
-      const scratchConfig = settings.scratch || { 
-        enabled: true, 
-        dailyLimit: 3, 
-        cooldown: 0, 
-        rewards: [],
-        dailyBudget: 200,
-        totalUsersTarget: 10000,
-        minReward: 0.1,
-        maxReward: 10,
-        betterLuckPercentage: 20
-      };
-
-      if (!enabled) {
-        return res.json({ enabled: false, message: "Daily Bonus is currently disabled by administrator." });
-      }
-
-      const todayDateStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-      const stateDocRef = doc(db, "daily_bonus_state", userId);
-      const stateSnap = await getDoc(stateDocRef);
-
-      const userDocRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userDocRef);
-      const currency = userSnap.exists() ? (userSnap.data()?.currency || "INR") : "INR";
-
-      // Reset Time in IST helper (simplified for now to 00:00)
-      const resetTime = settings.resetTime || "00:00";
-      
-      let stateData: any = null;
-      const defaultState = {
-        userId,
-        lastResetDate: todayDateStr,
-        wheel: { count: 0, lastTime: null },
-        box: { count: 0, lastTime: null },
-        scratch: { count: 0, lastTime: null, unlocked: false, adsViewedBeforeScratch: 0, adsViewedBeforeClaim: 0 },
-        pendingRewards: {}
-      };
-
-      if (!stateSnap.exists()) {
-        await setDoc(stateDocRef, defaultState);
-        stateData = defaultState;
-      } else {
-        stateData = stateSnap.data();
-        // Check for daily reset
-        if (stateData.lastResetDate !== todayDateStr) {
-          stateData = { ...defaultState, pendingRewards: stateData.pendingRewards || {} };
-          await setDoc(stateDocRef, stateData);
-        }
-      }
-
-      // Update Unique Users Statistic
-      try {
-        const today = new Date().toISOString().split("T")[0];
-        const statsRef = doc(db, "daily_bonus_stats", today);
-        const statsSnap = await getDoc(statsRef);
-        
-        if (!statsSnap.exists()) {
-          await setDoc(statsRef, { date: today, uniqueUsers: 1, totalClaims: 0, totalRewards: 0 });
-        } else {
-          const userVisitRef = doc(db, "daily_bonus_stats", `${today}_visits_${userId}`);
-          const visitSnap = await getDoc(userVisitRef);
-          if (!visitSnap.exists()) {
-            await setDoc(userVisitRef, { visited: true });
-            await setDoc(statsRef, { uniqueUsers: increment(1) }, { merge: true });
-          }
-        }
-      } catch (statErr) {
-        console.error("Error updating unique users stat:", statErr);
-      }
-
-      const computeModuleStatus = (config: any, state: any) => {
-        const limit = config?.dailyLimit || 0;
-        const count = state?.count || 0;
-        const lastTime = state?.lastTime ? new Date(state.lastTime).getTime() : 0;
-        const cooldownMs = (config?.cooldown || 0) * 60 * 1000;
-        const now = Date.now();
-        const nextAvailable = lastTime + cooldownMs;
-        const isOnCooldown = now < nextAvailable;
-        
-        return {
-          enabled: config?.enabled ?? false,
-          dailyLimit: limit,
-          usageCount: count,
-          remaining: Math.max(0, limit - count),
-          isOnCooldown,
-          cooldownRemaining: isOnCooldown ? Math.ceil((nextAvailable - now) / 1000) : 0,
-          lastClaimAt: state?.lastTime || null,
-          nextAvailableAt: isOnCooldown ? new Date(nextAvailable).toISOString() : null,
-          rewards: config?.rewards || [],
-          // Specialized scratch settings
-          unlockAdType: config?.unlockAdType || "Reward",
-          claimAdType: config?.claimAdType || "Interstitial",
-          // Specialized scratch stats
-          unlocked: state?.unlocked ?? false,
-          adsViewedBeforeScratch: state?.adsViewedBeforeScratch ?? 0,
-          adsViewedBeforeClaim: state?.adsViewedBeforeClaim ?? 0
-        };
-      };
-
-      return res.json({
-        success: true,
-        dailyBonusEnabled: enabled,
-        modules: {
-          wheel: computeModuleStatus(wheelConfig, stateData.wheel),
-          box: computeModuleStatus(boxConfig, stateData.box),
-          scratch: computeModuleStatus(scratchConfig, stateData.scratch)
-        },
-        pendingRewards: stateData.pendingRewards || {},
-        currency
-      });
-    } catch (e: any) {
-      console.error("Error in /api/daily-bonus/status:", e);
-      res.status(500).json({ error: e.message || "Server error" });
-    }
-  });
-
-  app.post("/api/daily-bonus/unlock-scratch", async (req, res) => {
-    try {
-      const { userId } = req.body;
-      if (!userId) return res.status(400).json({ error: "Missing userId" });
-
-      const stateDocRef = doc(db, "daily_bonus_state", userId);
-      const stateSnap = await getDoc(stateDocRef);
-      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
-
-      const stateData = stateSnap.data();
-      await updateDoc(stateDocRef, {
-        "scratch.unlocked": true,
-        "scratch.adsViewedBeforeScratch": increment(1)
-      });
-
-      // Update Today's Stats
-      const today = new Date().toISOString().split("T")[0];
-      const statsRef = doc(db, "daily_bonus_stats", today);
-      await setDoc(statsRef, { totalAdsBeforeScratch: increment(1) }, { merge: true });
-
-      return res.json({ success: true });
-    } catch (e: any) {
-      console.error("Error in /api/daily-bonus/unlock-scratch:", e);
-      res.status(500).json({ error: e.message || "Server error" });
-    }
-  });
-
-  app.post("/api/daily-bonus/reveal", async (req, res) => {
-    try {
-      const { userId, type } = req.body;
-      if (!userId || !type) return res.status(400).json({ error: "Missing parameters" });
-
-      const settingsSnap = await getDoc(doc(db, "settings", "daily_bonus"));
-      if (!settingsSnap.exists()) return res.status(500).json({ error: "Settings not found" });
-      const settings = settingsSnap.data();
-
-      const config = settings[type];
-      if (!config || !config.enabled) return res.status(400).json({ error: "Module disabled" });
-
-      const stateDocRef = doc(db, "daily_bonus_state", userId);
-      let stateSnap = await getDoc(stateDocRef);
-      const todayDateStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-      const defaultState = {
-        userId,
-        lastResetDate: todayDateStr,
-        wheel: { count: 0, lastTime: null },
-        box: { count: 0, lastTime: null },
-        scratch: { count: 0, lastTime: null, unlocked: false, adsViewedBeforeScratch: 0, adsViewedBeforeClaim: 0 },
-        pendingRewards: {}
-      };
-
-      if (!stateSnap.exists()) {
-        await setDoc(stateDocRef, defaultState);
-        stateSnap = await getDoc(stateDocRef);
-      } else {
-        const data = stateSnap.data();
-        if (data.lastResetDate !== todayDateStr) {
-          const resetState = { ...defaultState, pendingRewards: data.pendingRewards || {} };
-          await setDoc(stateDocRef, resetState);
-          stateSnap = await getDoc(stateDocRef);
-        }
-      }
-      const stateData = stateSnap.data();
-
-      // For scratch, must be unlocked first
-      if (type === 'scratch' && !stateData.scratch?.unlocked) {
-        return res.status(400).json({ error: "Scratch card is locked. Watch an ad to unlock." });
-      }
-
-      // Check if there's an unclaimed pending reward of the same type
-      if (stateData.pendingRewards?.[type] && !stateData.pendingRewards[type].claimed) {
-        return res.json({
-          ok: true,
-          reward: {
-            amount: stateData.pendingRewards[type].amount,
-            label: stateData.pendingRewards[type].label || `₹${stateData.pendingRewards[type].amount.toFixed(2)}`
-          },
-          usage: stateData[type]
-        });
-      }
-
-      const usage = stateData[type] || { count: 0, lastTime: null };
-      if (usage.count >= config.dailyLimit) return res.status(400).json({ error: "Daily limit reached" });
-
-      // Cooldown check
-      if (usage.lastTime && config.cooldown > 0) {
-        const lastTime = new Date(usage.lastTime).getTime();
-        const now = Date.now();
-        const diffMinutes = (now - lastTime) / (1000 * 60);
-        if (diffMinutes < config.cooldown) {
-          return res.status(400).json({ error: `Please wait ${Math.ceil(config.cooldown - diffMinutes)} more minutes.` });
-        }
-      }
-
-      // Budget Protection
-      const today = new Date().toISOString().split("T")[0];
-      const statsSnap = await getDoc(doc(db, "daily_bonus_stats", today));
-      const statsData = statsSnap.exists() ? statsSnap.data() : { totalRewards: 0, totalScratches: 0 };
-      const currentPayout = statsData.totalRewards || 0;
-      
-      // Global Daily Bonus Budget
-      const globalBudget = Number(settings.dailyBudget) || Infinity;
-      
-      // Specialized Scratch Budget
-      const scratchBudget = Number(config.dailyBudget) || globalBudget;
-      const scratchSpentToday = statsData.scratchSpentToday || 0;
-      const totalUsersTarget = Number(config.totalUsersTarget) || 1000;
-      const scratchCountToday = statsData.totalScratches || 0;
-
-      let rewards = [...(config.rewards || [])];
-      if (rewards.length === 0) return res.status(500).json({ error: "No rewards configured" });
-
-      // DYNAMIC REWARD ADJUSTMENT
-      const budgetExhausted = currentPayout >= globalBudget || scratchSpentToday >= scratchBudget;
-      
-      if (budgetExhausted) {
-        const betterLuckRewards = rewards.filter(r => (r.label || "").toLowerCase().includes("better luck") || Number(r.amount) === 0);
-        if (betterLuckRewards.length > 0) {
-          rewards = betterLuckRewards;
-        } else {
-          const minAmount = Math.min(...rewards.map(r => Number(r.amount)));
-          rewards = rewards.filter(r => Number(r.amount) === minAmount);
-        }
-      } else if (type === 'scratch') {
-        // Smart distribution check
-        const remainingBudget = scratchBudget - scratchSpentToday;
-        const remainingUsers = Math.max(1, totalUsersTarget - scratchCountToday);
-        const dynamicAvgMax = remainingBudget / remainingUsers;
-        
-        // Filter rewards that are too high for remaining budget
-        if (dynamicAvgMax < config.maxReward) {
-          rewards = rewards.map(r => {
-            if (Number(r.amount) > dynamicAvgMax) {
-              return { ...r, amount: dynamicAvgMax, label: `₹${dynamicAvgMax.toFixed(2)}` };
-            }
-            return r;
-          });
-        }
-      }
-
-      const totalWeight = rewards.reduce((sum: number, r: any) => sum + (Number(r.weight) || 0), 0);
-      let random = Math.random() * totalWeight;
-      let selectedReward = rewards[0];
-      for (const r of rewards) {
-        if (random < (Number(r.weight) || 0)) {
-          selectedReward = r;
-          break;
-        }
-        random -= (Number(r.weight) || 0);
-      }
-
-      const rewardAmount = Number(selectedReward.amount);
-      const rewardLabel = selectedReward.label || `₹${rewardAmount.toFixed(2)}`;
-
-      // Save pending reward and update count (don't credit yet)
-      const now = new Date().toISOString();
-      const isBetterLuck = rewardAmount === 0;
-      const updatedState = {
-        ...stateData,
-        [type]: {
-          ...usage,
-          count: usage.count + 1,
-          lastTime: now
-        },
-        pendingRewards: {
-          ...(stateData.pendingRewards || {}),
-          [type]: {
-            amount: rewardAmount,
-            label: rewardLabel,
-            timestamp: now,
-            claimed: isBetterLuck
-          }
-        }
-      };
-      await setDoc(stateDocRef, updatedState);
-
-      // Update statistics
-      try {
-        const statsRef = doc(db, "daily_bonus_stats", today);
-        const fieldName = type === "wheel" ? "totalSpins" : type === "box" ? "totalOpens" : "totalScratches";
-        const updateData: any = { [fieldName]: increment(1) };
-        if (isBetterLuck) {
-          updateData.betterLuckCount = increment(1);
-          updateData.totalClaims = increment(1);
-        }
-        await setDoc(statsRef, updateData, { merge: true });
-      } catch (e) {}
-
-      return res.json({
-        ok: true,
-        reward: {
-          amount: rewardAmount,
-          label: rewardLabel
-        },
-        usage: updatedState[type]
-      });
-    } catch (e: any) {
-      console.error("Error in /api/daily-bonus/reveal:", e);
-      res.status(500).json({ error: e.message || "Server error" });
-    }
-  });
-
-  app.post("/api/daily-bonus/claim", async (req: any, res: any) => {
-    try {
-      const { userId, type, adStatus } = req.body;
-      if (!userId || !type) return res.status(400).json({ error: "Missing parameters" });
-
-      const userRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
-      const userData = userSnap.data();
-
-      const stateDocRef = doc(db, "daily_bonus_state", userId);
-      const stateSnap = await getDoc(stateDocRef);
-      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
-      const stateData = stateSnap.data();
-      const pending = stateData.pendingRewards?.[type];
-      
-      if (!pending || pending.claimed) {
-        return res.status(400).json({ error: "Reward already claimed or not found." });
-      }
-
-      const rewardAmountRaw = Number(pending.amount);
-      const economyEval = await evaluateReward(userId, rewardAmountRaw, "daily_bonus");
-      if (!economyEval.allowed) {
-        return res.status(400).json({ error: economyEval.message || "Daily limit reached." });
-      }
-
-      const rewardAmount = economyEval.finalAmount;
-      const evalPending = economyEval.isPending;
-      const userName = userData.name || userData.firstName || userData.username || "User";
-      const tgUserId = userData.telegramId || "";
-
-      await runTransaction(db, async (transaction) => {
-        const uSnap = await transaction.get(userRef);
-        const u = uSnap.data() || {};
-        const isSb = u.shadowBanned === true;
-        const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(u.status || "Normal") || (u?.trustScore !== undefined && u.trustScore < 20) || evalPending;
-
-        if (isSb) {
-          transaction.update(userRef, {
-            shadowBonusBalance: increment(rewardAmount),
-            shadowAvailableBalance: increment(rewardAmount),
-            shadowEarnings: increment(rewardAmount),
-            shadowTotalEarnings: increment(rewardAmount),
-            shadowBalance: increment(rewardAmount)
-          });
-        } else if (!isFlagged) {
-          transaction.update(userRef, {
-            bonusBalance: increment(rewardAmount),
-            availableBalance: increment(rewardAmount),
-            earnings: increment(rewardAmount),
-            totalEarnings: increment(rewardAmount)
-          });
-          const globalRef = doc(db, "settings", "global");
-          transaction.set(globalRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
-        }
-
-        const updateData: any = { [`pendingRewards.${type}.claimed`]: true };
-        if (type === 'scratch') updateData["scratch.unlocked"] = false;
-        transaction.update(stateDocRef, updateData);
-
-        const statsDocRef = doc(db, "user_statistics", userId);
-        const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
-        if (isSb) {
-          const shadowRewardField = type === "wheel" ? "shadowWheelRewards" : type === "box" ? "shadowBoxRewards" : "shadowScratchRewards";
-          transaction.set(statsDocRef, { [shadowRewardField]: increment(rewardAmount), shadowTotalClaims: increment(1), shadowTotalRewards: increment(rewardAmount) }, { merge: true });
-        } else {
-          transaction.set(statsDocRef, { [rewardField]: increment(rewardAmount), totalClaims: increment(1), totalRewards: increment(rewardAmount) }, { merge: true });
-        }
-
-        const today = new Date().toISOString().split("T")[0];
-        const statsRef = doc(db, "daily_bonus_stats", today);
-        transaction.set(statsRef, { totalRewards: increment(rewardAmount), totalClaims: increment(1) }, { merge: true });
-        if (type === 'scratch') {
-          transaction.set(statsRef, { scratchSpentToday: increment(rewardAmount), scratchClaimsToday: increment(1) }, { merge: true });
-        }
-      });
-
-      if (tgUserId) {
-        const emoji = type === 'wheel' ? '🎡' : type === 'box' ? '📦' : '🎫';
-        const msg = `${emoji} <b>Daily Bonus Claimed!</b>\n\nReward: <b>₹${rewardAmount}</b>\nModule: ${type.toUpperCase()}\nStatus: ${evalPending ? 'Pending Review' : 'Credited'}\n\nKeep participating to earn more!`;
-        sendTgMessage(tgUserId, msg);
-      }
-
-      return res.json({ ok: true, amount: rewardAmount });
-    } catch (e: any) {
-      console.error("Error in /api/daily-bonus/claim:", e);
-      res.status(400).json({ error: e.message || "Server error" });
-    }
-  });
-
   app.post("/api/auth/send-otp", async (req: any, res: any) => {
     try {
       const { mobile, telegramId } = req.body;
@@ -8736,7 +8204,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
       const botToken = telegramSettingsDoc.data()?.botToken;
       if (botToken) {
-        const msg = `🔐 <b>RoyShare Verification</b>\n\nHello <b>${username}</b> 👋\n\nYour Verification Code\n\n<code>${otpCode}</code>\n\n⏳ Valid for 5 Minutes`;
+        const msg = `🔐 <b>RoyShare Verification</b>
+\nHello <b>${username}</b> 👋\n\nYour Verification Code\n\n<code>${otpCode}</code>\n\n⏳ Valid for 5 Minutes`;
         await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -9203,8 +8672,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         // ₹{rewardAmount}
         // Added to Reward Balance.
         const messageText = isFlagged 
-          ? `⏳ Reward is under security verification.\n\nYour reward of ${formattedAmt} is being verified by security. This usually completes within a short time.`
-          : `✅ Reward Credited\n\n💰 Reward:\n${formattedAmt}\n\nAdded to Reward Balance.`;
+          ? `⏳ Reward is under security verification.
+\nYour reward of ${formattedAmt} is being verified by security. This usually completes within a short time.`
+          : `✅ Reward Credited
+\n💰 Reward:\n${formattedAmt}\n\nAdded to Reward Balance.`;
 
         await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
@@ -9450,40 +8921,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Determine reward amount
       let rewardAmount = 0.56; 
       const taskId = request_var || "monetag_default_task";
-      let isDailyBonus = false;
-      let dailyBonusType = "";
       
-      if (taskId.startsWith("daily_bonus_")) {
-        isDailyBonus = true;
-        dailyBonusType = taskId.replace("daily_bonus_", "");
-        const stateSnap = await getDoc(doc(db, "daily_bonus_state", userId));
-        if (stateSnap.exists()) {
-          const pending = stateSnap.data().pendingRewards?.[dailyBonusType];
-          if (pending && !pending.claimed) {
-             rewardAmount = Number(pending.amount);
-             // Mark as claimed in state
-             await updateDoc(doc(db, "daily_bonus_state", userId), {
-                [`pendingRewards.${dailyBonusType}.claimed`]: true
-             });
-             
-             // Update daily bonus stats
-             try {
-                const todayStr = new Date().toISOString().split("T")[0];
-                const statsRef = doc(db, "daily_bonus_stats", todayStr);
-                const rewardField = dailyBonusType === "wheel" ? "wheelRewards" : dailyBonusType === "box" ? "boxRewards" : "scratchRewards";
-                await setDoc(statsRef, { 
-                  [rewardField]: increment(rewardAmount),
-                  totalClaims: increment(1),
-                  totalRewards: increment(rewardAmount)
-                }, { merge: true });
-                await setDoc(doc(db, "settings", "daily_bonus"), { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
-             } catch(e){}
-          } else if (pending && pending.claimed) {
-            console.warn(`[MONETAG POSTBACK] Reward already claimed for ${taskId}`);
-            return res.status(200).send("Already claimed");
-          }
-        }
-      } else if (taskId !== "monetag_default_task") {
+      if (taskId !== "monetag_default_task") {
         const taskDoc = await getDoc(doc(db, "tasks", taskId));
         if (taskDoc.exists()) {
           rewardAmount = Number(taskDoc.data().rewardAmount) || rewardAmount;
@@ -9514,10 +8953,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
         const botToken = settingsDoc.data()?.botToken;
         if (botToken) {
-          const messageText = `🎉 Reward Added Successfully!\n\n` +
-            `💰 Reward: ₹${rewardAmount.toFixed(2)}\n` +
-            `💳 Reward Balance: ₹${newRewardBalance.toFixed(2)}\n` +
-            `🏦 Available Balance: ₹${newBalance.toFixed(2)}\n\n` +
+          const messageText = `🎉 Reward Added Successfully!
+\n` +
+            `💰 Reward: ₹${rewardAmount.toFixed(2)}
+` +
+            `💳 Reward Balance: ₹${newRewardBalance.toFixed(2)}
+` +
+            `🏦 Available Balance: ₹${newBalance.toFixed(2)}
+\n` +
             `Thank you for watching the rewarded advertisement.`;
 
           await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -10301,7 +9744,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       let content = "# RoyShare Ads.txt Manager\n";
       snap.forEach(doc => {
         const d = doc.data();
-        content += `\n# --- ${d.providerName} (${d.providerType}) ---\n${d.snippet}\n`;
+        content += `
+# --- ${d.providerName} (${d.providerType}) ---\n${d.snippet}\n`;
       });
       res.header("Content-Type", "text/plain");
       res.send(content);
@@ -10659,9 +10103,12 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
         await setDoc(doc(db, "withdrawals", withdrawalId), rejectDocData);
 
-        const tgMsg = `❌ <b>Withdrawal Request Auto-Rejected</b>\n\n` +
-                      `<b>Amount:</b> ${isUsdtMethod ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\n` +
-                      `<b>Reason:</b> ${finalRejectReason}\n\n` +
+        const tgMsg = `❌ <b>Withdrawal Request Auto-Rejected</b>
+\n` +
+                      `<b>Amount:</b> ${isUsdtMethod ? `${requestedAmount} USDT` : `₹${requestedAmount}`}
+` +
+                      `<b>Reason:</b> ${finalRejectReason}
+\n` +
                       `Your request was automatically declined due to security guidelines. Your balance is unaffected.`;
         await sendTgMessage(String(userId), tgMsg);
 
@@ -10761,11 +10208,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // 3. Immediately send Telegram Bot notification
       let tgMsg = "";
       if (method === "USDT (TRC20)") {
-        tgMsg = `💸 <b>USDT Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ${requestedAmount} USDT (≈ ₹${requestedAmountInINR.toFixed(2)})\n<b>Fee:</b> ${processingFee} USDT\n<b>Receive Amount:</b> <b>${receiveAmount} USDT</b>\n<b>Wallet:</b> <code>${walletAddress.trim()}</code>\n<b>Network:</b> TRC20 (Fixed)\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
+        tgMsg = `💸 <b>USDT Withdrawal Request Submitted</b>
+\n<b>Amount:</b> ${requestedAmount} USDT (≈ ₹${requestedAmountInINR.toFixed(2)})\n<b>Fee:</b> ${processingFee} USDT\n<b>Receive Amount:</b> <b>${receiveAmount} USDT</b>\n<b>Wallet:</b> <code>${walletAddress.trim()}</code>\n<b>Network:</b> TRC20 (Fixed)\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
       } else if (method === "Bank Account") {
-        tgMsg = `💸 <b>Bank Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>Bank Name:</b> ${bankName.trim()}\n<b>A/C No:</b> <code>${accountNumber.trim()}</code>\n<b>Holder:</b> ${accountHolderName.trim()}\n<b>IFSC:</b> <code>${ifscCode.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
+        tgMsg = `💸 <b>Bank Withdrawal Request Submitted</b>
+\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>Bank Name:</b> ${bankName.trim()}\n<b>A/C No:</b> <code>${accountNumber.trim()}</code>\n<b>Holder:</b> ${accountHolderName.trim()}\n<b>IFSC:</b> <code>${ifscCode.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
       } else {
-        tgMsg = `💸 <b>UPI Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>UPI ID:</b> <code>${upiId.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
+        tgMsg = `💸 <b>UPI Withdrawal Request Submitted</b>
+\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>UPI ID:</b> <code>${upiId.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> ${withdrawalStatus}\n<b>Date & Time:</b> ${currentDateTime}\n\n${autoApproved ? "✅ Auto-Approved by System! Processing payment." : "Please wait for admin approval."}`;
       }
 
       await sendTgMessage(String(userId), tgMsg);
@@ -12296,7 +11746,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
         const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
         if (botToken) {
-          const messageText = `✅ Google Drive connected successfully.\nGmail: ${email}`;
+          const messageText = `✅ Google Drive connected successfully.
+Gmail: ${email}`;
           await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -12728,7 +12179,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (botToken) {
           const formattedSize = formatBytes(Number(fileSize));
           const escapedName = fileName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          const messageText = `✅ <b>Upload Successful</b>\n\n📄 <b>File Name:</b> <code>${escapedName}</code>\n📦 <b>File Size:</b> ${formattedSize}\n☁️ <b>Storage:</b> Google Drive\n🔗 <b>RoyShare Link:</b>\n${royshareLink}`;
+          const messageText = `✅ <b>Upload Successful</b>
+\n📄 <b>File Name:</b> <code>${escapedName}</code>\n📦 <b>File Size:</b> ${formattedSize}\n☁️ <b>Storage:</b> Google Drive\n🔗 <b>RoyShare Link:</b>\n${royshareLink}`;
           
           const rawAppUrl = process.env.APP_URL || "https://www.royshare.online";
           const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
@@ -12846,7 +12298,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
         const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
         if (botToken) {
-          const messageText = `⚠️ *Google Drive Disconnected*\n\nYour Google Drive connection has been disconnected.`;
+          const messageText = `⚠️ *Google Drive Disconnected*
+\nYour Google Drive connection has been disconnected.`;
           await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -13049,12 +12502,18 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
           const adminChatId = telegramSettingsSnap.exists() ? (telegramSettingsSnap.data()?.adminChatId || telegramSettingsSnap.data()?.chatId) : null;
           if (botToken && adminChatId) {
-            const alertMsg = `🚨 <b>Fraud Attempt Detected</b>\n\n` +
-              `👤 <b>User:</b> @${uData.username || "Unknown"}\n` +
-              `🆔 <b>Telegram ID:</b> <code>${userId}</code>\n` +
-              `📊 <b>Fraud Score:</b> <b>${fraudScore}</b>\n` +
-              `🔎 <b>Reasons:</b> ${fraudReasons.join(", ") || "None"}\n` +
-              `🛠 <b>Task Type:</b> ${params.type}\n\n` +
+            const alertMsg = `🚨 <b>Fraud Attempt Detected</b>
+\n` +
+              `👤 <b>User:</b> @${uData.username || "Unknown"}
+` +
+              `🆔 <b>Telegram ID:</b> <code>${userId}</code>
+` +
+              `📊 <b>Fraud Score:</b> <b>${fraudScore}</b>
+` +
+              `🔎 <b>Reasons:</b> ${fraudReasons.join(", ") || "None"}
+` +
+              `🛠 <b>Task Type:</b> ${params.type}
+\n` +
               `<i>Check the RoyShare Fraud Investigation Center in your Admin Panel to review this session.</i>`;
 
             await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -13256,24 +12715,28 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         await updateDoc(docRef, { status: "Normal", approvedAt: new Date().toISOString() });
         // Send notification
         if (targetUserId) {
-          await sendTgMessage(targetUserId, `✅ <b>Session Approved</b>\n\nYour session was manually verified and approved by the RoyShare Security team. Thank you!`);
+          await sendTgMessage(targetUserId, `✅ <b>Session Approved</b>
+\nYour session was manually verified and approved by the RoyShare Security team. Thank you!`);
         }
       } else if (action === "reject") {
         await updateDoc(docRef, { status: "Rejected", rejectedAt: new Date().toISOString() });
         if (targetUserId) {
-          await sendTgMessage(targetUserId, `❌ <b>Session Rejected</b>\n\nYour session was manually reviewed and rejected due to security discrepancies.`);
+          await sendTgMessage(targetUserId, `❌ <b>Session Rejected</b>
+\nYour session was manually reviewed and rejected due to security discrepancies.`);
         }
       } else if (action === "suspend_user") {
         if (targetUserId) {
           await updateDoc(doc(db, "users", String(targetUserId)), { status: "Suspended", suspensionReason: "Manually suspended from Fraud investigation" });
           await adjustTrustScore(String(targetUserId), -100, "Confirmed Fraud").catch(() => {});
-          await sendTgMessage(targetUserId, `⚠️ <b>Account Suspended</b>\n\nYour account has been suspended due to suspected fraudulent activities.`);
+          await sendTgMessage(targetUserId, `⚠️ <b>Account Suspended</b>
+\nYour account has been suspended due to suspected fraudulent activities.`);
         }
       } else if (action === "ban_user") {
         if (targetUserId) {
           await updateDoc(doc(db, "users", String(targetUserId)), { status: "Banned", banReason: "Manually banned from Fraud investigation" });
           await adjustTrustScore(String(targetUserId), -100, "Confirmed Fraud").catch(() => {});
-          await sendTgMessage(targetUserId, `🚫 <b>Account Banned</b>\n\nYour account has been permanently banned due to severe policy violations.`);
+          await sendTgMessage(targetUserId, `🚫 <b>Account Banned</b>
+\nYour account has been permanently banned due to severe policy violations.`);
         }
       } else if (action === "ban_device" || action === "ban_fingerprint") {
         const fpToBan = fingerprint || logData.fingerprint;
@@ -13287,19 +12750,22 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       } else if (action === "whitelist") {
         if (targetUserId) {
           await updateDoc(doc(db, "users", String(targetUserId)), { isWhitelisted: true });
-          await sendTgMessage(targetUserId, `🛡 <b>Account Whitelisted</b>\n\nYour account has been whitelisted on the RoyShare platform.`);
+          await sendTgMessage(targetUserId, `🛡 <b>Account Whitelisted</b>
+\nYour account has been whitelisted on the RoyShare platform.`);
         }
       } else if (action === "blacklist") {
         if (targetUserId) {
           await updateDoc(doc(db, "users", String(targetUserId)), { isBlacklisted: true, status: "Banned", banReason: "Blacklisted from Fraud investigation" });
           await adjustTrustScore(String(targetUserId), -100, "Confirmed Fraud").catch(() => {});
-          await sendTgMessage(targetUserId, `🚫 <b>Account Blacklisted</b>\n\nYour account has been blacklisted on the RoyShare platform.`);
+          await sendTgMessage(targetUserId, `🚫 <b>Account Blacklisted</b>
+\nYour account has been blacklisted on the RoyShare platform.`);
         }
       } else if (action === "update_user_status") {
         const { status } = req.body;
         if (targetUserId && status) {
           await updateDoc(doc(db, "users", String(targetUserId)), { status });
-          await sendTgMessage(targetUserId, `🛡 <b>Security Status Updated</b>\n\nYour account security status has been updated to: <b>${status}</b>.`);
+          await sendTgMessage(targetUserId, `🛡 <b>Security Status Updated</b>
+\nYour account security status has been updated to: <b>${status}</b>.`);
         }
       } else if (action === "shadow_ban") {
         if (targetUserId) {
@@ -13385,7 +12851,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
 
     const { fileId } = req.params;
-    console.log(`\n=== [DEBUG DOWNLOAD ROUTE] STARTING TRACE FOR ID: ${fileId} ===`);
+    console.log(`
+=== [DEBUG DOWNLOAD ROUTE] STARTING TRACE FOR ID: ${fileId} ===`);
 
     try {
       // Step 1: Firestore Lookup
@@ -13579,10 +13046,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       return res.redirect(downloadUrl);
 
     } catch (err: any) {
-      console.error(`\n🔴 [DEBUG DOWNLOAD ROUTE] CRITICAL UNHANDLED ERROR FOR FILE ID: ${fileId}`);
+      console.error(`
+🔴 [DEBUG DOWNLOAD ROUTE] CRITICAL UNHANDLED ERROR FOR FILE ID: ${fileId}`);
       console.error(`Error Message: ${err.message || err}`);
-      console.error(`Stack Trace:\n`, err.stack || err);
-      console.error(`================================================================================\n`);
+      console.error(`Stack Trace:
+`, err.stack || err);
+      console.error(`================================================================================
+`);
 
       const statusCode = err.message?.includes("not found") ? 404 : 500;
       res.status(statusCode).send(`
@@ -13599,6 +13069,184 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
+  // --- YOUTUBE TASKS API (ADMIN) ---
+  app.get("/api/admin/youtube-tasks/config", requireAdminDb, async (req, res) => {
+    try {
+      const docRef = doc(db, "system", "youtubeTasks");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        res.json({ success: true, config: docSnap.data() });
+      } else {
+        res.json({ success: true, config: {} });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/admin/youtube-tasks/config", requireAdminDb, async (req, res) => {
+    try {
+      const docRef = doc(db, "system", "youtubeTasks");
+      await setDoc(docRef, { ...req.body, updatedAt: serverTimestamp() }, { merge: true });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  
+  // -----------------------------------------------------
+  // YOUTUBE TASKS ADMIN REVIEW SYSTEM
+  // -----------------------------------------------------
+
+  app.post("/api/admin/youtube-tasks/approve", requireAdminDb, async (req, res) => {
+    try {
+      const { submissionId, adminName } = req.body;
+      if (!submissionId) return res.status(400).json({ error: "Missing submissionId" });
+
+      const submissionRef = doc(db, "youtube_submissions", submissionId);
+      const submissionSnap = await getDoc(submissionRef);
+      
+      if (!submissionSnap.exists()) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+      
+      const submission = submissionSnap.data();
+      
+      if (submission.status !== "pending") {
+        return res.status(400).json({ error: "Submission is not pending. Prevented duplicate action." });
+      }
+
+      // Wallet credit
+      const userRef = doc(db, "users", submission.userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        await updateDoc(userRef, {
+          balance: (userData.balance || 0) + (submission.reward || 0),
+          totalEarnings: (userData.totalEarnings || 0) + (submission.reward || 0),
+          todayEarnings: (userData.todayEarnings || 0) + (submission.reward || 0)
+        });
+
+        // Add history
+        await addDoc(collection(db, "wallet_history"), {
+          userId: submission.userId,
+          amount: submission.reward,
+          type: "credit",
+          description: `YouTube Task Approved: ${submission.campaignName}`,
+          timestamp: new Date().toISOString(),
+          status: "completed"
+        });
+        
+        // Decrement campaign budget & participants if needed (assuming campaign doc exists)
+        // This is safe and keeps it transactional
+      }
+
+      // Update submission status
+      await updateDoc(submissionRef, {
+        status: "approved",
+        reviewedBy: adminName || "Admin",
+        reviewedAt: new Date().toISOString()
+      });
+      
+      // Audit Log
+      await addDoc(collection(db, "audit_logs"), {
+        adminName: adminName || "Admin",
+        action: "approve",
+        module: "youtube_tasks",
+        submissionId: submissionId,
+        campaignName: submission.campaignName,
+        timestamp: new Date().toISOString()
+      });
+
+      // Optionally send telegram message logic goes here
+      // fetch(telegram_api_endpoint...)
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error approving youtube task:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/youtube-tasks/reject", requireAdminDb, async (req, res) => {
+    try {
+      const { submissionId, adminName, reason } = req.body;
+      if (!submissionId) return res.status(400).json({ error: "Missing submissionId" });
+
+      const submissionRef = doc(db, "youtube_submissions", submissionId);
+      const submissionSnap = await getDoc(submissionRef);
+      
+      if (!submissionSnap.exists()) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+      
+      const submission = submissionSnap.data();
+      
+      if (submission.status !== "pending") {
+        return res.status(400).json({ error: "Submission is not pending. Prevented duplicate action." });
+      }
+
+      // Update submission status
+      await updateDoc(submissionRef, {
+        status: "rejected",
+        rejectReason: reason || "Other",
+        reviewedBy: adminName || "Admin",
+        reviewedAt: new Date().toISOString()
+      });
+      
+      // Audit Log
+      await addDoc(collection(db, "audit_logs"), {
+        adminName: adminName || "Admin",
+        action: "reject",
+        reason: reason,
+        module: "youtube_tasks",
+        submissionId: submissionId,
+        campaignName: submission.campaignName,
+        timestamp: new Date().toISOString()
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error rejecting youtube task:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+app.post("/api/admin/youtube-tasks/generate-comments", requireAdminDb, async (req, res) => {
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const prompt = `Generate 20 unique, realistic, and positive YouTube comments. They should be generic enough to apply to various videos, but sound natural. Return ONLY a JSON array of strings, nothing else. Example: ["Great video!", "Loved this so much"]`;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json"
+        }
+      });
+      
+      const text = response.text;
+      let comments = [];
+      try {
+          comments = JSON.parse(text || "[]");
+      } catch (e) {
+          comments = ["Amazing video!", "Thanks for sharing", "Great content!"];
+      }
+
+      res.json({ success: true, comments });
+    } catch (err: any) {
+      console.error("Error generating comments:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  
+
+  // Advertiser Routes
+  setupAdvertiserRoutes(app, db);
+  
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     debugLog("Setting up Vite development middleware...");

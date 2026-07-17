@@ -1,3 +1,4 @@
+import YouTubeTasksAdmin from "../components/YouTubeTasksAdmin";
 import LinkAnalyticsPage from "./LinkAnalyticsPage";
 import { useState, useEffect, useRef } from "react";
 import { authenticatedFetch } from "../lib/api";
@@ -81,7 +82,12 @@ import UserDetailsModal from "../components/UserDetailsModal";
 import TelegramBroadcastCenter from "../components/TelegramBroadcastCenter";
 import LuckyNumberGiveawayAdminManager from "../components/LuckyNumberGiveawayAdminManager";
 import { FraudInvestigationCenter } from "../components/FraudInvestigationCenter";
-import buildInfo from "../build-info.json";
+import buildInfo from '../build-info.json';
+import AIModeration from "../components/Admin/AIModeration";
+import ReputationSystem from "../components/Admin/ReputationSystem";
+import AuditCenter from "../components/Admin/AuditCenter";
+import RewardsLeaderboard from "../components/Admin/RewardsLeaderboard";
+
 interface ErrorBoundaryProps {
   children: React.ReactNode;
 }
@@ -140,16 +146,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         console.error("Failed to copy build info:", err);
       });
   };
-  const [aiGenSettings, setAiGenSettings] = useState<any>({
-    slots: 8,
-    minReward: 1,
-    maxReward: 100,
-    betterLuckSlots: 2,
-    dailyBudget: 200,
-    totalUsers: 10000,
-    profitMargin: 20,
-  });
-  const [aiPreviewRewards, setAiPreviewRewards] = useState<any>(null);
   const [usersError, setUsersError] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
   const [adPlacements, setAdPlacements] = useState<any>({});
@@ -159,7 +155,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [adForm, setAdForm] = useState<any>(null);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiAnnouncing, setAiAnnouncing] = useState(false);
-  const [aiGenMessage, setAiGenMessage] = useState<any>(null);
   
   
   const [aiReplying, setAiReplying] = useState(false);
@@ -168,15 +163,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [announcementsError, setAnnouncementsError] = useState("");
   const [announcementsLoading, setAnnouncementsLoading] = useState(false);
-  const [bonusHistory, setBonusHistory] = useState<any[]>([]);
-  const [bonusHistoryLoading, setBonusHistoryLoading] = useState(false);
-  const [bonusSearch, setBonusSearch] = useState("");
-  const [bonusSettings, setBonusSettings] = useState<any>(null);
-  const [bonusSettingsLoading, setBonusSettingsLoading] = useState(false);
-  const [bonusView, setBonusView] = useState("");
-  const [dailyBonusStats, setDailyBonusStats] = useState<any>(null);
-  const [dailyBonusStatsLoading, setDailyBonusStatsLoading] = useState(false);
-  const [generatingAI, setGeneratingAI] = useState(false);
   const [googleDriveAccounts, setGoogleDriveAccounts] = useState<any[]>([]);
   const [googleDriveError, setGoogleDriveError] = useState("");
   const [googleDriveLoading, setGoogleDriveLoading] = useState(false);
@@ -1945,170 +1931,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
-  const fetchBonusSettings = async () => {
-    setBonusSettingsLoading(true);
-    try {
-      const res = await authenticatedFetch("/api/admin/daily-bonus/settings");
-      if (res.ok) {
-        const data = await res.json();
-        const defaults = {
-          dailyBonusEnabled: true,
-          resetTime: "00:00",
-          wheel: { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] },
-          box: { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] },
-          scratch: { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] },
-        };
-        setBonusSettings({
-          ...defaults,
-          ...data,
-          wheel: { ...defaults.wheel, ...data?.wheel },
-          box: { ...defaults.box, ...data?.box },
-          scratch: { ...defaults.scratch, ...data?.scratch },
-        });
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setBonusSettingsLoading(false);
-    }
-  };
-
-  const fetchBonusHistory = async () => {
-    setBonusHistoryLoading(true);
-    try {
-      const res = await authenticatedFetch("/api/admin/daily-bonus/history");
-      if (res.ok) setBonusHistory(await res.json());
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setBonusHistoryLoading(false);
-    }
-  };
-
-  const fetchDailyBonusStats = async () => {
-    setDailyBonusStatsLoading(true);
-    try {
-      const res = await authenticatedFetch("/api/admin/daily-bonus/stats");
-      if (res.ok) setDailyBonusStats(await res.json());
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setDailyBonusStatsLoading(false);
-    }
-  };
-
-  const saveBonusSettings = async (newSettings: any) => {
-    try {
-      const { totalSpins, totalRewardsDistributed, ...settingsToSave } =
-        newSettings;
-      const res = await authenticatedFetch("/api/admin/daily-bonus/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settingsToSave),
-      });
-      if (res.ok) {
-        alert("Daily Bonus settings saved successfully!");
-        fetchBonusSettings();
-      } else {
-        alert("Failed to save settings");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Error saving settings");
-    }
-  };
-
-  const handleAIGenerateRewards = async (type: string) => {
-    if (aiGenSettings.slots < 5 || aiGenSettings.slots > 30) {
-      alert("Number of Reward Slots must be between 5 and 30.");
-      return;
-    }
-    if (
-      aiGenSettings.minReward < 0 ||
-      aiGenSettings.maxReward < aiGenSettings.minReward
-    ) {
-      alert("Please enter valid minimum and maximum reward limits.");
-      return;
-    }
-    setGeneratingAI(true);
-    setAiPreviewRewards(null);
-    setAiGenMessage(null);
-    try {
-      // Use the specialized scratch card generator if type is scratch
-      const endpoint = type === 'scratch' 
-        ? `${API_BASE}/api/admin/scratch-card/ai-generate`
-        : `${API_BASE}/api/admin/daily-bonus/auto-generate`;
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...aiGenSettings,
-          type
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setAiPreviewRewards(type === 'scratch' ? data.distribution : data.rewards);
-        if (data.isLocalFallback) {
-          setAiGenMessage({
-            text: "AI Generator is temporarily unavailable. Using Smart Local Generator.",
-            type: "warning",
-          });
-        } else {
-          setAiGenMessage({
-            text: `🤖 AI successfully generated ${type === 'scratch' ? data.distribution.length : data.rewards.length} reward slots! Please review the preview table and click "Save and Apply".`,
-            type: "success",
-          });
-        }
-      } else {
-        // Handle failed AI generation with local fallback
-        generateLocalRewardsAsFallback();
-      }
-    } catch (err) {
-      console.error("AI Gen Error:", err);
-      // Handle network or connection errors with local fallback
-      generateLocalRewardsAsFallback();
-    } finally {
-      setGeneratingAI(false);
-    }
-  };
-
-  const generateLocalRewardsAsFallback = () => {
-    const numSlots = aiGenSettings.slots || 8;
-    const minRew = aiGenSettings.minReward || 1;
-    const maxRew = aiGenSettings.maxReward || 100;
-    const blSlots = aiGenSettings.betterLuckSlots || 0;
-
-    const rewards = [];
-    // Generate normal rewards with inverse quadratic weights
-    for (let i = 0; i < numSlots; i++) {
-      const ratio = numSlots > 1 ? i / (numSlots - 1) : 0;
-      const amount = Math.round(minRew + ratio * (maxRew - minRew));
-      const weight = Math.max(1, Math.round(100 * Math.pow(1 - ratio, 2)));
-      rewards.push({
-        label: `₹${amount.toFixed(2)}`,
-        amount,
-        weight,
-      });
-    }
-
-    // Generate Better Luck Next Time slots
-    for (let i = 0; i < blSlots; i++) {
-      rewards.push({
-        label: "Better Luck Next Time 🍀",
-        amount: 0,
-        weight: 35,
-      });
-    }
-
-    setAiPreviewRewards(rewards);
-    setAiGenMessage({
-      text: "AI Generator is temporarily unavailable. Using Smart Local Generator.",
-      type: "warning",
-    });
-  };
-
   const fetchUsers = async () => {
     setUsersLoading(true);
     setUsersError("");
@@ -3863,24 +3685,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       if (taskView === "stats") {
         fetchTaskLogs();
       }
-    } else if (activeTab === "🎁 Daily Bonus") {
-      if (
-        [
-          "settings",
-          "wheel-rewards",
-          "box-rewards",
-          "scratch-rewards",
-          "stats",
-        ].includes(bonusView)
-      ) {
-        fetchBonusSettings();
-      }
-      if (bonusView === "history") {
-        fetchBonusHistory();
-      }
-      if (bonusView === "stats") {
-        fetchDailyBonusStats();
-      }
     } else if (activeTab === "👥 Users") {
       fetchUsers();
     } else if (activeTab === "📈 Analytics") {
@@ -3891,7 +3695,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchSystemSettings();
       fetchTelegramSettings();
       fetchSupportSettings();
-      fetchBonusSettings();
       fetchImgbbConfig();
       fetchAdsgramSettings();
     } else if (activeTab === "🛡 Security Center") {
@@ -3914,7 +3717,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         clearInterval(supportInterval);
       }
     };
-  }, [activeTab, taskView, bonusView, analyticsView, broadcastTab]);
+  }, [activeTab, taskView, analyticsView, broadcastTab]);
 
   const handleActionSubmit = async () => {
     // Simplified guard logic
@@ -4305,22 +4108,33 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   onClick={async () => {
                     if (confirm("Are you sure you want to approve this withdrawal request?")) {
                       setModalLoading(true);
+                      console.log(`[Admin Dashboard] Initiating Approval for ID: ${selectedWithdrawal.id}`);
+                      const apiUrl = `/api/admin/withdrawals/${selectedWithdrawal.id}/approve`;
+                      console.log(`[Admin Dashboard] URL: ${apiUrl} | Method: POST`);
+                      
                       try {
-                        const res = await authenticatedFetch(`/api/admin/withdrawals/${selectedWithdrawal.id}/approve`, {
+                        const res = await authenticatedFetch(apiUrl, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" }
                         });
+                        
+                        console.log(`[Admin Dashboard] Response Status: ${res.status}`);
                         const resData = await res.json();
-                        if (res.ok) {
-                          alert(resData.message || "Withdrawal approved successfully!");
+                        console.log(`[Admin Dashboard] Response Body:`, resData);
+
+                        if (res.ok && resData.success) {
+                          alert(resData.message || "Withdrawal Approved Successfully");
                           fetchWithdrawals();
                           setModalAction("none");
                           setSelectedWithdrawal(null);
                         } else {
-                          alert(resData.error || "Approval failed.");
+                          const errorMsg = resData.error || resData.message || "Approval failed.";
+                          console.error(`[Admin Dashboard] Approval failed: ${errorMsg}`);
+                          alert(errorMsg);
                         }
                       } catch (err: any) {
-                        alert(err.message);
+                        console.error(`[Admin Dashboard] Network or Parse Error:`, err);
+                        alert(`Network Error: ${err.message}`);
                       } finally {
                         setModalLoading(false);
                       }
@@ -4341,23 +4155,34 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       return;
                     }
                     setModalLoading(true);
-                    authenticatedFetch(`/api/admin/withdrawals/${selectedWithdrawal.id}/reject`, {
+                    console.log(`[Admin Dashboard] Initiating Rejection for ID: ${selectedWithdrawal.id}`);
+                    const apiUrl = `/api/admin/withdrawals/${selectedWithdrawal.id}/reject`;
+                    
+                    authenticatedFetch(apiUrl, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ rejectReason: reason, rejectionType: "normal" })
                     })
                       .then(async (res) => {
+                        console.log(`[Admin Dashboard] Reject Response Status: ${res.status}`);
                         const resData = await res.json();
-                        if (res.ok) {
-                          alert(resData.message || "Withdrawal rejected.");
+                        console.log(`[Admin Dashboard] Reject Response Body:`, resData);
+
+                        if (res.ok && resData.success) {
+                          alert(resData.message || "Withdrawal Rejected Successfully and Amount Refunded.");
                           fetchWithdrawals();
                           setModalAction("none");
                           setSelectedWithdrawal(null);
                         } else {
-                          alert(resData.error || "Rejection failed.");
+                          const errorMsg = resData.error || resData.message || "Rejection failed.";
+                          console.error(`[Admin Dashboard] Rejection failed: ${errorMsg}`);
+                          alert(errorMsg);
                         }
                       })
-                      .catch((err) => alert(err.message))
+                      .catch((err) => {
+                        console.error(`[Admin Dashboard] Reject Error:`, err);
+                        alert(err.message);
+                      })
                       .finally(() => setModalLoading(false));
                   }}
                   disabled={modalLoading}
@@ -4416,23 +4241,34 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       return;
                     }
                     setModalLoading(true);
-                    authenticatedFetch(`/api/admin/withdrawals/${selectedWithdrawal.id}/reject`, {
+                    console.log(`[Admin Dashboard] Initiating Rejection for ID: ${selectedWithdrawal.id}`);
+                    const apiUrl = `/api/admin/withdrawals/${selectedWithdrawal.id}/reject`;
+                    
+                    authenticatedFetch(apiUrl, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ rejectReason: reason, rejectionType: "normal" })
                     })
                       .then(async (res) => {
+                        console.log(`[Admin Dashboard] Reject Response Status: ${res.status}`);
                         const resData = await res.json();
-                        if (res.ok) {
-                          alert(resData.message || "Withdrawal rejected.");
+                        console.log(`[Admin Dashboard] Reject Response Body:`, resData);
+
+                        if (res.ok && resData.success) {
+                          alert(resData.message || "Withdrawal Rejected Successfully and Amount Refunded.");
                           fetchWithdrawals();
                           setModalAction("none");
                           setSelectedWithdrawal(null);
                         } else {
-                          alert(resData.error || "Rejection failed.");
+                          const errorMsg = resData.error || resData.message || "Rejection failed.";
+                          console.error(`[Admin Dashboard] Rejection failed: ${errorMsg}`);
+                          alert(errorMsg);
                         }
                       })
-                      .catch((err) => alert(err.message))
+                      .catch((err) => {
+                        console.error(`[Admin Dashboard] Reject Error:`, err);
+                        alert(err.message);
+                      })
                       .finally(() => setModalLoading(false));
                   }}
                   disabled={modalLoading}
@@ -5040,16 +4876,20 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "📢 Announcements",
               "💰 Rewards",
               "🔗 Shortener Tasks",
-              "🎁 Daily Bonus",
               "🔗 Smart URL Shortener",
+              "📺 YouTube Tasks",
               "📥 Google Drive Accounts",
               "📉 Analytics",
               "📢 Broadcast",
               "📢 Telegram Broadcast Center",
               "💰 Verified Tasks",
-              "🛡 Security Center",
+                            "🛡 Security Center",
               "🛡️ Economy Protection",
               "🛡 Fraud Investigation Center",
+              "🛡️ AI Moderation",
+              "⭐ Reputation",
+              "📋 Audit Center",
+              "🏆 Rewards & Leaderboard",
               "📜 Activity Logs",
               "📥 Backup & Restore",
               "🚀 Referral System",
@@ -7086,1023 +6926,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                   </motion.div>
                 </div>
               )}
-            </div>
-          )}
-
-          {activeTab === "🎁 Daily Bonus" && (
-            <div className="space-y-6">
-              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
-                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                  🎁 Daily Bonus Manager
-                </h2>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <button
-                    onClick={() => setBonusView("settings")}
-                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === "settings" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
-                  >
-                    ⚙️ Settings
-                  </button>
-                  <button
-                    onClick={() => setBonusView("wheel-rewards")}
-                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === "wheel-rewards" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
-                  >
-                    🎡 Wheel
-                  </button>
-                  <button
-                    onClick={() => setBonusView("box-rewards")}
-                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === "box-rewards" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
-                  >
-                    📦 Box
-                  </button>
-                  <button
-                    onClick={() => setBonusView("scratch-rewards")}
-                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === "scratch-rewards" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
-                  >
-                    🎫 Scratch
-                  </button>
-                  <button
-                    onClick={() => setBonusView("stats")}
-                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === "stats" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
-                  >
-                    📊 Stats
-                  </button>
-                  <button
-                    onClick={() => setBonusView("history")}
-                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === "history" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
-                  >
-                    📜 History
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (bonusView === "history") fetchBonusHistory();
-                      else if (bonusView === "stats") fetchDailyBonusStats();
-                      else fetchBonusSettings();
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700"
-                  >
-                    🔄 Refresh
-                  </button>
-                </div>
-              </div>
-
-              {bonusSettingsLoading &&
-              bonusView !== "history" &&
-              bonusView !== "stats" ? (
-                <div className="flex justify-center py-10">
-                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              ) : bonusView === "settings" && bonusSettings ? (
-                <div className="space-y-6">
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                    <h3 className="text-lg font-bold text-white mb-6 border-b border-slate-800 pb-4">
-                      ⚙️ General Settings
-                    </h3>
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-                        <div>
-                          <p className="font-bold text-white">
-                            Daily Bonus System
-                          </p>
-                          <p className="text-sm text-slate-400">
-                            Enable or disable the entire daily bonus feature
-                          </p>
-                        </div>
-                        <button
-                          onClick={() =>
-                            saveBonusSettings({
-                              ...bonusSettings,
-                              dailyBonusEnabled:
-                                !bonusSettings.dailyBonusEnabled,
-                            })
-                          }
-                          className={`px-4 py-2 font-bold rounded-xl transition-all ${bonusSettings.dailyBonusEnabled ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"}`}
-                        >
-                          {bonusSettings.dailyBonusEnabled
-                            ? "🟢 Enabled"
-                            : "🔴 Disabled"}
-                        </button>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-slate-400 mb-1">
-                            🕒 Global Reset Time (UTC)
-                          </label>
-                          <input
-                            type="time"
-                            value={bonusSettings.resetTime || "00:00"}
-                            onChange={(e) =>
-                              setBonusSettings({
-                                ...bonusSettings,
-                                resetTime: e.target.value,
-                              })
-                            }
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-slate-400 mb-1">
-                            💰 Global Daily Bonus Budget (₹)
-                          </label>
-                          <input
-                            type="number"
-                            value={bonusSettings.dailyBudget || 10000}
-                            onChange={(e) =>
-                              setBonusSettings({
-                                ...bonusSettings,
-                                dailyBudget: parseInt(e.target.value) || 0,
-                              })
-                            }
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {["wheel", "box", "scratch"].map((type) => (
-                      <div
-                        key={type}
-                        className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden"
-                      >
-                        <div className="p-4 bg-slate-950/50 border-b border-slate-800 flex items-center justify-between">
-                          <h4 className="font-bold text-white capitalize">
-                            {type} Module
-                          </h4>
-                          <button
-                            onClick={() =>
-                              setBonusSettings({
-                                ...bonusSettings,
-                                [type]: {
-                                  ...(bonusSettings[type] || {}),
-                                  enabled: !bonusSettings[type]?.enabled,
-                                },
-                              })
-                            }
-                            className={`w-10 h-5 rounded-full relative transition-colors ${bonusSettings[type]?.enabled ? "bg-indigo-600" : "bg-slate-700"}`}
-                          >
-                            <div
-                              className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${bonusSettings[type]?.enabled ? "left-6" : "left-1"}`}
-                            />
-                          </button>
-                        </div>
-                        <div className="p-4 space-y-4">
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Limit
-                              </label>
-                              <input
-                                type="number"
-                                value={bonusSettings[type]?.dailyLimit ?? 0}
-                                onChange={(e) =>
-                                  setBonusSettings({
-                                    ...bonusSettings,
-                                    [type]: {
-                                      ...bonusSettings[type],
-                                      dailyLimit: parseInt(e.target.value) || 0,
-                                    },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Cooldown
-                              </label>
-                              <input
-                                type="number"
-                                value={bonusSettings[type]?.cooldown ?? 0}
-                                onChange={(e) =>
-                                  setBonusSettings({
-                                    ...bonusSettings,
-                                    [type]: {
-                                      ...bonusSettings[type],
-                                      cooldown: parseInt(e.target.value) || 0,
-                                    },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
-                              />
-                            </div>
-                          </div>
-
-                          {type === 'scratch' && (
-                            <div className="space-y-3 pt-2 border-t border-slate-800/50">
-                               <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-[10px] font-black text-amber-500 uppercase mb-1">
-                                      Daily Budget (₹)
-                                    </label>
-                                    <input
-                                      type="number"
-                                      value={bonusSettings.scratch?.dailyBudget ?? 200}
-                                      onChange={(e) =>
-                                        setBonusSettings({
-                                          ...bonusSettings,
-                                          scratch: {
-                                            ...bonusSettings.scratch,
-                                            dailyBudget: parseInt(e.target.value) || 0,
-                                          },
-                                        })
-                                      }
-                                      className="w-full bg-slate-950 border border-amber-900/30 rounded-lg px-3 py-1.5 text-white text-sm"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] font-black text-amber-500 uppercase mb-1">
-                                      Target Users
-                                    </label>
-                                    <input
-                                      type="number"
-                                      value={bonusSettings.scratch?.totalUsersTarget ?? 10000}
-                                      onChange={(e) =>
-                                        setBonusSettings({
-                                          ...bonusSettings,
-                                          scratch: {
-                                            ...bonusSettings.scratch,
-                                            totalUsersTarget: parseInt(e.target.value) || 0,
-                                          },
-                                        })
-                                      }
-                                      className="w-full bg-slate-950 border border-amber-900/30 rounded-lg px-3 py-1.5 text-white text-sm"
-                                    />
-                                  </div>
-                               </div>
-
-                               <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-[10px] font-black text-indigo-400 uppercase mb-1">
-                                      Unlock Ad Type
-                                    </label>
-                                    <select
-                                      value={bonusSettings.scratch?.unlockAdType || "Reward"}
-                                      onChange={(e) =>
-                                        setBonusSettings({
-                                          ...bonusSettings,
-                                          scratch: {
-                                            ...bonusSettings.scratch,
-                                            unlockAdType: e.target.value,
-                                          },
-                                        })
-                                      }
-                                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-[11px]"
-                                    >
-                                      <option value="Reward">Reward Video</option>
-                                      <option value="Interstitial">Interstitial</option>
-                                      <option value="Task">Task (External)</option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] font-black text-emerald-400 uppercase mb-1">
-                                      Claim Ad Type
-                                    </label>
-                                    <select
-                                      value={bonusSettings.scratch?.claimAdType || "Interstitial"}
-                                      onChange={(e) =>
-                                        setBonusSettings({
-                                          ...bonusSettings,
-                                          scratch: {
-                                            ...bonusSettings.scratch,
-                                            claimAdType: e.target.value,
-                                          },
-                                        })
-                                      }
-                                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-[11px]"
-                                    >
-                                      <option value="Reward">Reward Video</option>
-                                      <option value="Interstitial">Interstitial</option>
-                                      <option value="Task">Task (External)</option>
-                                    </select>
-                                  </div>
-                               </div>
-
-                               <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                      Min Reward
-                                    </label>
-                                    <input
-                                      type="number"
-                                      step="0.1"
-                                      value={bonusSettings.scratch?.minReward ?? 0.1}
-                                      onChange={(e) =>
-                                        setBonusSettings({
-                                          ...bonusSettings,
-                                          scratch: {
-                                            ...bonusSettings.scratch,
-                                            minReward: parseFloat(e.target.value) || 0,
-                                          },
-                                        })
-                                      }
-                                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                      Max Reward
-                                    </label>
-                                    <input
-                                      type="number"
-                                      step="1"
-                                      value={bonusSettings.scratch?.maxReward ?? 10}
-                                      onChange={(e) =>
-                                        setBonusSettings({
-                                          ...bonusSettings,
-                                          scratch: {
-                                            ...bonusSettings.scratch,
-                                            maxReward: parseFloat(e.target.value) || 0,
-                                          },
-                                        })
-                                      }
-                                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
-                                    />
-                                  </div>
-                               </div>
-                            </div>
-                          )}
-
-                          <div className="flex items-center justify-between pt-2">
-                            <span className="text-xs font-bold text-slate-400">
-                              Require Ad
-                            </span>
-                            <button
-                              onClick={() =>
-                                setBonusSettings({
-                                  ...bonusSettings,
-                                  [type]: {
-                                    ...bonusSettings[type],
-                                    adRequired:
-                                      !bonusSettings[type]?.adRequired,
-                                  },
-                                })
-                              }
-                              className={`text-[10px] px-2 py-1 rounded font-black ${bonusSettings[type]?.adRequired ? "bg-indigo-500/20 text-indigo-400" : "bg-slate-800 text-slate-500"}`}
-                            >
-                              {bonusSettings[type]?.adRequired ? "YES" : "NO"}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    onClick={() => saveBonusSettings(bonusSettings)}
-                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-indigo-900/20"
-                  >
-                    💾 Save All Module Settings
-                  </button>
-                </div>
-              ) : (bonusView === "wheel-rewards" ||
-                  bonusView === "box-rewards" ||
-                  bonusView === "scratch-rewards") &&
-                bonusSettings ? (
-                <div className="space-y-6">
-                  {/* AI Reward Generator Input Panel */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                    <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
-                      <div>
-                        <h3 className="text-lg font-bold text-white capitalize">
-                          🤖 {bonusView.split("-")[0]} AI Reward Generator
-                        </h3>
-                        <p className="text-xs text-slate-500 mt-1">
-                          Use Gemini AI to instantly generate a balanced,
-                          profitable reward pool.
-                        </p>
-                      </div>
-                      <span className="bg-indigo-600/15 text-indigo-400 font-bold text-xs px-3 py-1.5 rounded-full border border-indigo-500/10">
-                        Gemini Powered
-                      </span>
-                    </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-4 mb-6">
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
-                            Min Reward (₹)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.1"
-                            value={aiGenSettings.minReward}
-                            onChange={(e) =>
-                              setAiGenSettings({
-                                ...aiGenSettings,
-                                minReward: parseFloat(e.target.value) || 0,
-                              })
-                            }
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
-                            Max Reward (₹)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={aiGenSettings.maxReward}
-                            onChange={(e) =>
-                              setAiGenSettings({
-                                ...aiGenSettings,
-                                maxReward: parseFloat(e.target.value) || 0,
-                              })
-                            }
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
-                            Slots (5-30)
-                          </label>
-                          <input
-                            type="number"
-                            min="5"
-                            max="30"
-                            value={aiGenSettings.slots}
-                            onChange={(e) =>
-                              setAiGenSettings({
-                                ...aiGenSettings,
-                                slots: parseInt(e.target.value) || 0,
-                              })
-                            }
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
-                            Better Luck %
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={aiGenSettings.betterLuckSlots} // Using this field for percentage in UI
-                            onChange={(e) =>
-                              setAiGenSettings({
-                                ...aiGenSettings,
-                                betterLuckSlots: parseInt(e.target.value) || 0,
-                              })
-                            }
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
-                            Daily Budget (₹)
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={aiGenSettings.dailyBudget}
-                            onChange={(e) =>
-                              setAiGenSettings({
-                                ...aiGenSettings,
-                                dailyBudget: parseInt(e.target.value) || 0,
-                              })
-                            }
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
-                            Profit Margin %
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={aiGenSettings.profitMargin}
-                            onChange={(e) =>
-                              setAiGenSettings({
-                                ...aiGenSettings,
-                                profitMargin: parseInt(e.target.value) || 0,
-                              })
-                            }
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
-                          />
-                        </div>
-                      </div>
-
-                    <button
-                      onClick={() =>
-                        handleAIGenerateRewards(bonusView.split("-")[0])
-                      }
-                      disabled={generatingAI}
-                      className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black rounded-xl transition-all shadow-lg shadow-indigo-950/40 flex items-center justify-center gap-2"
-                    >
-                      {generatingAI ? (
-                        <>
-                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>Gemini is Crafting Rewards...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>🤖 Generate Rewards with Gemini AI</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Preview Generated Rewards */}
-                  {aiPreviewRewards ? (
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 animate-fade-in">
-                      <div className="flex justify-between items-center mb-6">
-                        <div>
-                          <h4 className="text-md font-bold text-emerald-400">
-                            👀 Generated Rewards Preview
-                          </h4>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            Please review the probability and weight balance
-                            generated by AI.
-                          </p>
-                        </div>
-                        <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-                          Preview Mode
-                        </span>
-                      </div>
-
-                      <div className="overflow-x-auto rounded-xl border border-slate-800">
-                        <table className="w-full text-left text-sm text-slate-300">
-                          <thead className="text-xs text-slate-400 uppercase bg-slate-950/80 border-b border-slate-800">
-                            <tr>
-                              <th className="px-4 py-3">Slot No</th>
-                              <th className="px-4 py-3">Label</th>
-                              <th className="px-4 py-3">Amount (₹)</th>
-                              <th className="px-4 py-3">Weight</th>
-                              <th className="px-4 py-3 text-right">
-                                Probability
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(() => {
-                              const totalWeight = aiPreviewRewards.reduce(
-                                (sum, r) => sum + (Number(r.weight) || 0),
-                                0,
-                              );
-                              return aiPreviewRewards.map((reward, idx) => {
-                                const prob =
-                                  totalWeight > 0
-                                    ? (
-                                        ((Number(reward.weight) || 0) /
-                                          totalWeight) *
-                                        100
-                                      ).toFixed(1)
-                                    : "0.0";
-                                return (
-                                  <tr
-                                    key={idx}
-                                    className="border-b border-slate-800/40 bg-slate-950/10 hover:bg-slate-950/30"
-                                  >
-                                    <td className="px-4 py-3 text-slate-500 font-mono text-xs">
-                                      #{idx + 1}
-                                    </td>
-                                    <td className="px-4 py-3 font-medium text-white">
-                                      {reward.label}
-                                    </td>
-                                    <td className="px-4 py-3 font-bold text-emerald-400">
-                                      ₹{Number(reward.amount).toFixed(2)}
-                                    </td>
-                                    <td className="px-4 py-3 text-slate-300">
-                                      {reward.weight}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-indigo-400 font-bold">
-                                      {prob}%
-                                    </td>
-                                  </tr>
-                                );
-                              });
-                            })()}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="mt-6 flex flex-col sm:flex-row justify-end gap-3">
-                        <button
-                          onClick={() => setAiPreviewRewards(null)}
-                          className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all uppercase"
-                        >
-                          ❌ Cancel Preview
-                        </button>
-                        <button
-                          onClick={async () => {
-                            const type = bonusView.split("-")[0];
-                            const updatedSettings = {
-                              ...bonusSettings,
-                              dailyBudget: aiGenSettings.dailyBudget, // Save the daily budget parameter to main setting!
-                              [type]: {
-                                ...bonusSettings[type],
-                                rewards: aiPreviewRewards,
-                              },
-                            };
-                            await saveBonusSettings(updatedSettings);
-                            setAiPreviewRewards(null);
-                          }}
-                          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs transition-all shadow-md shadow-emerald-950/30 uppercase flex items-center gap-2"
-                        >
-                          <span>
-                            💾 Save and Apply to{" "}
-                            {bonusView.split("-")[0].toUpperCase()}
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Active Config Pool fallback */
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                      <h4 className="text-md font-bold text-white mb-4">
-                        📋 Currently Configured Reward Pool
-                      </h4>
-                      <div className="overflow-x-auto rounded-xl border border-slate-800">
-                        <table className="w-full text-left text-sm text-slate-300">
-                          <thead className="text-xs text-slate-400 uppercase bg-slate-950/80 border-b border-slate-800">
-                            <tr>
-                              <th className="px-4 py-3">Slot</th>
-                              <th className="px-4 py-3">Label</th>
-                              <th className="px-4 py-3">Amount (₹)</th>
-                              <th className="px-4 py-3">Weight</th>
-                              <th className="px-4 py-3 text-right">
-                                Probability
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(() => {
-                              const type = bonusView.split("-")[0];
-                              const activeRewards =
-                                bonusSettings[type]?.rewards || [];
-                              if (activeRewards.length === 0) {
-                                return (
-                                  <tr>
-                                    <td
-                                      colSpan={5}
-                                      className="px-4 py-8 text-center text-slate-500"
-                                    >
-                                      No rewards configured. Use the AI
-                                      generator above to build the pool!
-                                    </td>
-                                  </tr>
-                                );
-                              }
-                              const totalWeight = activeRewards.reduce(
-                                (sum: number, r: any) =>
-                                  sum + (Number(r.weight) || 0),
-                                0,
-                              );
-                              return activeRewards.map(
-                                (reward: any, idx: number) => {
-                                  const prob =
-                                    totalWeight > 0
-                                      ? (
-                                          ((Number(reward.weight) || 0) /
-                                            totalWeight) *
-                                          100
-                                        ).toFixed(1)
-                                      : "0.0";
-                                  return (
-                                    <tr
-                                      key={idx}
-                                      className="border-b border-slate-800/40 bg-slate-950/10"
-                                    >
-                                      <td className="px-4 py-3 text-slate-500 font-mono text-xs">
-                                        #{idx + 1}
-                                      </td>
-                                      <td className="px-4 py-3 text-slate-300">
-                                        {reward.label}
-                                      </td>
-                                      <td className="px-4 py-3 font-bold text-emerald-400">
-                                        ₹{Number(reward.amount).toFixed(2)}
-                                      </td>
-                                      <td className="px-4 py-3 text-slate-400">
-                                        {reward.weight}
-                                      </td>
-                                      <td className="px-4 py-3 text-right text-indigo-400 font-semibold">
-                                        {prob}%
-                                      </td>
-                                    </tr>
-                                  );
-                                },
-                              );
-                            })()}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : bonusView === "stats" ? (
-                <div className="space-y-6">
-                  {/* Global Stats */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
-                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                        🎡 Global Total Spins
-                      </h3>
-                      <p className="text-2xl font-bold text-white">
-                        {dailyBonusStats?.global?.totalSpins || 0}
-                      </p>
-                    </div>
-                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
-                      <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">
-                        💰 Global Rewards
-                      </h3>
-                      <p className="text-2xl font-bold text-yellow-400">
-                        ₹
-                        {Number(
-                          dailyBonusStats?.global?.totalRewardsDistributed || 0,
-                        ).toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-4">
-                      <h3 className="text-xs font-semibold text-indigo-500/80 uppercase tracking-wider mb-1">
-                        ✅ Global Claims
-                      </h3>
-                      <p className="text-2xl font-bold text-indigo-400">
-                        {dailyBonusStats?.global?.totalClaims || 0}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Today Stats */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
-                    <div className="flex items-center justify-between mb-6">
-                      <div>
-                        <h3 className="text-lg font-black text-white">
-                          Today's Activity 📅
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Real-time stats for {new Date().toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest animate-pulse">
-                        Live Sync
-                      </div>
-                    </div>
-
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                            Unique Users
-                          </span>
-                          <span className="text-2xl font-black text-white">
-                            {dailyBonusStats?.today?.uniqueUsers || 0}
-                          </span>
-                        </div>
-                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                            Today Claims
-                          </span>
-                          <span className="text-2xl font-black text-white">
-                            {dailyBonusStats?.today?.totalClaims || 0}
-                          </span>
-                        </div>
-                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                            Total Scratches
-                          </span>
-                          <span className="text-2xl font-black text-white">
-                            {dailyBonusStats?.today?.totalScratches || 0}
-                          </span>
-                        </div>
-                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                            Scratch Ad Views
-                          </span>
-                          <span className="text-2xl font-black text-indigo-400">
-                            {(dailyBonusStats?.today?.totalAdsBeforeScratch || 0) + (dailyBonusStats?.today?.totalAdsBeforeClaim || 0)}
-                          </span>
-                        </div>
-                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                            Rewards Won
-                          </span>
-                          <span className="text-2xl font-black text-emerald-400">
-                            ₹
-                            {Number(
-                              dailyBonusStats?.today?.totalRewards || 0,
-                            ).toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                            Scratch Spent
-                          </span>
-                          <span className="text-2xl font-black text-amber-500">
-                            ₹
-                            {Number(
-                              dailyBonusStats?.today?.scratchSpentToday || 0,
-                            ).toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                            Avg Reward
-                          </span>
-                          <span className="text-2xl font-black text-indigo-400">
-                            ₹
-                            {Number(
-                              dailyBonusStats?.today?.averageReward || 0,
-                            ).toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                            Budget Remaining
-                          </span>
-                          <span className="text-2xl font-black text-emerald-500">
-                            ₹{Math.max(0, (bonusSettings?.dailyBudget || 10000) - (dailyBonusStats?.today?.totalRewards || 0)).toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-                      {/* Top Winners */}
-                      <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800">
-                        <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">
-                          🏆 Top Winners (All Time)
-                        </h4>
-                        <div className="space-y-3">
-                          {(dailyBonusStats?.topWinners || []).map(
-                            (winner: any, i: number) => (
-                              <div
-                                key={i}
-                                className="flex items-center justify-between p-3 bg-slate-900/50 rounded-xl border border-slate-800/50"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div
-                                    className={`w-6 h-6 flex items-center justify-center rounded-full text-[10px] font-bold ${i === 0 ? "bg-yellow-500/20 text-yellow-500" : "bg-slate-800 text-slate-500"}`}
-                                  >
-                                    {i + 1}
-                                  </div>
-                                  <span className="text-xs font-bold text-white truncate max-w-[120px]">
-                                    {winner.userName || "Anonymous"}
-                                  </span>
-                                </div>
-                                <span className="text-xs font-black text-emerald-400">
-                                  ₹{Number(winner.amount).toFixed(2)}
-                                </span>
-                              </div>
-                            ),
-                          )}
-                          {(dailyBonusStats?.topWinners || []).length === 0 && (
-                            <p className="text-[10px] text-slate-600 italic">
-                              No big wins yet
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Module Stats */}
-                      <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800">
-                        <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">
-                          📦 Module Performance (Today)
-                        </h4>
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-slate-400 flex items-center gap-2">
-                              🎡 Wheel Spins
-                            </span>
-                            <span className="text-xs font-black text-white">
-                              {dailyBonusStats?.today?.wheelSpins || 0}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-slate-400 flex items-center gap-2">
-                              📦 Box Opens
-                            </span>
-                            <span className="text-xs font-black text-white">
-                              {dailyBonusStats?.today?.boxOpens || 0}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-slate-400 flex items-center gap-2">
-                              🎫 Scratch Cards
-                            </span>
-                            <span className="text-xs font-black text-white">
-                              {dailyBonusStats?.today?.scratchClaims || 0}
-                            </span>
-                          </div>
-                          <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
-                            <span className="text-xs font-medium text-amber-500 flex items-center gap-2">
-                              💀 Better Luck Hits
-                            </span>
-                            <span className="text-xs font-black text-amber-500">
-                              {dailyBonusStats?.today?.betterLuckCount || 0}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {dailyBonusStatsLoading && (
-                    <div className="text-center py-4">
-                      <div className="inline-block w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                      <p className="text-[10px] text-slate-500 mt-2 font-bold uppercase">
-                        Refreshing Live Data...
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ) : bonusView === "history" ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                  <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex flex-wrap gap-4 items-center justify-between">
-                    <h3 className="font-bold text-white">📜 Claim History</h3>
-                    <input
-                      type="text"
-                      placeholder="Search User ID or Name..."
-                      value={bonusSearch}
-                      onChange={(e) => setBonusSearch(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
-                        <tr>
-                          <th className="px-4 py-3">📅 Date & Time</th>
-                          <th className="px-4 py-3">🎮 Type</th>
-                          <th className="px-4 py-3">👤 User</th>
-                          <th className="px-4 py-3">🆔 User ID</th>
-                          <th className="px-4 py-3">💰 Reward Won</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bonusHistoryLoading ? (
-                          <tr>
-                            <td colSpan={5} className="text-center py-8">
-                              <div className="inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                            </td>
-                          </tr>
-                        ) : bonusHistory.filter(
-                            (h) =>
-                              !bonusSearch ||
-                              h.userId?.includes(bonusSearch) ||
-                              h.userName
-                                ?.toLowerCase()
-                                .includes(bonusSearch.toLowerCase()),
-                          ).length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={5}
-                              className="text-center py-8 text-slate-500"
-                            >
-                              No history found
-                            </td>
-                          </tr>
-                        ) : (
-                          bonusHistory
-                            .filter(
-                              (h) =>
-                                !bonusSearch ||
-                                h.userId?.includes(bonusSearch) ||
-                                h.userName
-                                  ?.toLowerCase()
-                                  .includes(bonusSearch.toLowerCase()),
-                            )
-                            .map((h: any) => (
-                              <tr
-                                key={h.id}
-                                className="border-b border-slate-800/50"
-                              >
-                                <td className="px-4 py-3 text-xs text-slate-400">
-                                  {new Date(h.date).toLocaleString()}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <span
-                                    className={`px-2 py-1 rounded text-[10px] font-black uppercase ${
-                                      h.type === "wheel"
-                                        ? "bg-indigo-500/20 text-indigo-400"
-                                        : h.type === "box"
-                                          ? "bg-purple-500/20 text-purple-400"
-                                          : "bg-amber-500/20 text-amber-400"
-                                    }`}
-                                  >
-                                    {h.type || "wheel"}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 font-medium text-white">
-                                  {h.userName || "Unknown"}
-                                </td>
-                                <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                                  {h.userId}
-                                </td>
-                                <td className="px-4 py-3 font-bold text-yellow-400">
-                                  ₹{h.amount}
-                                </td>
-                              </tr>
-                            ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : null}
             </div>
           )}
           {activeTab === "👥 Users" && (
@@ -10610,9 +9433,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           {activeTab === "📢 Telegram Broadcast Center" && (
             <TelegramBroadcastCenter onOpenSettings={() => setActiveTab("📱 Telegram Settings")} />
           )}
-          {activeTab === "🛡 Fraud Investigation Center" && (
-            <FraudInvestigationCenter />
-          )}
+          {activeTab === "🛡 Fraud Investigation Center" && <FraudInvestigationCenter />}
+          {activeTab === "🛡️ AI Moderation" && <AIModeration />}
+          {activeTab === "⭐ Reputation" && <ReputationSystem />}
+          {activeTab === "📋 Audit Center" && <AuditCenter />}
+          {activeTab === "🏆 Rewards & Leaderboard" && <RewardsLeaderboard />}
+
           {activeTab === "🛡 Security Center" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
@@ -15309,6 +14135,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             </div>
           )}
 
+          {activeTab === "📺 YouTube Tasks" && (
+            <YouTubeTasksAdmin />
+          )}
+
           {activeTab === "⚙️ System Settings" && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
@@ -15331,7 +14161,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                           earningSettings: {},
                           withdrawalSettings: {},
                           referralSettings: {},
-                          bonusSettings: {},
                           notificationSettings: {},
                           websiteSettings: {},
                           maintenanceMode: "🟢 OFF",
@@ -15358,7 +14187,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       "💰 Earnings Settings",
                       "💸 Withdrawal Settings",
                       "👥 Referral Settings",
-                      "🎁 Bonus Settings",
                       "📢 Notification Settings",
                       "🌐 Website Settings",
                       "🎫 Support Settings",
@@ -16639,94 +15467,36 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                               initial={{ y: 100, opacity: 0 }}
                               animate={{ y: 0, opacity: 1 }}
                               exit={{ y: 100, opacity: 0 }}
-                              className="fixed bottom-6 left-6 right-6 md:left-1/2 md:-translate-x-1/2 md:max-w-4xl bg-slate-900/90 backdrop-blur-2xl border border-indigo-500/30 p-5 rounded-[2.5rem] flex items-center justify-between z-[100] shadow-[0_20px_50px_rgba(79,70,229,0.3)]"
+                              className="fixed bottom-6 left-6 right-6 md:left-auto md:w-auto z-50 bg-indigo-600 p-4 rounded-2xl shadow-2xl flex items-center justify-between gap-6 border border-indigo-400/30"
                             >
-                              <div className="flex items-center gap-4 pl-2">
-                                <div className="w-10 h-10 bg-indigo-500/20 rounded-full flex items-center justify-center text-indigo-400">
-                                  <AlertTriangle className="w-5 h-5 animate-pulse" />
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="text-white font-black text-sm uppercase tracking-wider">Unsaved Changes</span>
-                                  <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">You have modified withdrawal settings</span>
-                                </div>
+                              <div className="flex flex-col">
+                                <span className="text-white font-bold text-sm">Unsaved Changes Detected</span>
+                                <span className="text-indigo-100 text-[10px] opacity-80">You have modified system settings.</span>
                               </div>
-                              
-                              <div className="flex items-center gap-3">
+                              <div className="flex gap-2">
                                 <button
                                   onClick={() => setSystemSettings(originalSystemSettings)}
-                                  className="px-6 py-3 text-slate-400 font-black text-xs uppercase tracking-widest hover:text-white transition-colors"
+                                  className="px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white font-bold rounded-xl text-xs transition cursor-pointer"
                                 >
-                                  Discard
+                                  Reset
                                 </button>
                                 <button
-                                  onClick={() => saveSystemSettings()}
+                                  onClick={saveSystemSettings}
                                   disabled={systemSettingsSaving}
-                                  className="bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white font-black px-8 py-3.5 rounded-full text-xs uppercase tracking-widest shadow-xl shadow-indigo-500/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-2"
+                                  className="px-4 py-2 bg-white text-indigo-600 hover:bg-indigo-50 font-bold rounded-xl text-xs transition disabled:opacity-50 cursor-pointer"
                                 >
-                                  {systemSettingsSaving ? (
-                                    <>
-                                      <RefreshCw className="w-4 h-4 animate-spin" />
-                                      <span>Saving...</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Save className="w-4 h-4" />
-                                      <span>Save & Apply</span>
-                                    </>
-                                  )}
+                                  {systemSettingsSaving ? "Saving..." : "Save Changes"}
                                 </button>
                               </div>
                             </motion.div>
                           )}
                         </AnimatePresence>
-
-                        {/* Status Messages */}
-                        <div className="fixed bottom-24 right-8 z-[110] pointer-events-none">
-                           <AnimatePresence>
-                              {systemSettingsSuccess && (
-                                 <motion.div initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }} className="bg-emerald-500 text-white px-6 py-4 rounded-3xl font-black text-sm shadow-2xl flex items-center gap-3 border-4 border-emerald-400">
-                                    <Sparkles className="w-5 h-5" />
-                                    {systemSettingsSuccess}
-                                 </motion.div>
-                              )}
-                              {systemSettingsError && (
-                                 <motion.div initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }} className="bg-rose-500 text-white px-6 py-4 rounded-3xl font-black text-sm shadow-2xl border-4 border-rose-400">
-                                    ❌ {systemSettingsError}
-                                 </motion.div>
-                              )}
-                           </AnimatePresence>
-                        </div>
                       </div>
                     )}
 
-                    {settingsTab === "👥 Referral Settings" && (
-                      <ReferralAdminManager systemSettings={systemSettings} setSystemSettings={setSystemSettings} />
-                    )}
-
-                    {settingsTab === "🎁 Bonus Settings" && bonusSettings && (
-                      <div className="space-y-6">
-                        <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between">
-                          <div>
-                            <h4 className="text-white font-bold text-sm">🎁 Daily Bonus Configuration</h4>
-                            <p className="text-slate-400 text-xs mt-0.5">Manage Wheel, Mystery Box, and Scratch Card settings.</p>
-                          </div>
-                          <button onClick={() => saveBonusSettings(bonusSettings)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition">💾 Save All Settings</button>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Global Status</label>
-                            <div className="flex gap-4">
-                              <label className="flex items-center gap-2 text-white text-sm cursor-pointer">
-                                <input type="radio" checked={bonusSettings?.dailyBonusEnabled === true} onChange={() => setBonusSettings({...bonusSettings, dailyBonusEnabled: true})} className="w-4 h-4 text-indigo-600" /> 🟢 Enabled
-                              </label>
-                              <label className="flex items-center gap-2 text-white text-sm cursor-pointer">
-                                <input type="radio" checked={bonusSettings?.dailyBonusEnabled === false} onChange={() => setBonusSettings({...bonusSettings, dailyBonusEnabled: false})} className="w-4 h-4 text-indigo-600" /> 🔴 Disabled
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                        {settingsTab === "👥 Referral Settings" && (
+                          <ReferralAdminManager systemSettings={systemSettings} setSystemSettings={setSystemSettings} />
+                        )}
 
                     {settingsTab === "📢 Notification Settings" && (
                       <div className="space-y-4 max-w-lg">
@@ -17992,8 +16762,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               )}
             </div>
           )}
-
-          {/* Full Ad Preview Modal removed */}
         </div>
       ) : null}
     </div>

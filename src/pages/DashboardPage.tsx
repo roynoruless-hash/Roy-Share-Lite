@@ -24,7 +24,8 @@ import {
   Clock,
   CheckCircle2,
   ArrowLeft,
-  Share2
+  Share2,
+  Youtube
 } from "lucide-react";
 
 // Mock data as requested (no backend changes)
@@ -46,7 +47,6 @@ const USER_DATA = {
   ],
   recentActivity: [
     { id: 1, type: "upload", title: "Project_Assets.zip", time: "2 mins ago", detail: "Successfully uploaded" },
-    { id: 2, type: "reward", title: "Daily Bonus", time: "1 hour ago", detail: "+₹5.00 credited" },
     { id: 3, type: "download", title: "Game_Update_v2.apk", time: "3 hours ago", detail: "24 new downloads" },
     { id: 4, type: "link", title: "Smart Link Created", time: "5 hours ago", detail: "Shortened link generated" },
   ],
@@ -322,8 +322,9 @@ const DashboardPage = ({
             {!isTelegram && <ActionButton title="Upload File" icon={Upload} color="bg-blue-600" onClick={() => onNavigate?.("upload")} delay={0.1} />}
             {!isTelegram && <ActionButton title="Create Smart Link" icon={LinkIcon} color="bg-purple-600" onClick={() => onNavigate?.("my-links")} delay={0.2} />}
             {!isTelegram && <ActionButton title="Connect Drive" icon={Plus} color="bg-emerald-600" onClick={() => onNavigate?.("upload")} delay={0.3} />}
-            <ActionButton title="Withdraw" icon={Wallet} color="bg-orange-600" onClick={() => onNavigate?.("withdraw")} delay={0.4} />
-            <ActionButton title="Refer & Earn" icon={Share2} color="bg-indigo-600" onClick={() => onNavigate?.("referral")} delay={0.5} />
+            <ActionButton title="YouTube Tasks" icon={Youtube} color="bg-red-600" onClick={() => onNavigate?.("youtube-tasks")} delay={0.4} />
+            <ActionButton title="Withdraw" icon={Wallet} color="bg-orange-600" onClick={() => onNavigate?.("withdraw")} delay={0.5} />
+            <ActionButton title="Refer & Earn" icon={Share2} color="bg-indigo-600" onClick={() => onNavigate?.("referral")} delay={0.6} />
           </div>
         </div>
 

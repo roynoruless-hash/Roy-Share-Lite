@@ -247,35 +247,41 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   };
 
   const showAd = async (type: 'Reward' | 'Interstitial' | 'Task' | string): Promise<void> => {
-    const isInsideMiniApp = typeof window !== "undefined" && !!((window as any).Telegram?.WebApp?.initData || (window as any).Telegram?.WebApp?.platform);
-    
+    // 1. Detect environment and wait for Telegram
     console.log(`[Adsgram Shared] Starting Ad flow for type: ${type}`);
-    console.log("[Adsgram Shared] [Debug] Telegram.WebApp detected:", !!(window as any).Telegram?.WebApp);
+    
+    // Wait for Telegram parameters to be available
+    const tgReady = await waitForTelegramParams(7); // Increased timeout to 7s
+    const currentTg = (window as any).Telegram?.WebApp;
+    const isInsideMiniApp = !!(currentTg?.initData || currentTg?.platform);
+
+    if (!tgReady && isInsideMiniApp) {
+      console.warn("[Adsgram Shared] Failed to detect Telegram parameters after 7s wait, but platform detected. Proceeding anyway.");
+    }
 
     try {
-      // 1. Ensure Telegram is ready
-      const tgReady = await waitForTelegramParams(5);
-      if (!tgReady && isInsideMiniApp) {
-        console.warn("[Adsgram Shared] Failed to detect Telegram parameters after 5s wait.");
-      }
-
-      const currentTg = (window as any).Telegram?.WebApp;
+      // 2. Ensure Telegram is ready and expanded
       if (currentTg) {
-        console.log("[Adsgram Shared] Calling Telegram.WebApp.ready()...");
-        currentTg.ready();
+        console.log("[Adsgram Shared] Calling Telegram.WebApp.ready() and expand()...");
+        try {
+          currentTg.ready();
+          currentTg.expand();
+        } catch (e) {
+          console.error("[Adsgram Shared] Error in Telegram ready/expand:", e);
+        }
       }
 
-      // 2. Double check initData and User ID with local retries if needed
+      // 3. Double check initData and User ID with retries if missing
       let hasInitData = !!currentTg?.initData;
       let userId = currentTg?.initDataUnsafe?.user?.id || user?.telegramId || user?.id;
 
       if (!hasInitData && isInsideMiniApp) {
-        console.log("[Adsgram Shared] initData missing in Mini App environment, attempting extra retries...");
-        let retryCount = 0;
-        while (retryCount < 10 && !(window as any).Telegram?.WebApp?.initData) {
+        console.log("[Adsgram Shared] initData missing in Mini App environment, attempting retry loop (max 10s)...");
+        let attempts = 0;
+        while (attempts < 20 && !(window as any).Telegram?.WebApp?.initData) {
           await new Promise(r => setTimeout(r, 500));
-          retryCount++;
-          console.log(`[Adsgram Shared] Retry ${retryCount} for initData...`);
+          attempts++;
+          if (attempts % 2 === 0) console.log(`[Adsgram Shared] Retry ${attempts/2}s for initData...`);
         }
         hasInitData = !!(window as any).Telegram?.WebApp?.initData;
         userId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || userId;
@@ -284,10 +290,10 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       console.log("[Adsgram Shared] [Debug] initData present:", hasInitData);
       console.log("[Adsgram Shared] [Debug] Telegram User ID:", userId);
 
-      // 3. Load SDK and Config
+      // 4. Load SDK and Config
       const { loadAdsgramSDK, getAdsgramConfig } = await import("../lib/adsManager");
       
-      console.log("[Adsgram Shared] Loading Adsgram configuration...");
+      console.log("[Adsgram Shared] Loading Adsgram configuration for type:", type);
       const config = await getAdsgramConfig(type);
       console.log("[Adsgram Shared] [Debug] App ID:", config.appId || "Not Set");
       console.log("[Adsgram Shared] [Debug] Block ID:", config.blockId);
@@ -300,12 +306,11 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       console.log("[Adsgram Shared] Loading Adsgram SDK...");
       const adsgram = await loadAdsgramSDK();
       if (!adsgram) {
-        console.error("[Adsgram Shared] [Debug] Adsgram initialization result: FAILED (SDK not found)");
         throw new Error("Adsgram SDK failed to load. Check network connection.");
       }
-      console.log("[Adsgram Shared] [Debug] Adsgram initialization result: SUCCESS");
+      console.log("[Adsgram Shared] [Debug] Adsgram SDK loaded successfully.");
 
-      // 4. Show Ad
+      // 5. Initialize and Show Ad
       console.log("[Adsgram Shared] Initializing ad controller...");
       const adController = adsgram.init({ blockId: config.blockId });
       
@@ -316,7 +321,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     } catch (err: any) {
       const errStr = typeof err === "object" ? (err?.message || err?.description || JSON.stringify(err)) : String(err);
       console.error("[Adsgram Shared] [Debug] Exact failure reason:", errStr);
-      throw err; // Propagate error so page can handle it (e.g. show message to user)
+      throw err;
     }
   };
 

@@ -18,8 +18,8 @@ import Footer from "./components/Footer";
 import AdminLogin from "./components/AdminLogin";
 import MultiPageEngine from "./components/MultiPageEngine";
 
+const AdvertiserPanel = lazy(() => import("./pages/AdvertiserPanel"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
-const DailyBonusPage = lazy(() => import("./pages/DailyBonusPage"));
 const EarnRewardsPage = lazy(() => import("./pages/EarnRewardsPage"));
 const RewardTasksPage = lazy(() => import("./pages/RewardTasksPage"));
 const GPVerifyPage = lazy(() => import("./pages/GPVerifyPage"));
@@ -129,6 +129,11 @@ export default function App() {
     }
 
     // Fallback for non-Telegram (Web Browser)
+    
+    if (window.location.pathname === "/advertiser" || window.location.pathname.startsWith("/advertiser/")) {
+      return <AdvertiserPanel />;
+    }
+
     if (window.location.pathname === "/dashboard/admin") {
       return <AdminDashboard />;
     }
@@ -211,10 +216,6 @@ export default function App() {
       return <MultiPageEngine type={detectedType} id={detectedLinkId} />;
     }
 
-
-    if (window.location.pathname === "/daily-bonus") {
-      return <DailyBonusPage />;
-    }
 
     if (window.location.pathname === "/earn-rewards") {
       return <EarnRewardsPage />;

@@ -286,9 +286,6 @@ Type your invite code below and send, or click Skip to continue.`;
         } else if (msg.text === "📢 Announcements") {
             console.log("User selected Announcements");
             await processAnnouncements(botToken, chatId, user);
-        } else if (msg.text === "🎁 Daily Bonus") {
-            console.log("User selected Daily Bonus");
-            await processDailyBonus(botToken, chatId, user);
         } else if (msg.text === "🏆 Leaderboard") {
             console.log("User selected Leaderboard");
             await processLeaderboard(botToken, chatId, user);
@@ -2989,31 +2986,6 @@ Start uploading files, creating links and inviting friends to climb the leaderbo
     await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
 }
 
-async function processDailyBonus(botToken: string, chatId: number, user: any) {
-    const db = getDb();
-    const userDoc = await getDoc(doc(db, "users", String(user.id)));
-    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
-
-    const appUrl = getAppUrl();
-    const webAppUrl = `${appUrl}/daily-bonus?userId=${user.id}`;
-
-    const maxRewardStr = formatCurrency(5, currency);
-    const message = `🎁 *RoyShare Daily Bonus*
-
-Spin the lucky wheel daily to earn free rewards up to ${maxRewardStr}!
-
-🎡 *3 Free Spins every day!*
-
-Click the button below to open the Daily Bonus wheel and start spinning!`;
-
-    const inlineKeyboard = {
-        inline_keyboard: [
-            [{ text: "🎁 Play Daily Bonus", web_app: { url: webAppUrl } }],
-            [{ text: "🌐 Open in Browser", url: webAppUrl }]
-        ]
-    };
-    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
-}
 
 async function processEarnRewards(botToken: string, chatId: number, user: any) {
     const db = getDb();
