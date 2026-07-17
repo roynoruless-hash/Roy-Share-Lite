@@ -17523,12 +17523,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                 Reward Callback URL (Auto-Generated)
                               </span>
                               <code className="text-xs font-mono text-slate-300 block select-all break-all bg-slate-950 p-2.5 rounded border border-slate-850">
-                                {`${window.location.origin}/api/adsgram/reward?userid=[userid]`}
+                                https://royshare.online/api/adsgram/reward?userid=[userid]
                               </code>
                             </div>
                             <button
                               onClick={() => {
-                                const url = `${window.location.origin}/api/adsgram/reward?userid=[userid]`;
+                                const url = "https://royshare.online/api/adsgram/reward?userid=[userid]";
                                 navigator.clipboard.writeText(url);
                                 alert("Reward Callback URL copied to clipboard!");
                               }}
