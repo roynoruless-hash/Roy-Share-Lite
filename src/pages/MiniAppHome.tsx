@@ -511,16 +511,30 @@ export const MiniAppHome: React.FC = () => {
   // Deep Link Handling
   useEffect(() => {
     if (activeUser?.membershipVerified && startParam && !hasCheckedDeepLink) {
-      if (startParam.startsWith("join_")) {
-        const eventId = startParam.replace("join_", "");
+      if (startParam.startsWith("luckyspin_join_")) {
+        const eventId = startParam.replace("luckyspin_join_", "");
         console.log(`[MiniAppHome] Deep link detected for lucky spin join: ${eventId}`);
+        setHasCheckedDeepLink(true);
+        setLuckySpinInitialEventId(eventId);
+        setLuckySpinInitialMode("join");
+        setCurrentView("lucky-spin");
+      } else if (startParam.startsWith("luckyspin_live_")) {
+        const eventId = startParam.replace("luckyspin_live_", "");
+        console.log(`[MiniAppHome] Deep link detected for lucky spin live: ${eventId}`);
+        setHasCheckedDeepLink(true);
+        setLuckySpinInitialEventId(eventId);
+        setLuckySpinInitialMode("live");
+        setCurrentView("lucky-spin");
+      } else if (startParam.startsWith("join_")) {
+        const eventId = startParam.replace("join_", "");
+        console.log(`[MiniAppHome] Deep link detected for lucky spin join (legacy): ${eventId}`);
         setHasCheckedDeepLink(true);
         setLuckySpinInitialEventId(eventId);
         setLuckySpinInitialMode("join");
         setCurrentView("lucky-spin");
       } else if (startParam.startsWith("live_")) {
         const eventId = startParam.replace("live_", "");
-        console.log(`[MiniAppHome] Deep link detected for lucky spin live: ${eventId}`);
+        console.log(`[MiniAppHome] Deep link detected for lucky spin live (legacy): ${eventId}`);
         setHasCheckedDeepLink(true);
         setLuckySpinInitialEventId(eventId);
         setLuckySpinInitialMode("live");

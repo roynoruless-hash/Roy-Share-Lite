@@ -1035,8 +1035,8 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
                   </div>
                   <button
                     onClick={() => {
-                      const botUser = tgSettings?.botUsername || "RoyShareBot";
-                      const liveUrl = `https://t.me/${botUser}/app?startapp=live_${selectedEvent.id}`;
+                      const botUser = (tgSettings?.botUsername || "Roysharearn_bot").replace(/^@/, '');
+                      const liveUrl = `https://t.me/${botUser}?startapp=luckyspin_live_${selectedEvent.id}`;
                       const tgApp = (window as any).Telegram?.WebApp;
                       if (tgApp?.openTelegramLink) {
                         tgApp.openTelegramLink(liveUrl);
