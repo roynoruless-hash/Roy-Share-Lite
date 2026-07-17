@@ -4,7 +4,7 @@ import { authenticatedFetch } from "../lib/api";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { db } from "../lib/firebase";
-import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, where, deleteDoc, writeBatch, orderBy } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, where, deleteDoc, writeBatch, orderBy, onSnapshot } from "firebase/firestore";
 import { StatCard, HealthItem } from "../components/AdminComponents";
 import { EconomyAdminView } from "../components/EconomyAdminView";
 import LuckyDrawWinnerManager from "../components/LuckyDrawWinnerManager";
@@ -1437,6 +1437,21 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   });
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupTab, setBackupTab] = useState("📦 Create Backup");
+  const [adsgramDiagnostics, setAdsgramDiagnostics] = useState<any>(null);
+
+  useEffect(() => {
+    console.log("[AdminDashboard] Subscribing to AdsGram real-time diagnostics...");
+    const unsub = onSnapshot(doc(db, "settings", "adsgram_diagnostics"), (snapshot) => {
+      if (snapshot.exists()) {
+        setAdsgramDiagnostics(snapshot.data());
+      } else {
+        setAdsgramDiagnostics(null);
+      }
+    }, (error) => {
+      console.error("[AdminDashboard] Error subscribing to AdsGram diagnostics:", error);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -15714,6 +15729,126 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                   {adsgramConfigs[activeAdTab]?.lastTestResult || "No historical tests performed"}
                                 </span>
                               </div>
+                            </div>
+                          </div>
+
+                          {/* Real-time Verification & Diagnostics Cockpit */}
+                          <div className="border-t border-slate-900 pt-6 space-y-4">
+                            <div className="flex justify-between items-center">
+                              <h5 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse shrink-0"></span>
+                                🛡️ Real-Time AdsGram Verification Cockpit & Live Diagnostics
+                              </h5>
+                              {adsgramDiagnostics && (
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await setDoc(doc(db, "settings", "adsgram_diagnostics"), {});
+                                      alert("Diagnostics cleared!");
+                                    } catch (e) {
+                                      console.error(e);
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-[10px] font-bold text-slate-400 hover:text-white transition-all cursor-pointer"
+                                >
+                                  Clear Logs
+                                </button>
+                              )}
+                            </div>
+                            <p className="text-slate-400 text-xs">
+                              Live step-by-step trace of the latest user ad presentation session. Keeps administrators informed about active SDK integrations, timeouts, and validation errors.
+                            </p>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">Telegram WebApp</span>
+                                <span className={`text-xs font-bold ${
+                                  adsgramDiagnostics?.telegramWebAppDetected === "YES" ? "text-emerald-400" : adsgramDiagnostics?.telegramWebAppDetected === "NO" ? "text-rose-400" : "text-slate-400"
+                                }`}>
+                                  {adsgramDiagnostics?.telegramWebAppDetected || "No session logged"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">SDK Initialized</span>
+                                <span className={`text-xs font-bold ${
+                                  adsgramDiagnostics?.sdkInitialized === "YES" ? "text-emerald-400" : adsgramDiagnostics?.sdkInitialized === "FAILED" ? "text-rose-400" : "text-slate-400"
+                                }`}>
+                                  {adsgramDiagnostics?.sdkInitialized || "No session logged"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">Active App ID</span>
+                                <span className="text-xs font-mono font-semibold text-slate-300">
+                                  {adsgramDiagnostics?.appId || "None"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">Active Block ID</span>
+                                <span className="text-xs font-mono font-semibold text-slate-300">
+                                  {adsgramDiagnostics?.blockId || "None"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">Ad Request Started</span>
+                                <span className={`text-xs font-bold ${
+                                  adsgramDiagnostics?.adRequestStarted === "YES" ? "text-indigo-400" : "text-slate-400"
+                                }`}>
+                                  {adsgramDiagnostics?.adRequestStarted || "No"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">Ad Loaded</span>
+                                <span className={`text-xs font-bold ${
+                                  adsgramDiagnostics?.adLoaded === "YES" ? "text-emerald-400" : "text-slate-400"
+                                }`}>
+                                  {adsgramDiagnostics?.adLoaded || "No"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">Ad Completed</span>
+                                <span className={`text-xs font-bold ${
+                                  adsgramDiagnostics?.adCompleted === "YES" ? "text-emerald-400" : "text-slate-400"
+                                }`}>
+                                  {adsgramDiagnostics?.adCompleted || "No"}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">Ad Playback Failed</span>
+                                <span className={`text-xs font-bold ${
+                                  adsgramDiagnostics?.adFailed === "YES" ? "text-rose-400 animate-pulse" : "text-slate-400"
+                                }`}>
+                                  {adsgramDiagnostics?.adFailed || "No"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {adsgramDiagnostics?.failureReason && (
+                              <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs p-4 rounded-xl flex items-center gap-3">
+                                <AlertTriangle className="w-5 h-5 flex-shrink-0 text-rose-400" />
+                                <span className="font-mono"><b>Failure Reason:</b> {adsgramDiagnostics.failureReason}</span>
+                              </div>
+                            )}
+
+                            <div className="bg-slate-950 rounded-xl border border-slate-800/60 p-4">
+                              <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-2">Step-By-Step Live Trace Logs</span>
+                              {adsgramDiagnostics?.logs && adsgramDiagnostics.logs.length > 0 ? (
+                                <div className="space-y-1.5 max-h-48 overflow-y-auto font-mono text-[10px] text-slate-300">
+                                  {adsgramDiagnostics.logs.map((log: string, idx: number) => (
+                                    <div key={idx} className="border-b border-slate-900/40 pb-1 flex justify-between gap-4">
+                                      <span className="text-slate-400">{log}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-slate-500 italic block">No active live traces running. Trigger an ad in the Telegram Mini App to observe.</span>
+                              )}
                             </div>
                           </div>
                         </div>

@@ -1676,8 +1676,17 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       if (eventData.spinState.status !== "waiting" && eventData.spinState.status !== "winner_selected") {
         return res.status(400).json({ success: false, error: "Draw is currently in progress." });
       }
-      if (Number(eventData.participantsCount || 0) >= Number(eventData.maxParticipants || 50)) {
-        return res.status(400).json({ success: false, error: "This event is full!" });
+
+      // Read current actual participants directly from the database to avoid out-of-sync fields
+      const partsQuery = query(collection(db, "lucky_spin_participants"), where("eventId", "==", eventId));
+      const partsSnap = await getDocs(partsQuery);
+      const currentParticipantsCount = partsSnap.size;
+
+      // Read max participants configured dynamically from database document
+      const maxParticipants = Number(eventData.maxParticipants || 50);
+
+      if (currentParticipantsCount >= maxParticipants) {
+        return res.status(400).json({ success: false, error: "This event is full." });
       }
       
       const participantId = `${eventId}_${telegramId}`;
@@ -1697,11 +1706,11 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         joinTime: new Date().toISOString()
       });
       
-      // Increment participants count
-      const updatedCount = (eventData.participantsCount || 0) + 1;
+      // Increment participants count and remaining slots using database-authoritative numbers
+      const updatedCount = currentParticipantsCount + 1;
       await updateDoc(eventRef, {
         participantsCount: updatedCount,
-        remainingSlots: Math.max(0, (eventData.maxParticipants || 50) - updatedCount)
+        remainingSlots: Math.max(0, maxParticipants - updatedCount)
       });
       
       // Append Live Activity

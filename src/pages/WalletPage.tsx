@@ -269,21 +269,24 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
       await showAd(selectedAdType);
     } catch (adError: any) {
       console.error("[Withdrawal Ad] Ad presentation failed or skipped:", adError);
-      const errStr = typeof adError === "object" ? (adError?.message || adError?.description || JSON.stringify(adError)) : String(adError);
+      const errStr = adError?.message || String(adError);
       
       if (errStr === "NOT_IN_TELEGRAM") {
         setError("Please open this app inside Telegram to view ads and submit your withdrawal.");
         setAdLoading(false);
         return;
-      }
-
-      // If we are in real Telegram app, require complete view
-      if (isInsideTelegram) {
-        setError(`Security verification failed: Please watch the full sponsored ad to verify and submit your withdrawal. (Detail: ${errStr || "ad closed"})`);
+      } else if (errStr === "TIMEOUT") {
+        setError("Verification ad failed to load within 10 seconds. Please check your connection and try again.");
+        setAdLoading(false);
+        return;
+      } else if (errStr === "AD_SKIPPED") {
+        setError("Security verification failed: Please watch the full sponsored ad to verify and submit your withdrawal.");
         setAdLoading(false);
         return;
       } else {
-        console.warn("[Withdrawal Ad] Outside Telegram environment, bypassing ad verification for development.");
+        setError(`Security verification failed: Please watch the full sponsored ad to verify and submit your withdrawal. (Detail: ${errStr || "ad closed"})`);
+        setAdLoading(false);
+        return;
       }
     } finally {
       setAdLoading(false);
@@ -652,9 +655,23 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                   )}
 
                   {error && (
-                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-4 rounded-xl flex items-center gap-3">
-                      <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                      <span>{error}</span>
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-4 rounded-xl flex flex-col gap-3">
+                      <div className="flex items-center gap-3">
+                        <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                        <span>{error}</span>
+                      </div>
+                      {(error.includes("Verification ad") || error.includes("Security verification") || error.includes("ad closed")) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError("");
+                            handleWithdrawSubmit({ preventDefault: () => {} } as any);
+                          }}
+                          className="self-start px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-red-600/15"
+                        >
+                          🔄 Retry Verification Ad
+                        </button>
+                      )}
                     </div>
                   )}
 

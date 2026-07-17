@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User, TelegramAuthResponse } from "../types";
 import { API_BASE } from "../config/api";
 import { db } from "../lib/firebase";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 interface TelegramAuthContextType {
   user: User | null;
@@ -247,85 +247,217 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   };
 
   const showAd = async (type: 'Reward' | 'Interstitial' | 'Task' | string): Promise<void> => {
-    // 1. Detect environment and wait for Telegram
-    console.log(`[Adsgram Shared] Starting Ad flow for type: ${type}`);
+    const diagDocRef = doc(db, "settings", "adsgram_diagnostics");
+    const logs: string[] = [];
+    const timestamp = new Date().toISOString();
     
-    // Wait for Telegram parameters to be available
-    const tgReady = await waitForTelegramParams(7); // Increased timeout to 7s
-    const currentTg = (window as any).Telegram?.WebApp;
-    const isInsideMiniApp = !!(currentTg?.initData || currentTg?.platform);
+    // Helper to log steps
+    const logStep = async (stepName: string, updates: Record<string, any> = {}) => {
+      const stepTime = new Date().toISOString();
+      const logMsg = `[${stepTime}] ${stepName}`;
+      logs.push(logMsg);
+      console.log(`[Adsgram Diagnostics] ${stepName}`, updates);
+      
+      try {
+        await setDoc(diagDocRef, {
+          userId: user?.id || "Unknown",
+          telegramId: user?.telegramId || "Unknown",
+          timestamp: stepTime,
+          logs,
+          ...updates
+        }, { merge: true });
+      } catch (err) {
+        console.error("[Adsgram Diagnostics] Failed to write diagnostics to Firestore:", err);
+      }
+    };
 
-    if (!tgReady && isInsideMiniApp) {
-      console.warn("[Adsgram Shared] Failed to detect Telegram parameters after 7s wait, but platform detected. Proceeding anyway.");
-    }
+    console.log(`[Adsgram Shared] Starting Ad flow for type: ${type}`);
 
     try {
-      // 2. Ensure Telegram is ready and expanded
+      // Step 1: Detect environment
+      const currentTg = (window as any).Telegram?.WebApp;
+      const isInsideMiniApp = !!(currentTg?.initData || currentTg?.platform);
+      
+      await logStep("Telegram WebApp detected check", {
+        telegramWebAppDetected: isInsideMiniApp ? "YES" : "NO",
+        sdkInitialized: "Pending",
+        appId: "",
+        blockId: "",
+        adRequestStarted: "No",
+        adLoaded: "No",
+        adCompleted: "No",
+        adFailed: "No",
+        failureReason: ""
+      });
+
+      if (!isInsideMiniApp) {
+        const errorMsg = "Telegram WebApp is not available. Please open this app inside Telegram Mini App.";
+        await logStep("Ad failed: Not inside Telegram Mini App", {
+          adFailed: "YES",
+          failureReason: errorMsg
+        });
+        throw new Error("NOT_IN_TELEGRAM");
+      }
+
+      // Step 2: Ensure Telegram is ready and expanded
       if (currentTg) {
-        console.log("[Adsgram Shared] Calling Telegram.WebApp.ready() and expand()...");
         try {
           currentTg.ready();
           currentTg.expand();
-        } catch (e) {
+        } catch (e: any) {
           console.error("[Adsgram Shared] Error in Telegram ready/expand:", e);
         }
       }
 
-      // 3. Double check initData and User ID with retries if missing
+      // Step 3: Get user details and check initData
       let hasInitData = !!currentTg?.initData;
       let userId = currentTg?.initDataUnsafe?.user?.id || user?.telegramId || user?.id;
 
-      if (!hasInitData && isInsideMiniApp) {
-        console.log("[Adsgram Shared] initData missing in Mini App environment, attempting retry loop (max 10s)...");
+      if (!hasInitData) {
+        console.log("[Adsgram Shared] initData missing, attempting retry loop...");
         let attempts = 0;
         while (attempts < 20 && !(window as any).Telegram?.WebApp?.initData) {
           await new Promise(r => setTimeout(r, 500));
           attempts++;
-          if (attempts % 2 === 0) console.log(`[Adsgram Shared] Retry ${attempts/2}s for initData...`);
         }
         hasInitData = !!(window as any).Telegram?.WebApp?.initData;
         userId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || userId;
       }
 
       if (!hasInitData) {
-        console.warn("[Adsgram Shared] Cannot load Adsgram: Not inside Telegram environment or missing initData.");
+        const errorMsg = "Cannot load Adsgram: Not inside Telegram environment or missing initData.";
+        await logStep("Ad failed: Missing initData", {
+          adFailed: "YES",
+          failureReason: errorMsg
+        });
         throw new Error("NOT_IN_TELEGRAM");
       }
 
-      console.log("[Adsgram Shared] [Debug] initData present:", hasInitData);
-      console.log("[Adsgram Shared] [Debug] Telegram User ID:", userId);
-
-      // 4. Load SDK and Config
+      // Step 4: Load Config and verify App ID & Block ID
       const { loadAdsgramSDK, getAdsgramConfig } = await import("../lib/adsManager");
-      
-      console.log("[Adsgram Shared] Loading Adsgram configuration for type:", type);
       const config = await getAdsgramConfig(type);
-      console.log("[Adsgram Shared] [Debug] App ID:", config.appId || "Not Set");
-      console.log("[Adsgram Shared] [Debug] Block ID:", config.blockId);
-
-      if (!config.blockId) {
-        console.warn("[Adsgram Shared] No blockId found for ad type:", type, "Falling back to default 3856 (Test Block)");
-        config.blockId = "3856";
-      }
-
-      console.log("[Adsgram Shared] Loading Adsgram SDK...");
-      const adsgram = await loadAdsgramSDK();
-      if (!adsgram) {
-        throw new Error("Adsgram SDK failed to load. Check network connection.");
-      }
-      console.log("[Adsgram Shared] [Debug] Adsgram SDK loaded successfully.");
-
-      // 5. Initialize and Show Ad
-      console.log("[Adsgram Shared] Initializing ad controller...");
-      const adController = adsgram.init({ blockId: config.blockId });
       
-      console.log("[Adsgram Shared] Showing ad...");
-      await adController.show();
-      console.log("[Adsgram Shared] Ad completed successfully.");
+      if (!config || !config.blockId || !config.appId) {
+        const errorMsg = `AdsGram configuration missing or incomplete for type: ${type} (App ID: ${config?.appId || "None"}, Block ID: ${config?.blockId || "None"})`;
+        await logStep("Ad failed: Missing configuration", {
+          appId: config?.appId || "None",
+          blockId: config?.blockId || "None",
+          adFailed: "YES",
+          failureReason: errorMsg
+        });
+        throw new Error(errorMsg);
+      }
+
+      await logStep("App ID and Block ID loaded successfully", {
+        appId: config.appId,
+        blockId: config.blockId
+      });
+
+      // Step 5: Load Adsgram SDK script
+      let adsgram;
+      try {
+        adsgram = await loadAdsgramSDK();
+        await logStep("SDK initialized", {
+          sdkInitialized: "YES"
+        });
+      } catch (sdkError: any) {
+        const errorMsg = sdkError?.message || String(sdkError);
+        await logStep("Ad failed: SDK load error", {
+          sdkInitialized: "FAILED",
+          adFailed: "YES",
+          failureReason: errorMsg
+        });
+        throw new Error(`Adsgram SDK failed to load: ${errorMsg}`);
+      }
+
+      // Step 6: Initialize ad controller and request ad
+      const adController = adsgram.init({ blockId: config.blockId });
+      if (!adController) {
+        const errorMsg = "Failed to initialize ad controller (init returned null/undefined).";
+        await logStep("Ad failed: Controller init failed", {
+          adFailed: "YES",
+          failureReason: errorMsg
+        });
+        throw new Error(errorMsg);
+      }
+
+      await logStep("Ad request started", {
+        adRequestStarted: "YES"
+      });
+
+      // Step 7: Show ad with 10-second loading timeout
+      let loadTimeout: any;
+      let isAdStarted = false;
+
+      const adShowPromise = new Promise<void>((resolve, reject) => {
+        // Start 10-second timeout
+        loadTimeout = setTimeout(async () => {
+          if (!isAdStarted) {
+            const errorMsg = "Verification ad failed to load within 10 seconds. Please check your connection and try again.";
+            await logStep("Ad failed: Loading timeout", {
+              adFailed: "YES",
+              failureReason: errorMsg
+            });
+            reject(new Error("TIMEOUT"));
+          }
+        }, 10000);
+
+        // Listen for ad start to clear timeout
+        if (typeof adController.addEventListener === 'function') {
+          adController.addEventListener('Start', async () => {
+            isAdStarted = true;
+            clearTimeout(loadTimeout);
+            await logStep("Ad loaded", {
+              adLoaded: "YES"
+            });
+          });
+
+          adController.addEventListener('error', (err: any) => {
+            isAdStarted = true; // prevent timeout trigger
+            clearTimeout(loadTimeout);
+            reject(err);
+          });
+
+          adController.addEventListener('close', () => {
+            isAdStarted = true; // prevent timeout trigger
+            clearTimeout(loadTimeout);
+          });
+        }
+
+        // Call show() which returns a promise
+        adController.show()
+          .then(async (result: any) => {
+            clearTimeout(loadTimeout);
+            if (result && result.done) {
+              await logStep("Ad completed", {
+                adCompleted: "YES"
+              });
+              resolve();
+            } else {
+              const errorMsg = result?.description || "User closed the ad before completion.";
+              await logStep("Ad failed: Skipped/Closed", {
+                adFailed: "YES",
+                failureReason: errorMsg
+              });
+              reject(new Error("AD_SKIPPED"));
+            }
+          })
+          .catch(async (err: any) => {
+            clearTimeout(loadTimeout);
+            const errStr = typeof err === "object" ? (err?.message || err?.description || JSON.stringify(err)) : String(err);
+            await logStep("Ad failed: Playback error", {
+              adFailed: "YES",
+              failureReason: errStr
+            });
+            reject(new Error(errStr));
+          });
+      });
+
+      await adShowPromise;
 
     } catch (err: any) {
-      const errStr = typeof err === "object" ? (err?.message || err?.description || JSON.stringify(err)) : String(err);
-      console.error("[Adsgram Shared] [Debug] Exact failure reason:", errStr);
+      const errStr = err?.message || String(err);
+      console.error("[Adsgram Diagnostics] Exact failure reason:", errStr);
       throw err;
     }
   };

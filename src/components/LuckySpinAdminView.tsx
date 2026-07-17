@@ -88,6 +88,7 @@ export const LuckySpinAdminView: React.FC = () => {
   const [lastWriteTime, setLastWriteTime] = useState<Date | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [dbMaxParticipants, setDbMaxParticipants] = useState<number | null>(null);
 
   // Fetch all events
   useEffect(() => {
@@ -178,6 +179,24 @@ export const LuckySpinAdminView: React.FC = () => {
       unsubViewers();
       unsubWinners();
     };
+  }, [selectedEvent?.id]);
+
+  // Real-time listener specifically for the selected event doc to capture raw db maxParticipants
+  useEffect(() => {
+    if (!selectedEvent?.id) {
+      setDbMaxParticipants(null);
+      return;
+    }
+    const eventRef = doc(db, "lucky_spin_events", selectedEvent.id);
+    const unsub = onSnapshot(eventRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setDbMaxParticipants(Number(data.maxParticipants || 0));
+      }
+    }, (err) => {
+      console.error("Direct event snapshot error:", err);
+    });
+    return () => unsub();
   }, [selectedEvent?.id]);
 
   // Handle Create Event
@@ -741,9 +760,43 @@ export const LuckySpinAdminView: React.FC = () => {
               </h3>
               
               <div className="grid grid-cols-2 gap-3 text-xs">
+                {/* Database Event ID */}
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40 col-span-2">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Database Event ID</span>
+                  <span className="font-mono text-white select-all break-all">{selectedEvent.id}</span>
+                </div>
+
+                {/* Configured Maximum Participants */}
                 <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Participants (DB)</span>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Configured Max Participants</span>
+                  <span className="font-black text-amber-400">{selectedEvent.maxParticipants}</span>
+                </div>
+
+                {/* Database Max Participants Value */}
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">DB Max Participants Value</span>
+                  <span className="font-black text-blue-400">
+                    {dbMaxParticipants !== null ? dbMaxParticipants : "Loading..."}
+                  </span>
+                </div>
+
+                {/* Current Participants */}
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Current Participants</span>
                   <span className="font-black text-white">{participants.length}</span>
+                </div>
+
+                {/* Remaining Slots */}
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Remaining Slots</span>
+                  <span className="font-black text-emerald-400">
+                    {Math.max(0, (dbMaxParticipants !== null ? dbMaxParticipants : selectedEvent.maxParticipants) - participants.length)}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Participants (DB Count field)</span>
+                  <span className="font-black text-white">{selectedEvent.participantsCount || 0}</span>
                 </div>
                 
                 <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800/40">
@@ -772,6 +825,14 @@ export const LuckySpinAdminView: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              {dbMaxParticipants !== null && selectedEvent.maxParticipants !== dbMaxParticipants && (
+                <div className="p-3 bg-red-950/40 border border-red-500/50 rounded-2xl text-[11px] text-red-400 font-bold space-y-1">
+                  <p>⚠️ ERROR: Discrepancy detected between Configured and DB Value!</p>
+                  <p>Configured Max: {selectedEvent.maxParticipants}</p>
+                  <p>DB Max Value: {dbMaxParticipants}</p>
+                </div>
+              )}
 
               {syncError && (
                 <div className="p-3 bg-red-950/20 border border-red-900/40 rounded-2xl text-[10px] text-red-400 font-medium">
