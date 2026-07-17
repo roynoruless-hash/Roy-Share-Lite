@@ -17,6 +17,34 @@ import {
   runTransaction
 } from "firebase/firestore";
 
+// Helper to split prize amount among total winners randomly such that sum is exactly prizeAmount and all are positive integers
+function splitPrizeBudget(totalAmount: number, numWinners: number): number[] {
+  if (numWinners <= 0) return [];
+  if (numWinners === 1) return [totalAmount];
+  
+  const remaining = totalAmount - numWinners;
+  if (remaining < 0) {
+    const allocations = Array(numWinners).fill(1);
+    return allocations;
+  }
+  
+  const cuts: number[] = [];
+  for (let i = 0; i < numWinners - 1; i++) {
+    cuts.push(Math.floor(Math.random() * (remaining + 1)));
+  }
+  cuts.sort((a, b) => a - b);
+  
+  const allocations: number[] = [];
+  let prev = 0;
+  for (let i = 0; i < numWinners - 1; i++) {
+    allocations.push(1 + (cuts[i] - prev));
+    prev = cuts[i];
+  }
+  allocations.push(1 + (remaining - prev));
+  
+  return allocations;
+}
+
 const router = express.Router();
 
 // Helper to get Telegram Settings
@@ -448,6 +476,10 @@ router.post("/save-giveaway", async (req: any, res: any) => {
       return res.status(400).json({ success: false, error: "Missing required giveaway configurations" });
     }
 
+    if (Number(prizeAmount) < Number(totalWinners)) {
+      return res.status(400).json({ success: false, error: `Prize Amount (₹${prizeAmount}) must be at least equal to Total Winners (${totalWinners}) so every winner receives a positive amount of at least ₹1.` });
+    }
+
     const giveawayId = id || `campaign_${Date.now()}`;
     const isNew = !id;
 
@@ -460,6 +492,8 @@ router.post("/save-giveaway", async (req: any, res: any) => {
     else if (numberRange === "1-500") maxNum = 500;
     else if (numberRange === "1-600") maxNum = 600;
     else if (numberRange === "Manual") maxNum = Number(maxNumber || 100);
+
+    let prizeAllocations = null;
 
     const campaignData: any = {
       title,
@@ -488,8 +522,18 @@ router.post("/save-giveaway", async (req: any, res: any) => {
         campaignData.winnerName = exData.winnerName || null;
         campaignData.winnerUsername = exData.winnerUsername || null;
         campaignData.winnerStatus = exData.winnerStatus || null;
+        campaignData.drawnWinners = exData.drawnWinners || null;
+        
+        if (exData.prizeAmount === Number(prizeAmount) && exData.totalWinners === Number(totalWinners)) {
+          prizeAllocations = exData.prizeAllocations || null;
+        }
       }
     }
+
+    if (!prizeAllocations) {
+      prizeAllocations = splitPrizeBudget(Number(prizeAmount), Number(totalWinners));
+    }
+    campaignData.prizeAllocations = prizeAllocations;
 
     await setDoc(doc(db, "lucky_number_campaigns", giveawayId), campaignData, { merge: true });
 
@@ -518,9 +562,9 @@ router.post("/save-giveaway", async (req: any, res: any) => {
 // Draw Winner
 router.post("/draw-winner", async (req: any, res: any) => {
   try {
-    const { giveawayId } = req.body;
-    if (!giveawayId) {
-      return res.status(400).json({ success: false, error: "Missing giveawayId" });
+    const { giveawayId, winnerIndex } = req.body;
+    if (!giveawayId || winnerIndex === undefined) {
+      return res.status(400).json({ success: false, error: "Missing giveawayId or winnerIndex" });
     }
 
     const campaignDocRef = doc(db, "lucky_number_campaigns", giveawayId);
@@ -530,6 +574,26 @@ router.post("/draw-winner", async (req: any, res: any) => {
     }
 
     const campaign = campaignSnap.data();
+    const idx = Number(winnerIndex);
+    if (idx < 0 || idx >= campaign.totalWinners) {
+      return res.status(400).json({ success: false, error: "Invalid winnerIndex" });
+    }
+
+    let prizeAllocations = campaign.prizeAllocations;
+    if (!prizeAllocations || prizeAllocations.length !== campaign.totalWinners) {
+      prizeAllocations = splitPrizeBudget(Number(campaign.prizeAmount), Number(campaign.totalWinners));
+      await updateDoc(campaignDocRef, { prizeAllocations });
+    }
+
+    const allocatedPrize = prizeAllocations[idx];
+
+    const drawnWinnersList = campaign.drawnWinners || [];
+    const excludedNumbers = drawnWinnersList
+      .filter((w: any) => w && w.status !== "Rejected")
+      .map((w: any) => Number(w.selectedNumber));
+    const excludedTgIds = drawnWinnersList
+      .filter((w: any) => w && w.status !== "Rejected")
+      .map((w: any) => String(w.telegramId));
 
     // Fetch all confirmed entries
     const qEntries = query(
@@ -538,18 +602,34 @@ router.post("/draw-winner", async (req: any, res: any) => {
       where("status", "==", "Confirmed")
     );
     const entriesSnap = await getDocs(qEntries);
-    const entries = entriesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+    const entries = entriesSnap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .filter(e => !excludedNumbers.includes(Number(e.selectedNumber)) && !excludedTgIds.includes(String(e.telegramId)));
 
     if (entries.length === 0) {
-      return res.status(400).json({ success: false, error: "No confirmed entries found to pick a winner from." });
+      return res.status(400).json({ success: false, error: "No available confirmed entries found to pick a winner from." });
     }
 
     // Pick a random confirmed entry
     const randomIndex = Math.floor(Math.random() * entries.length);
     const winnerEntry = entries[randomIndex];
 
-    // Save winner details as Pending verification in campaign document
+    const newWinnerObj = {
+      winnerIndex: idx,
+      telegramId: winnerEntry.telegramId,
+      selectedNumber: Number(winnerEntry.selectedNumber),
+      name: winnerEntry.firstName || "Anonymous User",
+      username: winnerEntry.username || "",
+      status: "Pending",
+      allocatedPrize: allocatedPrize,
+      drawConfirmedAt: new Date().toISOString()
+    };
+
+    const updatedDrawnWinners = [...drawnWinnersList];
+    updatedDrawnWinners[idx] = newWinnerObj;
+
     await updateDoc(campaignDocRef, {
+      drawnWinners: updatedDrawnWinners,
       winnerId: winnerEntry.telegramId,
       winnerNumber: winnerEntry.selectedNumber,
       winnerName: winnerEntry.firstName || "Anonymous User",
@@ -571,21 +651,17 @@ router.post("/draw-winner", async (req: any, res: any) => {
     await batch.commit();
 
     // Write Audit Log
-    await writeAuditLog(giveawayId, campaign.title, "Winner Drawn", {
+    await writeAuditLog(giveawayId, campaign.title, `Winner #${idx + 1} Drawn`, {
       telegramId: winnerEntry.telegramId,
       number: winnerEntry.selectedNumber,
-      name: winnerEntry.firstName
+      name: winnerEntry.firstName,
+      allocatedPrize
     });
 
     return res.json({
       success: true,
-      message: "Winner drawn successfully!",
-      winner: {
-        telegramId: winnerEntry.telegramId,
-        number: winnerEntry.selectedNumber,
-        name: winnerEntry.firstName,
-        username: winnerEntry.username
-      }
+      message: `Winner #${idx + 1} drawn successfully!`,
+      winner: newWinnerObj
     });
 
   } catch (err: any) {
@@ -597,9 +673,9 @@ router.post("/draw-winner", async (req: any, res: any) => {
 // Approve Winner (Credit Wallet automatically, mark complete, notify)
 router.post("/approve-winner", async (req: any, res: any) => {
   try {
-    const { giveawayId } = req.body;
-    if (!giveawayId) {
-      return res.status(400).json({ success: false, error: "Missing giveawayId" });
+    const { giveawayId, winnerIndex } = req.body;
+    if (!giveawayId || winnerIndex === undefined) {
+      return res.status(400).json({ success: false, error: "Missing giveawayId or winnerIndex" });
     }
 
     const campaignDocRef = doc(db, "lucky_number_campaigns", giveawayId);
@@ -609,18 +685,22 @@ router.post("/approve-winner", async (req: any, res: any) => {
     }
 
     const campaign = campaignSnap.data();
-    if (!campaign.winnerId || campaign.winnerStatus !== "Pending") {
-      return res.status(400).json({ success: false, error: "No pending winner to approve." });
+    const idx = Number(winnerIndex);
+    const drawnWinnersList = campaign.drawnWinners || [];
+    const winnerObj = drawnWinnersList[idx];
+
+    if (!winnerObj || winnerObj.status !== "Pending") {
+      return res.status(400).json({ success: false, error: "No pending winner to approve at this index." });
     }
 
-    const prizeAmt = Number(campaign.prizeAmount || 100);
+    const prizeAmt = Number(winnerObj.allocatedPrize);
 
     // 1. Transaction to Credit Wallet
     await runTransaction(db, async (transaction) => {
-      const userRef = doc(db, "users", String(campaign.winnerId));
+      const userRef = doc(db, "users", String(winnerObj.telegramId));
       const userSnap = await transaction.get(userRef);
       if (!userSnap.exists()) {
-        throw new Error(`User profile for Telegram ID ${campaign.winnerId} not found. Cannot credit wallet.`);
+        throw new Error(`User profile for Telegram ID ${winnerObj.telegramId} not found. Cannot credit wallet.`);
       }
 
       const userData = userSnap.data();
@@ -646,23 +726,23 @@ router.post("/approve-winner", async (req: any, res: any) => {
       const logRef = doc(collection(db, "activityLogs"));
       transaction.set(logRef, {
         adminId: "admin",
-        targetUserId: String(campaign.winnerId),
+        targetUserId: String(winnerObj.telegramId),
         action: "add_balance",
         amount: prizeAmt,
-        reason: `Prize payout for Lucky Number Giveaway: ${campaign.title}`,
+        reason: `Prize payout for Lucky Number Giveaway: ${campaign.title} (Winner #${idx + 1})`,
         createdAt: new Date()
       });
     });
 
     // 2. Update Entry documents
     const batch = writeBatch(db);
-    batch.update(doc(db, "lucky_number_entries", `${giveawayId}_user_${campaign.winnerId}`), {
+    batch.update(doc(db, "lucky_number_entries", `${giveawayId}_user_${winnerObj.telegramId}`), {
       status: "Winner",
       paymentStatus: "Paid",
       rewardAmount: prizeAmt,
       paidAt: new Date().toISOString()
     });
-    batch.update(doc(db, "lucky_number_entries", `${giveawayId}_num_${campaign.winnerNumber}`), {
+    batch.update(doc(db, "lucky_number_entries", `${giveawayId}_num_${winnerObj.selectedNumber}`), {
       status: "Winner",
       paymentStatus: "Paid",
       rewardAmount: prizeAmt,
@@ -670,30 +750,50 @@ router.post("/approve-winner", async (req: any, res: any) => {
     });
     await batch.commit();
 
-    // 3. Update campaign document
-    await updateDoc(campaignDocRef, {
-      winnerStatus: "Approved",
-      status: "Completed",
-      winnersDrawn: true
-    });
+    // 3. Update the winner object in drawnWinners
+    const updatedDrawnWinners = [...drawnWinnersList];
+    updatedDrawnWinners[idx] = {
+      ...winnerObj,
+      status: "Approved",
+      paidAt: new Date().toISOString()
+    };
+
+    // Check if ALL winners have been processed (Approved or Rejected)
+    const allApprovedCount = updatedDrawnWinners.filter((w: any) => w && w.status === "Approved").length;
+    const isCompleted = allApprovedCount === campaign.totalWinners;
+
+    const updateFields: any = {
+      drawnWinners: updatedDrawnWinners,
+    };
+
+    if (String(campaign.winnerId) === String(winnerObj.telegramId)) {
+      updateFields.winnerStatus = "Approved";
+    }
+
+    if (isCompleted) {
+      updateFields.status = "Completed";
+      updateFields.winnersDrawn = true;
+    }
+
+    await updateDoc(campaignDocRef, updateFields);
 
     // 4. Send Bot confirmation message
     const botMsg = `🏆 <b>CONGRATULATIONS! You Won!</b> 🏆\n\n` +
       `You are the lucky winner of our Lucky Number Giveaway campaign: <b>${campaign.title}</b>!\n\n` +
       `💰 Winning Amount: <b>₹${prizeAmt}</b>\n` +
-      `🍀 Your Lucky Number: <b>${campaign.winnerNumber}</b>\n\n` +
+      `🍀 Your Lucky Number: <b>${winnerObj.selectedNumber}</b>\n\n` +
       `<b>₹${prizeAmt}</b> has been credited instantly to your Roy Share Wallet. You can withdraw it or check your balance anytime inside the app! 🎉`;
     
-    await sendTgMessage(String(campaign.winnerId), botMsg);
+    await sendTgMessage(String(winnerObj.telegramId), botMsg);
 
     // Audit Log
-    await writeAuditLog(giveawayId, campaign.title, "Winner Approved", {
-      telegramId: campaign.winnerId,
-      number: campaign.winnerNumber,
+    await writeAuditLog(giveawayId, campaign.title, `Winner #${idx + 1} Approved`, {
+      telegramId: winnerObj.telegramId,
+      number: winnerObj.selectedNumber,
       amount: prizeAmt
     });
 
-    return res.json({ success: true, message: "Winner approved! Wallet credited and notification sent successfully." });
+    return res.json({ success: true, message: `Winner #${idx + 1} approved successfully!` });
 
   } catch (err: any) {
     console.error("Approve winner error:", err);
@@ -704,9 +804,9 @@ router.post("/approve-winner", async (req: any, res: any) => {
 // Reject Winner (Reject drawn winner, clear winner fields)
 router.post("/reject-winner", async (req: any, res: any) => {
   try {
-    const { giveawayId, reason } = req.body;
-    if (!giveawayId) {
-      return res.status(400).json({ success: false, error: "Missing giveawayId" });
+    const { giveawayId, winnerIndex, reason } = req.body;
+    if (!giveawayId || winnerIndex === undefined) {
+      return res.status(400).json({ success: false, error: "Missing giveawayId or winnerIndex" });
     }
 
     const campaignDocRef = doc(db, "lucky_number_campaigns", giveawayId);
@@ -716,11 +816,15 @@ router.post("/reject-winner", async (req: any, res: any) => {
     }
 
     const campaign = campaignSnap.data();
-    if (!campaign.winnerId) {
-      return res.status(400).json({ success: false, error: "No winner drawn to reject." });
+    const idx = Number(winnerIndex);
+    const drawnWinnersList = campaign.drawnWinners || [];
+    const winnerObj = drawnWinnersList[idx];
+
+    if (!winnerObj) {
+      return res.status(400).json({ success: false, error: "No winner drawn at this index to reject." });
     }
 
-    const winnerId = campaign.winnerId;
+    const winnerId = winnerObj.telegramId;
 
     // Update entries to Rejected
     const batch = writeBatch(db);
@@ -729,17 +833,30 @@ router.post("/reject-winner", async (req: any, res: any) => {
       paymentStatus: "Rejected",
       rejectionReason: reason || "Verification failed"
     });
-    batch.update(doc(db, "lucky_number_entries", `${giveawayId}_num_${campaign.winnerNumber}`), {
+    batch.update(doc(db, "lucky_number_entries", `${giveawayId}_num_${winnerObj.selectedNumber}`), {
       status: "Rejected",
       paymentStatus: "Rejected",
       rejectionReason: reason || "Verification failed"
     });
     await batch.commit();
 
-    // Update campaign document to reflect rejection
-    await updateDoc(campaignDocRef, {
-      winnerStatus: "Rejected",
-    });
+    // Update the winner object in drawnWinners to Rejected
+    const updatedDrawnWinners = [...drawnWinnersList];
+    updatedDrawnWinners[idx] = {
+      ...winnerObj,
+      status: "Rejected",
+      rejectionReason: reason || "Verification failed"
+    };
+
+    const updateFields: any = {
+      drawnWinners: updatedDrawnWinners
+    };
+
+    if (String(campaign.winnerId) === String(winnerId)) {
+      updateFields.winnerStatus = "Rejected";
+    }
+
+    await updateDoc(campaignDocRef, updateFields);
 
     // Send Rejection Bot message
     const botMsg = `❌ <b>Your Lucky Number Giveaway entry has been rejected.</b>\n\n` +
@@ -748,12 +865,12 @@ router.post("/reject-winner", async (req: any, res: any) => {
     await sendTgMessage(String(winnerId), botMsg);
 
     // Write Audit Log
-    await writeAuditLog(giveawayId, campaign.title, "Winner Rejected", {
+    await writeAuditLog(giveawayId, campaign.title, `Winner #${idx + 1} Rejected`, {
       telegramId: winnerId,
       reason
     });
 
-    return res.json({ success: true, message: "Winner successfully rejected." });
+    return res.json({ success: true, message: `Winner #${idx + 1} successfully rejected.` });
 
   } catch (err: any) {
     console.error("Reject winner error:", err);
@@ -761,12 +878,12 @@ router.post("/reject-winner", async (req: any, res: any) => {
   }
 });
 
-// Redraw Winner (Picks a different random Confirmed participant)
+// Redraw Winner (Picks a different random Confirmed participant for a specific winnerIndex)
 router.post("/redraw-winner", async (req: any, res: any) => {
   try {
-    const { giveawayId } = req.body;
-    if (!giveawayId) {
-      return res.status(400).json({ success: false, error: "Missing giveawayId" });
+    const { giveawayId, winnerIndex } = req.body;
+    if (!giveawayId || winnerIndex === undefined) {
+      return res.status(400).json({ success: false, error: "Missing giveawayId or winnerIndex" });
     }
 
     const campaignDocRef = doc(db, "lucky_number_campaigns", giveawayId);
@@ -776,17 +893,33 @@ router.post("/redraw-winner", async (req: any, res: any) => {
     }
 
     const campaign = campaignSnap.data();
-    const oldWinnerId = campaign.winnerId;
+    const idx = Number(winnerIndex);
+    const drawnWinnersList = campaign.drawnWinners || [];
+    const oldWinnerObj = drawnWinnersList[idx];
+
+    if (!oldWinnerObj) {
+      return res.status(400).json({ success: false, error: "No winner exists at this index to redraw." });
+    }
+
+    const oldWinnerId = oldWinnerObj.telegramId;
 
     // If there was a previous winner, mark their entry as Confirmed again (if they weren't rejected)
-    if (oldWinnerId && campaign.winnerStatus !== "Rejected") {
+    if (oldWinnerId && oldWinnerObj.status !== "Rejected") {
       const batch = writeBatch(db);
       batch.update(doc(db, "lucky_number_entries", `${giveawayId}_user_${oldWinnerId}`), { status: "Confirmed" });
-      batch.update(doc(db, "lucky_number_entries", `${giveawayId}_num_${campaign.winnerNumber}`), { status: "Confirmed" });
+      batch.update(doc(db, "lucky_number_entries", `${giveawayId}_num_${oldWinnerObj.selectedNumber}`), { status: "Confirmed" });
       await batch.commit();
     }
 
-    // Fetch all confirmed entries EXCEPT the old winner (if they were rejected)
+    // Identify already drawn/confirmed numbers/users from OTHER slots to exclude them!
+    const otherDrawnWinners = drawnWinnersList.filter((w: any, wIdx: number) => w && wIdx !== idx && w.status !== "Rejected");
+    const excludedNumbers = otherDrawnWinners.map((w: any) => Number(w.selectedNumber));
+    const excludedTgIds = otherDrawnWinners.map((w: any) => String(w.telegramId));
+
+    // Also exclude the old winner who is being replaced by this redraw
+    excludedTgIds.push(String(oldWinnerId));
+
+    // Fetch all confirmed entries
     const qEntries = query(
       collection(db, "lucky_number_entries"),
       where("campaignId", "==", giveawayId),
@@ -795,18 +928,37 @@ router.post("/redraw-winner", async (req: any, res: any) => {
     const entriesSnap = await getDocs(qEntries);
     const entries = entriesSnap.docs
       .map(d => ({ id: d.id, ...d.data() } as any))
-      .filter(e => e.telegramId !== oldWinnerId);
+      .filter(e => !excludedNumbers.includes(Number(e.selectedNumber)) && !excludedTgIds.includes(String(e.telegramId)));
 
     if (entries.length === 0) {
-      return res.status(400).json({ success: false, error: "No other confirmed entries found to redraw a winner." });
+      return res.status(400).json({ success: false, error: "No other confirmed entries found to redraw this winner." });
     }
 
     // Pick new random winner
     const randomIndex = Math.floor(Math.random() * entries.length);
     const winnerEntry = entries[randomIndex];
 
-    // Save winner details as Pending verification in campaign document
+    // Maintain consistent prize pool! Uses the same allocated prize amount for this slot!
+    const allocatedPrize = oldWinnerObj.allocatedPrize;
+
+    const newWinnerObj = {
+      winnerIndex: idx,
+      telegramId: winnerEntry.telegramId,
+      selectedNumber: Number(winnerEntry.selectedNumber),
+      name: winnerEntry.firstName || "Anonymous User",
+      username: winnerEntry.username || "",
+      status: "Pending",
+      allocatedPrize: allocatedPrize,
+      drawConfirmedAt: new Date().toISOString()
+    };
+
+    // Update drawnWinners array
+    const updatedDrawnWinners = [...drawnWinnersList];
+    updatedDrawnWinners[idx] = newWinnerObj;
+
+    // Update campaign document
     await updateDoc(campaignDocRef, {
+      drawnWinners: updatedDrawnWinners,
       winnerId: winnerEntry.telegramId,
       winnerNumber: winnerEntry.selectedNumber,
       winnerName: winnerEntry.firstName || "Anonymous User",
@@ -827,21 +979,17 @@ router.post("/redraw-winner", async (req: any, res: any) => {
     await batch.commit();
 
     // Write Audit Log
-    await writeAuditLog(giveawayId, campaign.title, "Winner Redrawn", {
+    await writeAuditLog(giveawayId, campaign.title, `Winner #${idx + 1} Redrawn`, {
       oldWinnerTelegramId: oldWinnerId,
       newWinnerTelegramId: winnerEntry.telegramId,
-      number: winnerEntry.selectedNumber
+      number: winnerEntry.selectedNumber,
+      allocatedPrize
     });
 
     return res.json({
       success: true,
-      message: "Winner redrawn successfully!",
-      winner: {
-        telegramId: winnerEntry.telegramId,
-        number: winnerEntry.selectedNumber,
-        name: winnerEntry.firstName,
-        username: winnerEntry.username
-      }
+      message: `Winner #${idx + 1} redrawn successfully!`,
+      winner: newWinnerObj
     });
 
   } catch (err: any) {
@@ -891,6 +1039,8 @@ router.post("/reset-giveaway", async (req: any, res: any) => {
       winnerName: null,
       winnerUsername: null,
       winnerStatus: null,
+      drawnWinners: null,
+      prizeAllocations: null,
     });
 
     await batch.commit();

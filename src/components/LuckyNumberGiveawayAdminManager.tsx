@@ -79,6 +79,7 @@ export default function LuckyNumberGiveawayAdminManager() {
   // Rejection Modal state
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [rejectIndex, setRejectIndex] = useState<number | null>(null);
 
   // Fetch bot settings for telegram deep link
   useEffect(() => {
@@ -339,7 +340,7 @@ export default function LuckyNumberGiveawayAdminManager() {
   // WINNER ACTIONS
 
   // 1. Draw Winner
-  const handleDrawWinner = async () => {
+  const handleDrawWinner = async (winnerIndex: number) => {
     if (!activeGiveawayId) return;
     setDrawingWinner(true);
     setError("");
@@ -347,11 +348,11 @@ export default function LuckyNumberGiveawayAdminManager() {
       const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/draw-winner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ giveawayId: activeGiveawayId })
+        body: JSON.stringify({ giveawayId: activeGiveawayId, winnerIndex })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setSuccessMsg(`🎲 Winner drawn successfully! Selected Number: ${data.winner.number}, Name: ${data.winner.name}`);
+        setSuccessMsg(`🎲 Winner #${winnerIndex + 1} drawn successfully! Selected Number: ${data.winner.selectedNumber}, Name: ${data.winner.name}`);
         setTimeout(() => setSuccessMsg(""), 5000);
       } else {
         setError(data.error || "Failed to draw winner.");
@@ -365,20 +366,20 @@ export default function LuckyNumberGiveawayAdminManager() {
   };
 
   // 2. Approve Winner (Wallet credit + Notify)
-  const handleApproveWinner = async () => {
+  const handleApproveWinner = async (winnerIndex: number, allocatedPrize: number) => {
     if (!activeGiveawayId) return;
-    if (!confirm("Confirm winner verification? This will instantly credit the prize amount to their Roy Share Wallet and notify them!")) return;
+    if (!confirm(`Confirm Winner #${winnerIndex + 1} verification? This will instantly credit ₹${allocatedPrize} to their Roy Share Wallet and notify them!`)) return;
     setVerifyingWinner(true);
     setError("");
     try {
       const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/approve-winner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ giveawayId: activeGiveawayId })
+        body: JSON.stringify({ giveawayId: activeGiveawayId, winnerIndex })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setSuccessMsg("🎉 Winner verified and approved! Payout credited to Roy Share Wallet instantly.");
+        setSuccessMsg(`🎉 Winner #${winnerIndex + 1} verified and approved! Payout of ₹${allocatedPrize} credited instantly.`);
         setTimeout(() => setSuccessMsg(""), 6000);
       } else {
         setError(data.error || "Failed to approve winner.");
@@ -393,7 +394,7 @@ export default function LuckyNumberGiveawayAdminManager() {
 
   // 3. Reject Winner
   const handleRejectWinner = async () => {
-    if (!activeGiveawayId) return;
+    if (!activeGiveawayId || rejectIndex === null) return;
     setVerifyingWinner(true);
     setError("");
     setShowRejectModal(false);
@@ -404,12 +405,13 @@ export default function LuckyNumberGiveawayAdminManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           giveawayId: activeGiveawayId,
+          winnerIndex: rejectIndex,
           reason: rejectionReason.trim() || "Verification failed / Rule violation"
         })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setSuccessMsg("❌ Winner entry successfully rejected and notified!");
+        setSuccessMsg(`❌ Winner #${rejectIndex + 1} successfully rejected and notified!`);
         setTimeout(() => setSuccessMsg(""), 4000);
       } else {
         setError(data.error || "Failed to reject winner.");
@@ -419,24 +421,25 @@ export default function LuckyNumberGiveawayAdminManager() {
       setError("Network error while rejecting winner.");
     } finally {
       setVerifyingWinner(false);
+      setRejectIndex(null);
     }
   };
 
   // 4. Redraw Winner
-  const handleRedrawWinner = async () => {
+  const handleRedrawWinner = async (winnerIndex: number) => {
     if (!activeGiveawayId) return;
-    if (!confirm("🔄 Are you sure you want to REDRAW the winner? This will select a different random participant!")) return;
+    if (!confirm(`🔄 Are you sure you want to REDRAW Winner #${winnerIndex + 1}? This will select a different random participant for this spot!`)) return;
     setDrawingWinner(true);
     setError("");
     try {
       const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/redraw-winner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ giveawayId: activeGiveawayId })
+        body: JSON.stringify({ giveawayId: activeGiveawayId, winnerIndex })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setSuccessMsg(`🔄 Redraw success! New Winner Number: ${data.winner.number}, Name: ${data.winner.name}`);
+        setSuccessMsg(`🔄 Redraw success! Winner #${winnerIndex + 1} Selected Number: ${data.winner.selectedNumber}, Name: ${data.winner.name}`);
         setTimeout(() => setSuccessMsg(""), 5000);
       } else {
         setError(data.error || "Failed to redraw winner.");
@@ -670,6 +673,9 @@ export default function LuckyNumberGiveawayAdminManager() {
                     onChange={(e) => setFormPrizeAmount(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none"
                   />
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    This is the <b>total budget</b>, NOT the individual prize. It will be randomly split among all winners.
+                  </p>
                 </div>
 
                 {/* Total Winners */}
@@ -682,6 +688,9 @@ export default function LuckyNumberGiveawayAdminManager() {
                     onChange={(e) => setFormTotalWinners(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none"
                   />
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Total number of winner slots. Budget must be greater than or equal to total winners (min ₹1 per slot).
+                  </p>
                 </div>
 
                 {/* Number Range Option */}
@@ -1041,102 +1050,128 @@ export default function LuckyNumberGiveawayAdminManager() {
                           </h4>
                         </div>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          selectedGiveaway.winnersDrawn ? "bg-emerald-500/15 text-emerald-400" : "bg-blue-500/15 text-blue-400"
+                          selectedGiveaway.status === "Completed" ? "bg-emerald-500/15 text-emerald-400" : "bg-blue-500/15 text-blue-400"
                         }`}>
-                          {selectedGiveaway.winnersDrawn ? "Completed" : "Awaiting Draw"}
+                          {selectedGiveaway.status === "Completed" ? "Completed" : "Active Board"}
                         </span>
                       </div>
 
                       <p className="text-[11px] text-slate-400 leading-relaxed">
-                        To pick a winner, press the <b>Draw Lucky Winner</b> button. A random confirmed number reservation on the board will be picked atomically. You can then approve their payout directly into their Roy Share Wallet, reject the entry if they violated rules, or trigger a redraw.
+                        To pick winners, press the corresponding <b>Draw Winner</b> button in the slots below. The total budget of <b>₹{selectedGiveaway.prizeAmount}</b> has been randomly pre-split across all slots. No winner can get ₹0 or negative amounts, and the sum of all payouts will equal the total prize amount exactly.
                       </p>
-
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <button
-                          onClick={handleDrawWinner}
-                          disabled={drawingWinner || selectedGiveaway.status === "Completed" || entries.length === 0}
-                          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-black rounded-xl transition flex items-center gap-1 cursor-pointer"
-                        >
-                          {drawingWinner ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "🎲"}
-                          Draw Lucky Winner
-                        </button>
-                      </div>
                     </div>
 
-                    {/* Active Drawn Winner Showcase */}
-                    {selectedGiveaway.winnerId ? (
-                      <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/35">
-                        <div className="p-4 bg-slate-900/60 border-b border-slate-800/60 flex justify-between items-center">
-                          <span className="font-bold text-slate-200">Drawn Winner Verification Panel</span>
-                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                            selectedGiveaway.winnerStatus === "Approved" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                            selectedGiveaway.winnerStatus === "Rejected" ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
-                          }`}>
-                            Winner Status: {selectedGiveaway.winnerStatus || "Pending"}
-                          </span>
-                        </div>
-
-                        <div className="p-5 space-y-4">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <span className="text-[10px] text-slate-500 uppercase font-bold">Selected Number</span>
-                              <div className="text-2xl font-black text-emerald-400">
-                                🍀 Card {String(selectedGiveaway.winnerNumber).padStart(2, '0')}
+                    {/* Multi-Winner Slot Allocations */}
+                    <div className="space-y-4">
+                      {Array.from({ length: selectedGiveaway.totalWinners || 1 }).map((_, i) => {
+                        const winner = selectedGiveaway.drawnWinners?.[i];
+                        const allocatedPrize = selectedGiveaway.prizeAllocations?.[i] || Math.floor(selectedGiveaway.prizeAmount / (selectedGiveaway.totalWinners || 1));
+                        
+                        return (
+                          <div key={i} className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/35">
+                            <div className="p-4 bg-slate-900/60 border-b border-slate-800/60 flex justify-between items-center">
+                              <span className="font-bold text-slate-200">Winner #{i + 1} Allocation</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] bg-slate-950 text-amber-400 px-2.5 py-1 rounded-lg border border-slate-900 font-bold">
+                                  Allocated Prize: ₹{allocatedPrize}
+                                </span>
+                                {winner ? (
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                    winner.status === "Approved" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                                    winner.status === "Rejected" ? "bg-red-500/10 text-red-400 border border-red-500/20" : 
+                                    "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                                  }`}>
+                                    {winner.status || "Pending"}
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-slate-900 text-slate-500 border border-slate-800">
+                                    Awaiting Draw
+                                  </span>
+                                )}
                               </div>
                             </div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] text-slate-500 uppercase font-bold">Winner Profile</span>
-                              <div className="font-black text-white text-base">
-                                {selectedGiveaway.winnerName}
-                              </div>
-                              <div className="text-[10px] text-slate-400">
-                                Telegram ID: {selectedGiveaway.winnerId} {selectedGiveaway.winnerUsername && `| @${selectedGiveaway.winnerUsername}`}
-                              </div>
+
+                            <div className="p-5 space-y-4">
+                              {winner ? (
+                                <>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                      <span className="text-[10px] text-slate-500 uppercase font-bold">Selected Lucky Number</span>
+                                      <div className="text-2xl font-black text-emerald-400">
+                                        🍀 Card {String(winner.selectedNumber).padStart(2, '0')}
+                                      </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <span className="text-[10px] text-slate-500 uppercase font-bold">Winner Profile</span>
+                                      <div className="font-black text-white text-base">
+                                        {winner.name}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400">
+                                        Telegram ID: {winner.telegramId} {winner.username && `| @${winner.username}`}
+                                      </div>
+                                      {winner.rejectionReason && (
+                                        <div className="text-[10px] text-red-400 font-bold italic mt-1">
+                                          Reason Rejected: {winner.rejectionReason}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* ACTION BUTTONS (Approve, Reject, Redraw) */}
+                                  <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-900">
+                                    {winner.status === "Pending" && (
+                                      <>
+                                        <button
+                                          onClick={() => handleApproveWinner(i, allocatedPrize)}
+                                          disabled={verifyingWinner}
+                                          className="px-4.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-black rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                                        >
+                                          {verifyingWinner ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-4 h-4" />}
+                                          Approve Winner (Pay ₹{allocatedPrize})
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setRejectionReason("");
+                                            setRejectIndex(i);
+                                            setShowRejectModal(true);
+                                          }}
+                                          disabled={verifyingWinner}
+                                          className="px-4 py-2.5 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 disabled:opacity-50 text-red-400 font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                                        >
+                                          <XCircle className="w-4 h-4" />
+                                          Reject Winner
+                                        </button>
+                                      </>
+                                    )}
+
+                                    <button
+                                      onClick={() => handleRedrawWinner(i)}
+                                      disabled={drawingWinner || selectedGiveaway.status === "Completed"}
+                                      className="px-4 py-2.5 bg-slate-850 hover:bg-slate-800 disabled:opacity-50 text-slate-300 font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                      Redraw Winner
+                                    </button>
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="py-6 flex flex-col items-center justify-center border border-dashed border-slate-800 rounded-xl space-y-3 bg-slate-950/20">
+                                  <span className="text-slate-500 text-xs">No winner drawn for Winner #{i + 1} yet.</span>
+                                  <button
+                                    onClick={() => handleDrawWinner(i)}
+                                    disabled={drawingWinner || selectedGiveaway.status === "Completed" || entries.length === 0}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs"
+                                  >
+                                    {drawingWinner ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "🎲"}
+                                    Draw Winner #{i + 1} (Pay ₹{allocatedPrize})
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
-
-                          {/* ACTION BUTTONS (Approve, Reject, Redraw) */}
-                          <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-900">
-                            {selectedGiveaway.winnerStatus === "Pending" && (
-                              <>
-                                <button
-                                  onClick={handleApproveWinner}
-                                  disabled={verifyingWinner}
-                                  className="px-4.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-black rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                                >
-                                  {verifyingWinner ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-4 h-4" />}
-                                  Approve Winner (Pay ₹{selectedGiveaway.prizeAmount})
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setRejectionReason("");
-                                    setShowRejectModal(true);
-                                  }}
-                                  disabled={verifyingWinner}
-                                  className="px-4 py-2.5 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 disabled:opacity-50 text-red-400 font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                                >
-                                  <XCircle className="w-4 h-4" />
-                                  Reject Winner
-                                </button>
-                              </>
-                            )}
-
-                            <button
-                              onClick={handleRedrawWinner}
-                              disabled={drawingWinner || selectedGiveaway.status === "Completed"}
-                              className="px-4 py-2.5 bg-slate-850 hover:bg-slate-800 disabled:opacity-50 text-slate-300 font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <RefreshCw className="w-3.5 h-3.5" />
-                              Redraw Winner
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="py-12 text-center border-2 border-dashed border-slate-800 rounded-2xl text-slate-500">
-                        No winner has been drawn for this board yet. Click Draw Lucky Winner to select one!
-                      </div>
-                    )}
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
@@ -1154,7 +1189,7 @@ export default function LuckyNumberGiveawayAdminManager() {
                           <h4 className="font-bold text-white border-b border-slate-800 pb-1.5 uppercase text-[10px] tracking-wider text-emerald-400">Campaign Budget Analysis</h4>
                           <div className="flex justify-between py-1 border-b border-slate-900/40">
                             <span className="text-slate-400">Maximum Budget Target:</span>
-                            <span className="font-bold text-slate-200">₹{selectedGiveaway.prizeAmount * selectedGiveaway.totalWinners}</span>
+                            <span className="font-bold text-slate-200">₹{selectedGiveaway.prizeAmount}</span>
                           </div>
                           <div className="flex justify-between py-1 border-b border-slate-900/40">
                             <span className="text-slate-400">Total Payouts Credited:</span>
