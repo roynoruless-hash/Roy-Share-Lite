@@ -309,7 +309,7 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
       if (!script) {
         script = document.createElement("script");
         script.id = scriptId;
-        script.src = "https://sad.adsgram.ai/js/adsgram-sdk.js";
+        script.src = "https://sad.adsgram.ai/js/sad.min.js";
         script.async = true;
         document.head.appendChild(script);
       }
