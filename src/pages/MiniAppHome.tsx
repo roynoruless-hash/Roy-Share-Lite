@@ -64,7 +64,7 @@ const AnnouncementsPage = lazy(() => import("./AnnouncementsPage"));
 const SettingsPage = lazy(() => import("./SettingsPage"));
 const ShortenPage = lazy(() => import("./ShortenPage"));
 const RewardEarningsPage = lazy(() => import("./RewardEarningsPage"));
-const PublicUpiGiveawayPage = lazy(() => import("./PublicUpiGiveawayPage"));
+const PublicLuckyNumberGiveawayPage = lazy(() => import("./PublicLuckyNumberGiveawayPage"));
 const PublicLuckyDrawPage = lazy(() => import("./PublicLuckyDrawPage"));
 
 interface MembershipVerificationProps {
@@ -510,13 +510,22 @@ export const MiniAppHome: React.FC = () => {
     if (activeUser?.membershipVerified && startParam && !hasCheckedDeepLink) {
       if (startParam.startsWith("upi_")) {
         const giveawayId = startParam.replace("upi_", "");
-        console.log(`[MiniAppHome] Deep link detected for upi giveaway: ${giveawayId}`);
+        console.log(`[MiniAppHome] Deep link detected for lucky number giveaway: ${giveawayId}`);
+        setHasCheckedDeepLink(true);
+        setCurrentView(`upi-${giveawayId}`);
+      } else if (startParam.startsWith("lucky_")) {
+        const giveawayId = startParam.replace("lucky_", "");
+        console.log(`[MiniAppHome] Deep link detected for lucky number giveaway: ${giveawayId}`);
         setHasCheckedDeepLink(true);
         setCurrentView(`upi-${giveawayId}`);
       } else if (!startParam.startsWith("ref_") && !startParam.startsWith("gift_")) {
         console.log(`[MiniAppHome] Direct deep link detected for giveaway: ${startParam}`);
         setHasCheckedDeepLink(true);
-        if (startParam.startsWith("LD-")) { setCurrentView(`lucky-${startParam}`); } else if (startParam.startsWith("lucky_")) { setCurrentView(`lucky-${startParam.replace("lucky_", "")}`); } else { setCurrentView(`upi-${startParam}`); }
+        if (startParam.startsWith("LD-")) { 
+          setCurrentView(`lucky-${startParam}`); 
+        } else { 
+          setCurrentView(`upi-${startParam}`); 
+        }
       }
     }
   }, [activeUser?.membershipVerified, isPhoneVerified, startParam, hasCheckedDeepLink]);
@@ -1110,7 +1119,7 @@ export const MiniAppHome: React.FC = () => {
         )}
         {currentView.startsWith("upi-") && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-            <PublicUpiGiveawayPage giveawayId={currentView.replace("upi-", "")} onBack={() => setCurrentView("home")} />
+            <PublicLuckyNumberGiveawayPage giveawayId={currentView.replace("upi-", "")} onBack={() => setCurrentView("home")} onNavigate={(view) => setCurrentView(view)} />
           </Suspense>
         )}
 

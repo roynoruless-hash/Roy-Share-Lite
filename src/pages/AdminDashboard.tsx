@@ -75,7 +75,7 @@ import React from 'react';
 import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
 import TelegramBroadcastCenter from "../components/TelegramBroadcastCenter";
-import UpiGiveawayAdminManager from "../components/UpiGiveawayAdminManager";
+import LuckyNumberGiveawayAdminManager from "../components/LuckyNumberGiveawayAdminManager";
 import { FraudInvestigationCenter } from "../components/FraudInvestigationCenter";
 import buildInfo from "../build-info.json";
 interface ErrorBoundaryProps {
@@ -5012,7 +5012,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "⚙️ System Settings",
               "📄 Ads.txt Manager",
               "📱 Telegram Settings",
-              "💸 UPI Giveaway",
+              "🍀 Lucky Number Giveaway",
               "🎁 Lucky Draw Winner",
             ].map((btn) => (
               <button
@@ -14468,8 +14468,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             <EconomyAdminView />
           )}
 
-          {activeTab === "💸 UPI Giveaway" && (
-            <UpiGiveawayAdminManager />
+          {activeTab === "🍀 Lucky Number Giveaway" && (
+            <LuckyNumberGiveawayAdminManager />
           )}
 
           {activeTab === "🎁 Lucky Draw Winner" && (

@@ -17,28 +17,22 @@ import {
   Copy, 
   Check, 
   Users, 
-  TrendingUp, 
   Coins, 
   Image as ImageIcon, 
-  Calendar, 
   CheckCircle, 
   AlertCircle,
   Eye,
   Download,
-  Trophy,
   Loader2,
   RefreshCw,
   XCircle,
-  Info,
-  Flame,
-  Clock,
-  UserCheck,
-  Zap
+  TrendingUp,
+  UserCheck
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { formatInKolkata, formatFriendlyKolkata } from "../lib/dateUtils";
+import { formatFriendlyKolkata } from "../lib/dateUtils";
 
-export default function UpiGiveawayAdminManager() {
+export default function LuckyNumberGiveawayAdminManager() {
   const [giveaways, setGiveaways] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -58,7 +52,6 @@ export default function UpiGiveawayAdminManager() {
   const [formMaxNumber, setFormMaxNumber] = useState(100);
   const [formAdsType, setFormAdsType] = useState<"Reward" | "Interstitial" | "Task">("Reward");
   const [formNumberVisibility, setFormNumberVisibility] = useState<"Hide Remaining Numbers" | "Show Remaining Numbers" | "Show Hot Numbers">("Show Remaining Numbers");
-  const [formEndDate, setFormEndDate] = useState("");
   const [formStatus, setFormStatus] = useState<"Draft" | "Live" | "Paused" | "Ended" | "Drawing Winners" | "Completed">("Draft");
   const [autoPostChannel, setAutoPostChannel] = useState(false);
 
@@ -106,13 +99,13 @@ export default function UpiGiveawayAdminManager() {
     fetchBotSettings();
   }, []);
 
-  // Fetch giveaways
+  // Fetch giveaways (Campaigns)
   useEffect(() => {
     const unsub = onSnapshot(
-      collection(db, "upi_giveaways"), 
+      collection(db, "lucky_number_campaigns"), 
       (snap) => {
         const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        list.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         setGiveaways(list);
         setLoading(false);
       },
@@ -136,7 +129,7 @@ export default function UpiGiveawayAdminManager() {
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64String = reader.result as string;
-        const res = await fetch(`${API_BASE}/api/upi-giveaway/upload`, {
+        const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/upload`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -174,13 +167,12 @@ export default function UpiGiveawayAdminManager() {
     if (!formBannerUrl.trim()) return setError("Banner image is required.");
     if (formPrizeAmount <= 0) return setError("Prize amount must be greater than zero.");
     if (formTotalWinners <= 0) return setError("Total winners must be greater than zero.");
-    if (!formEndDate) return setError("End date & time is required.");
     if (formNumberRange === "Manual Range" && formMinNumber >= formMaxNumber) {
       return setError("Minimum number must be less than maximum number.");
     }
     
     try {
-      const res = await fetch(`${API_BASE}/api/upi-giveaway/save-giveaway`, {
+      const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/save-giveaway`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -190,12 +182,11 @@ export default function UpiGiveawayAdminManager() {
           description: formDescription,
           prizeAmount: Number(formPrizeAmount),
           totalWinners: Number(formTotalWinners),
-          numberRange: formNumberRange,
+          numberRange: formNumberRange === "Manual Range" ? "Manual" : formNumberRange.replace(" to ", "-"),
           minNumber: Number(formMinNumber),
           maxNumber: Number(formMaxNumber),
           adsType: formAdsType,
           numberVisibility: formNumberVisibility,
-          endDate: formEndDate,
           status: formStatus,
           autoPostChannel
         })
@@ -203,9 +194,9 @@ export default function UpiGiveawayAdminManager() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setSuccessMsg(editingId ? "Giveaway updated successfully!" : "Giveaway created & published successfully!");
+        setSuccessMsg(editingId ? "Lucky Board updated successfully!" : "Lucky Board created & published successfully!");
         if (data.channelPostSuccess) {
-          setSuccessMsg(prev => prev + " 📣 Auto-posted to Channel successfully!");
+          setSuccessMsg(prev => prev + " 📣 Auto-posted to Telegram Channel!");
         }
         setTimeout(() => setSuccessMsg(""), 4500);
         resetForm();
@@ -229,7 +220,6 @@ export default function UpiGiveawayAdminManager() {
     setFormMaxNumber(100);
     setFormAdsType("Reward");
     setFormNumberVisibility("Show Remaining Numbers");
-    setFormEndDate("");
     setFormStatus("Draft");
     setAutoPostChannel(false);
     setEditingId(null);
@@ -243,12 +233,13 @@ export default function UpiGiveawayAdminManager() {
     setFormDescription(giveaway.description || "");
     setFormPrizeAmount(giveaway.prizeAmount || 100);
     setFormTotalWinners(giveaway.totalWinners || 10);
-    setFormNumberRange(giveaway.numberRange || "1 to 100");
+    
+    const rangeStr = giveaway.numberRange === "Manual" ? "Manual Range" : (giveaway.numberRange || "1-100").replace("-", " to ");
+    setFormNumberRange(rangeStr);
     setFormMinNumber(giveaway.minNumber || 1);
     setFormMaxNumber(giveaway.maxNumber || 100);
-    setFormAdsType(giveaway.adsType || giveaway.adsgramType || "Reward");
+    setFormAdsType(giveaway.adsType || "Reward");
     setFormNumberVisibility(giveaway.numberVisibility || "Show Remaining Numbers");
-    setFormEndDate(formatInKolkata(giveaway.endDate));
     setFormStatus(giveaway.status || "Draft");
     setAutoPostChannel(false);
     setShowForm(true);
@@ -258,8 +249,8 @@ export default function UpiGiveawayAdminManager() {
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this Lucky Number Board? All active selections and winner logs will be wiped!")) return;
     try {
-      await deleteDoc(doc(db, "upi_giveaways", id));
-      setSuccessMsg("Giveaway deleted successfully.");
+      await deleteDoc(doc(db, "lucky_number_campaigns", id));
+      setSuccessMsg("Lucky Board deleted successfully.");
       setTimeout(() => setSuccessMsg(""), 3000);
     } catch (err: any) {
       setError("Failed to delete giveaway: " + err.message);
@@ -267,7 +258,7 @@ export default function UpiGiveawayAdminManager() {
   };
 
   const handleCopyLink = (giveawayId: string) => {
-    const link = `https://t.me/${botUsername}?startapp=upi_${giveawayId}`;
+    const link = `https://t.me/${botUsername}?startapp=lucky_${giveawayId}`;
     navigator.clipboard.writeText(link).then(() => {
       setCopiedId(giveawayId);
       setTimeout(() => setCopiedId(null), 2000);
@@ -280,14 +271,16 @@ export default function UpiGiveawayAdminManager() {
     
     setEntriesLoading(true);
     const q = query(
-      collection(db, "upi_giveaway_entries"),
-      where("giveawayId", "==", activeGiveawayId)
+      collection(db, "lucky_number_entries"),
+      where("campaignId", "==", activeGiveawayId)
     );
     
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      list.sort((a: any, b: any) => new Date(b.entryTime || b.reservedAt).getTime() - new Date(a.entryTime || a.reservedAt).getTime());
-      setEntries(list);
+      // Filter duplicate records since we save both user and number doc keys
+      const uniqueList = list.filter(item => item.id.includes("_num_"));
+      uniqueList.sort((a: any, b: any) => new Date(b.reservedAt || 0).getTime() - new Date(a.reservedAt || 0).getTime());
+      setEntries(uniqueList);
       setEntriesLoading(false);
     }, (err) => {
       console.error("Error loading entries snapshot:", err);
@@ -301,7 +294,7 @@ export default function UpiGiveawayAdminManager() {
   const loadAnalytics = async (giveawayId: string) => {
     setAnalyticsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/upi-giveaway/analytics/${giveawayId}`);
+      const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/analytics/${giveawayId}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setAnalyticsData(data.analytics);
@@ -319,7 +312,7 @@ export default function UpiGiveawayAdminManager() {
   const loadAuditLogs = async (giveawayId: string) => {
     setLogsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/upi-giveaway/audit-logs/${giveawayId}`);
+      const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/audit-logs/${giveawayId}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setAuditLogs(data.logs);
@@ -343,7 +336,7 @@ export default function UpiGiveawayAdminManager() {
     }
   }, [activeGiveawayId, viewTab]);
 
-  // WINNER VERIFICATION ACTIONS
+  // WINNER ACTIONS
 
   // 1. Draw Winner
   const handleDrawWinner = async () => {
@@ -351,7 +344,7 @@ export default function UpiGiveawayAdminManager() {
     setDrawingWinner(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/upi-giveaway/draw-winner`, {
+      const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/draw-winner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ giveawayId: activeGiveawayId })
@@ -365,7 +358,7 @@ export default function UpiGiveawayAdminManager() {
       }
     } catch (err: any) {
       console.error("Draw winner error:", err);
-      setError("Server error while drawing winner.");
+      setError("Server error while picking random winner.");
     } finally {
       setDrawingWinner(false);
     }
@@ -378,7 +371,7 @@ export default function UpiGiveawayAdminManager() {
     setVerifyingWinner(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/upi-giveaway/approve-winner`, {
+      const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/approve-winner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ giveawayId: activeGiveawayId })
@@ -406,7 +399,7 @@ export default function UpiGiveawayAdminManager() {
     setShowRejectModal(false);
 
     try {
-      const res = await fetch(`${API_BASE}/api/upi-giveaway/reject-winner`, {
+      const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/reject-winner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -436,7 +429,7 @@ export default function UpiGiveawayAdminManager() {
     setDrawingWinner(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/upi-giveaway/redraw-winner`, {
+      const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/redraw-winner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ giveawayId: activeGiveawayId })
@@ -462,7 +455,7 @@ export default function UpiGiveawayAdminManager() {
     setResettingCampaign(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/upi-giveaway/reset-giveaway`, {
+      const res = await fetch(`${API_BASE}/api/lucky-number-giveaway/reset-giveaway`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ giveawayId })
@@ -490,7 +483,7 @@ export default function UpiGiveawayAdminManager() {
       e.telegramId || "",
       e.firstName || "",
       e.username ? `@${e.username}` : "",
-      formatFriendlyKolkata(e.entryTime || e.reservedAt),
+      formatFriendlyKolkata(e.reservedAt),
       e.status || ""
     ]);
 
@@ -510,7 +503,7 @@ export default function UpiGiveawayAdminManager() {
 
   // Stats calculators
   const totalNum = selectedGiveaway ? (selectedGiveaway.maxNumber - selectedGiveaway.minNumber + 1) : 0;
-  const activeSelectionsCount = entries.filter(e => e.status === "Confirmed" || e.status === "Winner" || e.status === "Approved" || e.status === "Rejected").length;
+  const activeSelectionsCount = entries.filter(e => e.status === "Confirmed" || e.status === "Winner").length;
   const availNum = Math.max(0, totalNum - activeSelectionsCount);
 
   // Compute bucketing counts to find Popular & Least Selected Ranges
@@ -528,7 +521,7 @@ export default function UpiGiveawayAdminManager() {
           label: `${bMin}-${bMax}`,
           count: entries.filter(e => {
             const n = Number(e.selectedNumber);
-            return n >= bMin && n <= bMax && (e.status === "Confirmed" || e.status === "Winner" || e.status === "Approved");
+            return n >= bMin && n <= bMax && (e.status === "Confirmed" || e.status === "Winner");
           }).length
         });
       }
@@ -717,9 +710,9 @@ export default function UpiGiveawayAdminManager() {
                     onChange={(e) => setFormAdsType(e.target.value as any)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   >
-                    <option value="Reward">Reward Ads</option>
-                    <option value="Interstitial">Interstitial Ads</option>
-                    <option value="Task">Task Ads</option>
+                    <option value="Reward">Reward</option>
+                    <option value="Interstitial">Interstitial</option>
+                    <option value="Task">Task</option>
                   </select>
                 </div>
 
@@ -749,32 +742,20 @@ export default function UpiGiveawayAdminManager() {
 
                 {/* Number Visibility option */}
                 <div className="col-span-2 space-y-1">
-                  <label className="text-slate-400 font-bold">Board Visibility & Highlight Mode</label>
+                  <label className="text-slate-400 font-bold">Board Visibility Mode</label>
                   <select
                     value={formNumberVisibility}
                     onChange={(e) => setFormNumberVisibility(e.target.value as any)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   >
-                    <option value="Show Remaining Numbers">Show Remaining Numbers (Show reserved as locked)</option>
-                    <option value="Hide Remaining Numbers">Hide Remaining Numbers (Remove selected instantly)</option>
-                    <option value="Show Hot Numbers">Show Hot Numbers (Highlight least selected buckets)</option>
+                    <option value="Show Remaining Numbers">Show Remaining Numbers</option>
+                    <option value="Hide Remaining Numbers">Hide Remaining Numbers</option>
+                    <option value="Show Hot Numbers">Show Hot Numbers (least selected ranges)</option>
                   </select>
                 </div>
 
-                {/* End Date */}
-                <div className="space-y-1">
-                  <label className="text-slate-400 font-bold">Draw Closing Date</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={formEndDate}
-                    onChange={(e) => setFormEndDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none text-xs"
-                  />
-                </div>
-
                 {/* Status selection */}
-                <div className="space-y-1">
+                <div className="col-span-2 space-y-1">
                   <label className="text-slate-400 font-bold">Board Status</label>
                   <select
                     value={formStatus}
@@ -782,9 +763,9 @@ export default function UpiGiveawayAdminManager() {
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-300 focus:outline-none"
                   >
                     <option value="Draft">Draft</option>
-                    <option value="Live">Live / Open</option>
+                    <option value="Live">Live</option>
                     <option value="Paused">Paused</option>
-                    <option value="Ended">Closed</option>
+                    <option value="Ended">Ended</option>
                   </select>
                 </div>
               </div>
@@ -1018,26 +999,25 @@ export default function UpiGiveawayAdminManager() {
                           </thead>
                           <tbody>
                             {entries.map(e => (
-                              <tr key={e.id} className="border-b border-slate-900/60 hover:bg-slate-900/30">
+                              <tr key={e.id} className="border-b border-slate-900/65 hover:bg-slate-950/30">
                                 <td className="p-3">
-                                  <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-black font-mono">
-                                    {String(e.selectedNumber).padStart(2, "0")}
+                                  <span className="px-2.5 py-1 bg-slate-900 text-emerald-400 rounded-lg font-black border border-slate-800">
+                                    {String(e.selectedNumber).padStart(2, '0')}
                                   </span>
                                 </td>
                                 <td className="p-3">
-                                  <div className="font-bold text-slate-200">{e.firstName}</div>
-                                  {e.username && <span className="text-[10px] text-slate-500">@{e.username}</span>}
+                                  <div className="font-bold text-slate-200">{e.firstName || "Anonymous"}</div>
+                                  <div className="text-[10px] text-slate-500">@{e.username || "no_username"}</div>
                                 </td>
                                 <td className="p-3 font-mono text-slate-400">{e.telegramId}</td>
-                                <td className="p-3 text-slate-400">{formatFriendlyKolkata(e.entryTime || e.reservedAt)}</td>
+                                <td className="p-3 text-slate-400">{formatFriendlyKolkata(e.reservedAt)}</td>
                                 <td className="p-3">
-                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase border ${
-                                    e.status === "Confirmed" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
-                                    e.status === "Winner" ? "bg-amber-500/10 border-amber-500/20 text-amber-400" :
-                                    e.status === "PendingAd" ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
-                                    "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    e.status === "Confirmed" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/10" :
+                                    e.status === "Winner" ? "bg-amber-500/15 text-amber-400 border border-amber-500/10 animate-pulse" :
+                                    e.status === "Rejected" ? "bg-red-500/15 text-red-400 border border-red-500/10" : "bg-slate-800 text-slate-400"
                                   }`}>
-                                    {e.status === "PendingAd" ? "⌛ Watching Ad" : e.status}
+                                    {e.status}
                                   </span>
                                 </td>
                               </tr>
@@ -1049,153 +1029,189 @@ export default function UpiGiveawayAdminManager() {
                   </div>
                 )}
 
-                {/* TAB OUTCOME 2: WINNER VERIFICATION MANAGER */}
+                {/* TAB OUTCOME 2: WINNER VERIFICATION */}
                 {viewTab === "verification" && (
-                  <div className="space-y-6">
-                    <div className="bg-slate-950 p-6 rounded-3xl border border-slate-900 space-y-4">
-                      <div className="flex items-center gap-3">
-                        <Trophy className="w-10 h-10 text-amber-400 shrink-0" />
-                        <div>
-                          <h4 className="font-black text-white text-sm">Lucky Winner Verification</h4>
-                          <p className="text-[11px] text-slate-500">Pick winner, verify selections, and trigger automated wallet rewards</p>
+                  <div className="space-y-6 text-xs text-slate-300">
+                    <div className="p-5 bg-slate-950 border border-slate-900 rounded-2xl space-y-4">
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-1.5">
+                          <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Campaign Winner Target</span>
+                          <h4 className="text-sm font-black text-white flex items-center gap-1.5">
+                            🏁 Winning Target: {selectedGiveaway.totalWinners} Lucky Winners
+                          </h4>
                         </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          selectedGiveaway.winnersDrawn ? "bg-emerald-500/15 text-emerald-400" : "bg-blue-500/15 text-blue-400"
+                        }`}>
+                          {selectedGiveaway.winnersDrawn ? "Completed" : "Awaiting Draw"}
+                        </span>
                       </div>
 
-                      {/* Display Winner Block */}
-                      {selectedGiveaway.winnerId ? (
-                        <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
-                          <div className="grid grid-cols-2 gap-3 text-xs">
-                            <div className="space-y-0.5">
-                              <span className="text-slate-500 font-bold block uppercase text-[9px]">Lucky Winner</span>
-                              <span className="font-black text-slate-200 text-sm">{selectedGiveaway.winnerName}</span>
-                              {selectedGiveaway.winnerUsername && <span className="text-[10px] text-slate-500 block">@{selectedGiveaway.winnerUsername}</span>}
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        To pick a winner, press the <b>Draw Lucky Winner</b> button. A random confirmed number reservation on the board will be picked atomically. You can then approve their payout directly into their Roy Share Wallet, reject the entry if they violated rules, or trigger a redraw.
+                      </p>
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          onClick={handleDrawWinner}
+                          disabled={drawingWinner || selectedGiveaway.status === "Completed" || entries.length === 0}
+                          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-black rounded-xl transition flex items-center gap-1 cursor-pointer"
+                        >
+                          {drawingWinner ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "🎲"}
+                          Draw Lucky Winner
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Active Drawn Winner Showcase */}
+                    {selectedGiveaway.winnerId ? (
+                      <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/35">
+                        <div className="p-4 bg-slate-900/60 border-b border-slate-800/60 flex justify-between items-center">
+                          <span className="font-bold text-slate-200">Drawn Winner Verification Panel</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                            selectedGiveaway.winnerStatus === "Approved" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                            selectedGiveaway.winnerStatus === "Rejected" ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                          }`}>
+                            Winner Status: {selectedGiveaway.winnerStatus || "Pending"}
+                          </span>
+                        </div>
+
+                        <div className="p-5 space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-slate-500 uppercase font-bold">Selected Number</span>
+                              <div className="text-2xl font-black text-emerald-400">
+                                🍀 Card {String(selectedGiveaway.winnerNumber).padStart(2, '0')}
+                              </div>
                             </div>
-                            <div className="space-y-0.5">
-                              <span className="text-slate-500 font-bold block uppercase text-[9px]">Winning Number</span>
-                              <span className="font-black text-amber-400 font-mono text-base bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block">
-                                {String(selectedGiveaway.winnerNumber).padStart(2, "0")}
-                              </span>
-                            </div>
-                            <div className="space-y-0.5">
-                              <span className="text-slate-500 font-bold block uppercase text-[9px]">Wallet Credit Status</span>
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                selectedGiveaway.winnerStatus === "Approved" ? "bg-emerald-500/10 text-emerald-400" :
-                                selectedGiveaway.winnerStatus === "Rejected" ? "bg-rose-500/10 text-rose-400" : "bg-amber-500/10 text-amber-400"
-                              }`}>
-                                {selectedGiveaway.winnerStatus === "Approved" ? "✅ Wallet Credited" : `⏳ ${selectedGiveaway.winnerStatus}`}
-                              </span>
-                            </div>
-                            <div className="space-y-0.5">
-                              <span className="text-slate-500 font-bold block uppercase text-[9px]">Prize Payout Amount</span>
-                              <span className="font-black text-slate-200 text-sm">₹{selectedGiveaway.prizeAmount}</span>
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-slate-500 uppercase font-bold">Winner Profile</span>
+                              <div className="font-black text-white text-base">
+                                {selectedGiveaway.winnerName}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                Telegram ID: {selectedGiveaway.winnerId} {selectedGiveaway.winnerUsername && `| @${selectedGiveaway.winnerUsername}`}
+                              </div>
                             </div>
                           </div>
 
-                          {/* ACTION BUTTONS (VERIFICATION CONTROL) */}
-                          <div className="flex flex-wrap gap-2 pt-2 text-xs">
+                          {/* ACTION BUTTONS (Approve, Reject, Redraw) */}
+                          <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-900">
                             {selectedGiveaway.winnerStatus === "Pending" && (
                               <>
                                 <button
                                   onClick={handleApproveWinner}
                                   disabled={verifyingWinner}
-                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-black rounded-xl transition flex items-center gap-1 cursor-pointer"
+                                  className="px-4.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-black rounded-xl transition flex items-center gap-1.5 cursor-pointer"
                                 >
-                                  <UserCheck className="w-4 h-4" />
-                                  Approve Winner
+                                  {verifyingWinner ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-4 h-4" />}
+                                  Approve Winner (Pay ₹{selectedGiveaway.prizeAmount})
                                 </button>
                                 <button
-                                  onClick={() => setShowRejectModal(true)}
+                                  onClick={() => {
+                                    setRejectionReason("");
+                                    setShowRejectModal(true);
+                                  }}
                                   disabled={verifyingWinner}
-                                  className="px-4 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 font-bold rounded-xl border border-rose-500/20 transition flex items-center gap-1 cursor-pointer"
+                                  className="px-4 py-2.5 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 disabled:opacity-50 text-red-400 font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
                                 >
                                   <XCircle className="w-4 h-4" />
                                   Reject Winner
                                 </button>
                               </>
                             )}
+
                             <button
                               onClick={handleRedrawWinner}
-                              disabled={drawingWinner}
-                              className="px-4 py-2 bg-slate-800 hover:bg-slate-750 disabled:opacity-50 text-slate-200 font-bold rounded-xl transition flex items-center gap-1 cursor-pointer"
+                              disabled={drawingWinner || selectedGiveaway.status === "Completed"}
+                              className="px-4 py-2.5 bg-slate-850 hover:bg-slate-800 disabled:opacity-50 text-slate-300 font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
                             >
-                              <RefreshCw className={`w-4 h-4 ${drawingWinner ? "animate-spin" : ""}`} />
+                              <RefreshCw className="w-3.5 h-3.5" />
                               Redraw Winner
                             </button>
                           </div>
                         </div>
-                      ) : (
-                        <div className="p-8 text-center bg-slate-900 border border-slate-800 border-dashed rounded-2xl space-y-3">
-                          <Trophy className="w-10 h-10 mx-auto text-slate-600" />
-                          <p className="text-xs text-slate-400">No winners have been selected on this board yet.</p>
-                          <button
-                            onClick={handleDrawWinner}
-                            disabled={drawingWinner || activeSelectionsCount === 0}
-                            className="px-5 py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-black text-xs rounded-xl transition inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-                          >
-                            {drawingWinner ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                            Draw Lucky Winner Now
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* TAB OUTCOME 3: DETAILED ANALYTICS */}
-                {viewTab === "analytics" && (
-                  <div className="space-y-4 text-xs">
-                    <span className="text-slate-400 font-bold block uppercase tracking-wider">Analytics Breakdown</span>
-                    
-                    {analyticsLoading ? (
-                      <div className="py-12 text-center text-slate-500">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
-                        Analyzing...
-                      </div>
-                    ) : analyticsData ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-slate-950 border border-slate-900 p-4 rounded-2xl space-y-1">
-                          <span className="text-slate-500 uppercase text-[9px] font-bold">Total Confirmed Board Entries</span>
-                          <span className="text-lg font-black text-white">{analyticsData.confirmedEntries}</span>
-                        </div>
-                        <div className="bg-slate-950 border border-slate-900 p-4 rounded-2xl space-y-1">
-                          <span className="text-slate-500 uppercase text-[9px] font-bold">Ad Watching Attempts</span>
-                          <span className="text-lg font-black text-blue-400">{analyticsData.pendingAdEntries}</span>
-                        </div>
-                        <div className="bg-slate-950 border border-slate-900 p-4 rounded-2xl space-y-1">
-                          <span className="text-slate-500 uppercase text-[9px] font-bold">Approved Winners</span>
-                          <span className="text-lg font-black text-emerald-400">{analyticsData.approvedEntries}</span>
-                        </div>
-                        <div className="bg-slate-950 border border-slate-900 p-4 rounded-2xl space-y-1">
-                          <span className="text-slate-500 uppercase text-[9px] font-bold">System Participation Ratio</span>
-                          <span className="text-lg font-black text-purple-400">{analyticsData.participationRate}%</span>
-                        </div>
                       </div>
                     ) : (
-                      <div className="p-8 text-center text-slate-500">Failed to generate campaign analytics.</div>
+                      <div className="py-12 text-center border-2 border-dashed border-slate-800 rounded-2xl text-slate-500">
+                        No winner has been drawn for this board yet. Click Draw Lucky Winner to select one!
+                      </div>
                     )}
                   </div>
                 )}
 
-                {/* TAB OUTCOME 4: CAMPAIGN AUDIT LOGS */}
+                {/* TAB OUTCOME 3: ANALYTICS INSIGHTS */}
+                {viewTab === "analytics" && (
+                  <div className="space-y-4 text-xs">
+                    {analyticsLoading ? (
+                      <div className="py-12 text-center text-slate-500">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-slate-600" />
+                        Loading analytics data...
+                      </div>
+                    ) : analyticsData ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-900 space-y-3">
+                          <h4 className="font-bold text-white border-b border-slate-800 pb-1.5 uppercase text-[10px] tracking-wider text-emerald-400">Campaign Budget Analysis</h4>
+                          <div className="flex justify-between py-1 border-b border-slate-900/40">
+                            <span className="text-slate-400">Maximum Budget Target:</span>
+                            <span className="font-bold text-slate-200">₹{selectedGiveaway.prizeAmount * selectedGiveaway.totalWinners}</span>
+                          </div>
+                          <div className="flex justify-between py-1 border-b border-slate-900/40">
+                            <span className="text-slate-400">Total Payouts Credited:</span>
+                            <span className="font-bold text-emerald-400">₹{analyticsData.distributedBudget}</span>
+                          </div>
+                          <div className="flex justify-between py-1">
+                            <span className="text-slate-400">Remaining Budget Pool:</span>
+                            <span className="font-bold text-amber-500">₹{analyticsData.remainingBudget}</span>
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-900 space-y-3">
+                          <h4 className="font-bold text-white border-b border-slate-800 pb-1.5 uppercase text-[10px] tracking-wider text-emerald-400">Activity & Conversion Metrics</h4>
+                          <div className="flex justify-between py-1 border-b border-slate-900/40">
+                            <span className="text-slate-400">Total Registered Board Members:</span>
+                            <span className="font-bold text-slate-200">{analyticsData.totalEntries}</span>
+                          </div>
+                          <div className="flex justify-between py-1 border-b border-slate-900/40">
+                            <span className="text-slate-400">LMA Participation Rate:</span>
+                            <span className="font-bold text-slate-200">{analyticsData.participationRate}%</span>
+                          </div>
+                          <div className="flex justify-between py-1">
+                            <span className="text-slate-400">Watch-Ad-Pending sessions:</span>
+                            <span className="font-bold text-slate-400">{analyticsData.pendingAdEntries}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="py-12 text-center text-slate-500">Failed to load analytics details.</div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB OUTCOME 4: AUDIT LOGS */}
                 {viewTab === "audit-logs" && (
                   <div className="space-y-4 text-xs">
-                    <span className="text-slate-400 font-bold block">Campaign Action History</span>
-
+                    <span className="text-slate-400 font-bold block">Board Verification Audit Logs</span>
                     {logsLoading ? (
-                      <div className="py-12 text-center text-slate-500">Loading audit history...</div>
+                      <div className="py-12 text-center text-slate-500">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-slate-600" />
+                        Loading logs...
+                      </div>
                     ) : auditLogs.length === 0 ? (
-                      <div className="py-12 text-center text-slate-500">No actions logged on this campaign.</div>
+                      <div className="py-12 text-center text-slate-500">No audit logs found for this campaign.</div>
                     ) : (
-                      <div className="space-y-3.5 max-h-96 overflow-y-auto pr-2 bg-slate-950/40 p-4 rounded-2xl border border-slate-900">
+                      <div className="bg-slate-950 border border-slate-900 rounded-2xl p-4 max-h-80 overflow-y-auto space-y-3">
                         {auditLogs.map(log => (
-                          <div key={log.id} className="p-3 bg-slate-950/80 rounded-xl border border-slate-900 space-y-1">
-                            <div className="flex justify-between">
-                              <span className="font-bold text-slate-300">{log.action}</span>
-                              <span className="text-[10px] text-slate-500">{formatFriendlyKolkata(log.timestamp)}</span>
+                          <div key={log.id} className="border-b border-slate-900/60 pb-2.5 last:border-b-0 space-y-1">
+                            <div className="flex justify-between text-[10px]">
+                              <span className="font-black text-emerald-400">{log.action}</span>
+                              <span className="text-slate-500">{formatFriendlyKolkata(log.timestamp)}</span>
                             </div>
-                            <pre className="text-[10px] text-slate-500 bg-slate-950 p-2 rounded-lg border border-slate-900/40 overflow-x-auto whitespace-pre-wrap font-mono">
-                              {JSON.stringify(log.details, null, 2)}
-                            </pre>
+                            {log.details && (
+                              <p className="text-[10px] text-slate-400 font-mono break-all bg-slate-900/40 p-1.5 rounded-lg border border-slate-900/50">
+                                {JSON.stringify(log.details)}
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1205,11 +1221,13 @@ export default function UpiGiveawayAdminManager() {
 
               </motion.div>
             ) : (
-              <div className="h-full bg-slate-900/50 border border-slate-800 border-dashed rounded-3xl p-16 text-center text-slate-500 flex flex-col items-center justify-center space-y-3">
-                <Gift className="w-12 h-12 text-slate-700 animate-pulse" />
+              <div className="h-full bg-slate-900/50 border border-slate-800 rounded-3xl p-12 text-center text-slate-500 flex flex-col justify-center items-center gap-3">
+                <Gift className="w-12 h-12 text-slate-600 animate-pulse" />
                 <div>
-                  <h3 className="text-white font-bold text-sm">No Lucky Board Selected</h3>
-                  <p className="text-xs text-slate-500">Choose a Lucky Number board from the campaign list to review selections and draw winners!</p>
+                  <h3 className="font-black text-slate-300">Select a Campaign Board</h3>
+                  <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                    Click any Lucky Draw Campaign from the left list to open its live real-time entries, analytics, audit logs, and pick winners.
+                  </p>
                 </div>
               </div>
             )}
@@ -1223,39 +1241,36 @@ export default function UpiGiveawayAdminManager() {
         {showRejectModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 max-w-sm w-full p-6 rounded-3xl space-y-4 shadow-2xl text-xs"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-slate-900 border border-slate-800 p-6 rounded-3xl w-full max-w-md space-y-4 shadow-2xl"
             >
-              <div className="flex items-center gap-2.5 text-rose-500 border-b border-slate-850 pb-2.5">
-                <XCircle className="w-5 h-5" />
-                <h3 className="font-black text-white text-sm">Reject Lucky Winner</h3>
-              </div>
-              <p className="text-slate-400">Please provide a reason. This explanation will be direct-messaged to the user via our Telegram bot.</p>
-              
               <div className="space-y-1.5">
-                <label className="text-slate-500 font-bold block uppercase text-[9px]">Rejection Reason</label>
-                <textarea
-                  rows={3}
-                  required
-                  placeholder="e.g., Duplicate Telegram account detected / Rules violation."
-                  value={rejectionReason}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none focus:border-rose-500"
-                />
+                <h3 className="text-base font-black text-white">Specify Rejection Reason</h3>
+                <p className="text-xs text-slate-400">
+                  Provide a brief reason why this entry is being rejected. The user will be notified instantly via the Telegram Bot.
+                </p>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 text-[11px]">
+              <input
+                type="text"
+                placeholder="e.g., Suspicious Telegram bot user profile / rule violation"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none text-xs focus:border-red-500"
+              />
+
+              <div className="flex gap-2 justify-end text-xs">
                 <button
                   onClick={() => setShowRejectModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-750 font-bold rounded-lg cursor-pointer"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-750 font-bold rounded-xl transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleRejectWinner}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 font-bold rounded-lg cursor-pointer text-white"
+                  className="px-4.5 py-2.5 bg-red-600 hover:bg-red-500 font-black text-white rounded-xl transition cursor-pointer"
                 >
                   Confirm Rejection
                 </button>

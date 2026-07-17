@@ -18,16 +18,15 @@ import {
   ChevronRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { parseInKolkata, getGiveawayStatus } from "../lib/dateUtils";
 import { loadAdsgramSDK, getAdsgramConfig } from "../lib/adsManager";
 
-interface PublicUpiGiveawayPageProps {
+interface PublicLuckyNumberGiveawayPageProps {
   giveawayId: string;
   onBack: () => void;
   onNavigate?: (view: string) => void;
 }
 
-export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }: PublicUpiGiveawayPageProps) {
+export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNavigate }: PublicLuckyNumberGiveawayPageProps) {
   const { user } = useTelegramAuth();
   
   const [giveaway, setGiveaway] = useState<any>(null);
@@ -40,14 +39,11 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
   const [enrollError, setEnrollError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // Countdown State
-  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: false });
-
   // 1. Listen to Giveaway in real-time
   useEffect(() => {
     if (!giveawayId) return;
 
-    const docRef = doc(db, "upi_giveaways", giveawayId);
+    const docRef = doc(db, "lucky_number_campaigns", giveawayId);
     const unsub = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
         setGiveaway({ id: snap.id, ...snap.data() });
@@ -65,7 +61,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
   useEffect(() => {
     if (!giveawayId) return;
 
-    const q = query(collection(db, "upi_giveaway_entries"), where("giveawayId", "==", giveawayId));
+    const q = query(collection(db, "lucky_number_entries"), where("campaignId", "==", giveawayId));
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => d.data());
       setEntries(list);
@@ -75,32 +71,6 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
 
     return unsub;
   }, [giveawayId]);
-
-  // 3. Countdown Clock Timer
-  useEffect(() => {
-    if (!giveaway?.endDate) return;
-
-    const calculateTimeLeft = () => {
-      const parsedEnd = parseInKolkata(giveaway.endDate);
-      const difference = +parsedEnd - +new Date();
-      if (difference <= 0) {
-        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true });
-        return;
-      }
-
-      setTimeLeft({
-        days: Math.floor(difference / (1000 * 60 * 60 * 24)),
-        hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
-        minutes: Math.floor((difference / 1000 / 60) % 60),
-        seconds: Math.floor((difference / 1000) % 60),
-        isExpired: false
-      });
-    };
-
-    calculateTimeLeft();
-    const interval = setInterval(calculateTimeLeft, 1000);
-    return () => clearInterval(interval);
-  }, [giveaway]);
 
   if (loading) {
     return (
@@ -122,7 +92,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
           <p className="text-sm text-slate-400">This Lucky Number Giveaway was not found or has been removed.</p>
           <button
             onClick={onBack}
-            className="px-6 py-3 bg-slate-800 hover:bg-slate-700 font-bold rounded-xl text-sm transition cursor-pointer"
+            className="px-6 py-3 bg-slate-800 hover:bg-slate-750 font-bold rounded-xl text-sm transition cursor-pointer"
           >
             Back to Home
           </button>
@@ -131,8 +101,8 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
     );
   }
 
-  const isLive = getGiveawayStatus(giveaway) === "LIVE";
-  const myEntry = entries.find(e => e.telegramId === String(user?.telegramId));
+  const isLive = giveaway.status === "Live";
+  const myEntry = entries.find(e => e.telegramId === String(user?.telegramId) && e.status !== "PendingAd");
 
   // Determine bounds of the Board
   const minNum = Number(giveaway.minNumber || 1);
@@ -157,7 +127,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
     buckets.forEach(b => {
       b.count = entries.filter(e => {
         const num = Number(e.selectedNumber);
-        return num >= b.min && num <= b.max && (e.status === "Confirmed" || e.status === "Winner" || e.status === "Approved");
+        return num >= b.min && num <= b.max && (e.status === "Confirmed" || e.status === "Winner");
       }).length;
     });
 
@@ -223,7 +193,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
 
     try {
       // Step 1: Request temporary reservation on backend to prevent race condition
-      const reserveRes = await fetch(`${API_BASE}/api/upi-giveaway/reserve-number`, {
+      const reserveRes = await fetch(`${API_BASE}/api/lucky-number-giveaway/reserve-number`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -264,7 +234,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
       controller.show()
         .then(async () => {
           // Ad successfully completed! Confirm permanently.
-          const confirmRes = await fetch(`${API_BASE}/api/upi-giveaway/confirm-number`, {
+          const confirmRes = await fetch(`${API_BASE}/api/lucky-number-giveaway/confirm-number`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -284,7 +254,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
         .catch(async (err: any) => {
           // User closed ad early or load failed. Release the reservation.
           console.warn("[LuckyNumber] Ad failed or closed prematurely. Releasing reservation...", err);
-          await fetch(`${API_BASE}/api/upi-giveaway/release-number`, {
+          await fetch(`${API_BASE}/api/lucky-number-giveaway/release-number`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -323,8 +293,8 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
 
       <main className="p-4 max-w-md mx-auto space-y-6 relative z-10">
 
-        {/* Winner Approved Box - Immediate Wallet Wallet Payout Notification */}
-        {myEntry && (myEntry.status === "Winner" && myEntry.paymentStatus === "Paid") && (
+        {/* Winner Showcase Panel */}
+        {myEntry && myEntry.status === "Winner" && (
           <motion.div 
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -368,7 +338,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
               <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
                 isLive ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-red-500/10 border-red-500/20 text-red-400"
               }`}>
-                {isLive ? "Live Board" : "Closed"}
+                {isLive ? "Live" : "Closed"}
               </span>
             </div>
           </div>
@@ -393,36 +363,6 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
                 <span className="text-lg font-black text-white">{giveaway.totalWinners}</span>
               </div>
             </div>
-
-            {/* Countdown / Expired Banner */}
-            {isLive ? (
-              <div className="space-y-2">
-                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block text-center">Closes In</span>
-                <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                  <div className="bg-slate-950/40 py-2 rounded-xl border border-slate-800">
-                    <span className="text-base font-black text-white block">{timeLeft.days}</span>
-                    <span className="text-[8px] text-slate-500 font-bold uppercase">Days</span>
-                  </div>
-                  <div className="bg-slate-950/40 py-2 rounded-xl border border-slate-800">
-                    <span className="text-base font-black text-white block">{timeLeft.hours}</span>
-                    <span className="text-[8px] text-slate-500 font-bold uppercase">Hrs</span>
-                  </div>
-                  <div className="bg-slate-950/40 py-2 rounded-xl border border-slate-800">
-                    <span className="text-base font-black text-white block">{timeLeft.minutes}</span>
-                    <span className="text-[8px] text-slate-500 font-bold uppercase">Mins</span>
-                  </div>
-                  <div className="bg-slate-950/40 py-2 rounded-xl border border-slate-800">
-                    <span className="text-base font-black text-white block">{timeLeft.seconds}</span>
-                    <span className="text-[8px] text-slate-500 font-bold uppercase">Secs</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 text-center text-red-400 text-xs font-bold flex items-center justify-center gap-2">
-                <Clock className="w-4 h-4" />
-                This Lucky Number Board is closed.
-              </div>
-            )}
           </div>
         </div>
 
@@ -472,7 +412,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
               <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800 text-center">
                 <span className="text-slate-500 text-[10px] block font-bold">Remaining Available</span>
                 <span className="text-sm font-black text-emerald-400">
-                  {totalNumbersCount - entries.filter(e => e.status === "Confirmed" || e.status === "Winner" || e.status === "Approved").length}
+                  {totalNumbersCount - entries.filter(e => e.status === "Confirmed" || e.status === "Winner").length}
                 </span>
               </div>
             </div>
@@ -579,9 +519,7 @@ export default function PublicUpiGiveawayPage({ giveawayId, onBack, onNavigate }
                 {enrolling ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
-                  <>
-                    <span>Watch Sponsor Ad & Confirm 🍀</span>
-                  </>
+                  <span>Watch Sponsor Ad & Confirm 🍀</span>
                 )}
               </button>
             </div>

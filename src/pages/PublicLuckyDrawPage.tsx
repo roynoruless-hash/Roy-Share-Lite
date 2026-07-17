@@ -254,7 +254,7 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
         campaignId: giveawayId,
         telegramId: user?.telegramId
       };
-      const endpoint = "/api/upi-giveaway/lucky-draw/enroll";
+      const endpoint = "/api/lucky-number-giveaway/lucky-draw/enroll";
       console.log(`[LuckyDraw] Sending payload to ${endpoint}:`, payload);
       
       const res = await fetch(endpoint, {

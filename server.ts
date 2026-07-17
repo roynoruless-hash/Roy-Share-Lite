@@ -42,7 +42,7 @@ import { getStorage } from "firebase-admin/storage";
 fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] Vite import removed\n`);
 import { getDb } from "./src/lib/firebase";
 import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch, deleteField } from "firebase/firestore";
-import upiGiveawayRouter from "./src/routes/upiGiveaway";
+import luckyNumberGiveawayRouter from "./src/routes/luckyNumberGiveaway";
 import { adjustTrustScore } from "./src/lib/trustScore";
 import { evaluateReward, getEconomySettings, saveEconomySettings } from "./src/lib/economy";
 import { getGiveawayStatus } from "./src/lib/dateUtils";
@@ -282,8 +282,8 @@ async function startServer() {
     res.status(410).json({ error: "Feature removed", success: false });
   });
 
-  // Register UPI Giveaway Router
-  app.use("/api/upi-giveaway", upiGiveawayRouter);
+  // Register Lucky Number Giveaway Router
+  app.use("/api/lucky-number-giveaway", luckyNumberGiveawayRouter);
 
   // Global Request Logger
   app.use((req, res, next) => {
