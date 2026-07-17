@@ -10014,20 +10014,23 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Check duplicate by event ID
       let isDuplicate = false;
       if (logEntry.adEventId) {
-        const q = query(rewardLogRef, where("adEventId", "==", logEntry.adEventId), where("status", "==", "success"));
+        const q = query(rewardLogRef, where("adEventId", "==", logEntry.adEventId));
         const snap = await getDocs(q);
         if (!snap.empty) {
-          isDuplicate = true;
+          isDuplicate = snap.docs.some(doc => doc.data().status === "success");
         }
       }
 
       // Time-based throttle fallback: prevent duplicate requests for the same user in under 5 seconds
       if (!isDuplicate) {
         const fiveSecAgo = new Date(Date.now() - 5000).toISOString();
-        const qUser = query(rewardLogRef, where("userId", "==", String(userid)), where("timestamp", ">=", fiveSecAgo), where("status", "==", "success"));
+        const qUser = query(rewardLogRef, where("userId", "==", String(userid)));
         const snapUser = await getDocs(qUser);
         if (!snapUser.empty) {
-          isDuplicate = true;
+          isDuplicate = snapUser.docs.some(doc => {
+            const data = doc.data();
+            return data.status === "success" && data.timestamp >= fiveSecAgo;
+          });
         }
       }
 
@@ -10074,11 +10077,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       console.log(`[ADSGRAM CALLBACK] SUCCESS: Balance credited and callback logged for user ${userid}`);
       return res.status(200).send("OK");
     } catch (e: any) {
-      console.error("[ADSGRAM CALLBACK] Fatal Error:", e);
+      console.error("[ADSGRAM CALLBACK] Fatal Error Stack:", e.stack || e);
       logEntry.status = "failed";
-      logEntry.error = e.message;
-      await addDoc(rewardLogRef, logEntry).catch(() => {});
-      return res.status(500).send("Internal Server Error");
+      logEntry.error = e.message || String(e);
+      await addDoc(rewardLogRef, logEntry).catch((err) => {
+        console.error("[ADSGRAM CALLBACK] Error logging failure to firestore:", err);
+      });
+      return res.status(400).send(`Error processing reward: ${e.message || e}`);
     }
   };
 
