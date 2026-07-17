@@ -1,5 +1,5 @@
 import express from 'express';
-import { collection, doc, getDoc, setDoc, getDocs, query, where, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, getDocs, query, where, updateDoc, serverTimestamp, addDoc, limit, orderBy } from 'firebase/firestore';
 import { GoogleGenAI } from "@google/genai";
 
 export function setupAdvertiserRoutes(app: express.Express, db: any) {
@@ -171,7 +171,7 @@ app.get('/api/advertiser/:id/notifications', async (req, res) => {
     const q = query(
       collection(db, 'advertiser_notifications'), 
       where('advertiserId', '==', req.params.id),
-      db.collection('something').orderBy('createdAt', 'desc'),
+      orderBy('createdAt', 'desc'),
       limit(20)
     );
     const snap = await getDocs(q);

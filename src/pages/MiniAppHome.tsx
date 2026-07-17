@@ -66,6 +66,7 @@ const ShortenPage = lazy(() => import("./ShortenPage"));
 const RewardEarningsPage = lazy(() => import("./RewardEarningsPage"));
 const PublicLuckyNumberGiveawayPage = lazy(() => import("./PublicLuckyNumberGiveawayPage"));
 const PublicLuckyDrawPage = lazy(() => import("./PublicLuckyDrawPage"));
+import { LuckySpinUserView } from "../components/LuckySpinUserView";
 
 interface MembershipVerificationProps {
   user: any;
@@ -751,6 +752,10 @@ export const MiniAppHome: React.FC = () => {
     return <DriveUploadPage onBack={() => setCurrentView("home")} />;
   }
 
+  if (currentView === "lucky-spin") {
+    return <LuckySpinUserView onBack={() => setCurrentView("home")} />;
+  }
+
   if (currentView === "dashboard") {
     return <DashboardPage onBack={() => setCurrentView("home")} onNavigate={setCurrentView} />;
   }
@@ -818,6 +823,7 @@ export const MiniAppHome: React.FC = () => {
     { id: "my-links", label: "My Links", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
     { id: "withdraw", label: "Withdraw", icon: CreditCard, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
     { id: "refer", label: "Refer & Earn", icon: Users, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
+    { id: "lucky-spin", label: "Lucky Spin Live", icon: Sparkles, color: "bg-gradient-to-r from-pink-550 to-violet-600", shadow: "shadow-pink-500/20" },
     { id: "earn-rewards", label: "Reward Tasks", icon: ClipboardList, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
     { id: "announcements", label: "Announcements", icon: Bell, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
     { id: "settings", label: "Settings", icon: Settings, color: "bg-slate-500", shadow: "shadow-slate-500/20" },

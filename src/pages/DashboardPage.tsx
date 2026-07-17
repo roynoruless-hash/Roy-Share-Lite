@@ -25,7 +25,8 @@ import {
   CheckCircle2,
   ArrowLeft,
   Share2,
-  Youtube
+  Youtube,
+  Sparkles
 } from "lucide-react";
 
 // Mock data as requested (no backend changes)
@@ -324,6 +325,7 @@ const DashboardPage = ({
             {!isTelegram && <ActionButton title="Connect Drive" icon={Plus} color="bg-emerald-600" onClick={() => onNavigate?.("upload")} delay={0.3} />}
             <ActionButton title="Withdraw" icon={Wallet} color="bg-orange-600" onClick={() => onNavigate?.("withdraw")} delay={0.5} />
             <ActionButton title="Refer & Earn" icon={Share2} color="bg-indigo-600" onClick={() => onNavigate?.("referral")} delay={0.6} />
+            <ActionButton title="Lucky Spin Live" icon={Sparkles} color="bg-gradient-to-r from-pink-500 to-violet-600" onClick={() => onNavigate?.("lucky-spin")} delay={0.7} />
           </div>
         </div>
 

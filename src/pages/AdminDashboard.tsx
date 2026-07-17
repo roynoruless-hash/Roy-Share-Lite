@@ -80,6 +80,7 @@ import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
 import TelegramBroadcastCenter from "../components/TelegramBroadcastCenter";
 import LuckyNumberGiveawayAdminManager from "../components/LuckyNumberGiveawayAdminManager";
+import { LuckySpinAdminView } from "../components/LuckySpinAdminView";
 import { FraudInvestigationCenter } from "../components/FraudInvestigationCenter";
 import buildInfo from '../build-info.json';
 import RewardsLeaderboard from "../components/Admin/RewardsLeaderboard";
@@ -3114,182 +3115,6 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
-  const fetchBroadcasts = async () => {
-    setBroadcastsLoading(true);
-    try {
-      const res = await authenticatedFetch("/api/admin/broadcasts");
-      if (res.ok) {
-        setBroadcasts(await res.json());
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setBroadcastsLoading(false);
-    }
-  };
-
-  const sendBroadcast = async (status: string) => {
-    if (
-      status === "Sent" &&
-      !broadcastForm.message &&
-      !broadcastForm.mediaUrl
-    ) {
-      alert("Please provide a message or media content.");
-      return;
-    }
-
-    setBroadcastsLoading(true);
-    setBroadcastStats(null);
-    if (status === "Sent") {
-      setSendStatus("preparing");
-    }
-
-    try {
-      let scheduledAt = null;
-      if (
-        status === "Scheduled" &&
-        broadcastForm.scheduledAtDate &&
-        broadcastForm.scheduledAtTime
-      ) {
-        scheduledAt = `${broadcastForm.scheduledAtDate}T${broadcastForm.scheduledAtTime}:00`;
-      }
-
-      const payload = {
-        type: broadcastForm.type,
-        message: broadcastForm.message,
-        caption: broadcastForm.caption,
-        mediaUrl: broadcastForm.mediaUrl,
-        buttonText: broadcastForm.buttonText,
-        buttonLink: broadcastForm.buttonLink,
-        targetAudience: broadcastForm.targetAudience,
-        status,
-        scheduledAt,
-      };
-
-      if (status === "Sent") {
-        // Show preparing state for 600ms for high quality feedback
-        await new Promise((r) => setTimeout(r, 600));
-        setSendStatus("sending");
-      }
-
-      const res = await authenticatedFetch("/api/admin/broadcasts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        if (status === "Sent") {
-          setSendStatus("success");
-          setBroadcastStats({
-            totalUsers: data.totalUsers,
-            delivered: data.delivered,
-            failed: data.failed,
-            skipped: data.skipped,
-            timeTaken: data.timeTaken,
-          });
-
-          // Automatically run a self-test after live broadcast is done
-          setTimeout(() => {
-            runSelfTest();
-          }, 1500);
-        } else {
-          alert("✅ Broadcast Scheduled Successfully");
-        }
-
-        setBroadcastForm({
-          type: "text",
-          message: "",
-          caption: "",
-          mediaUrl: "",
-          buttonText: "",
-          buttonLink: "",
-          targetAudience: "👥 All Users",
-          scheduledAtDate: "",
-          scheduledAtTime: "",
-        });
-        setIsScheduling(false);
-        if (broadcastTab === "📊 Broadcast History") fetchBroadcasts();
-      } else {
-        if (status === "Sent") {
-          setSendStatus("failed");
-        } else {
-          alert(
-            "Failed to schedule broadcast: " + (data.error || "Unknown error"),
-          );
-        }
-      }
-    } catch (err: any) {
-      console.error(err);
-      if (status === "Sent") {
-        setSendStatus("failed");
-      } else {
-        alert("Error sending broadcast: " + err.message);
-      }
-    } finally {
-      setBroadcastsLoading(false);
-    }
-  };
-
-  const runSelfTest = async () => {
-    setIsSelfTesting(true);
-    setSelfTestError("");
-    setSelfTestResults(null);
-    try {
-      const res = await authenticatedFetch("/api/admin/broadcasts/self-test", {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSelfTestResults(data);
-      } else {
-        setSelfTestError(data.error || "Self-test failed.");
-      }
-    } catch (err: any) {
-      console.error("Self-test error:", err);
-      setSelfTestError(err.message || "Network error running self-test.");
-    } finally {
-      setIsSelfTesting(false);
-    }
-  };
-
-  const improveWithAi = async () => {
-    const originalText =
-      broadcastForm.type === "text" || broadcastTab === "🎯 Targeted Broadcast"
-        ? broadcastForm.message
-        : broadcastForm.caption;
-
-    if (!originalText || originalText.trim() === "") {
-      alert("Please enter some text before clicking 'Improve with AI'.");
-      return;
-    }
-
-    setIsImprovingWithAi(true);
-    setAiOriginalText(originalText);
-    setAiGeneratedText("");
-    setAiError("");
-    setShowAiView(true);
-
-    try {
-      const res = await authenticatedFetch("/api/admin/broadcasts/improve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: originalText }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setAiGeneratedText(data.improvedText);
-      } else {
-        setAiError(data.error || "AI Generation failed.");
-      }
-    } catch (err: any) {
-      console.error("AI Improvement error:", err);
-      setAiError(err.message || "Network error. Please check Gemini settings.");
-    } finally {
-      setIsImprovingWithAi(false);
-    }
-  };
 
   const handleTicketAiAnalyze = async (ticketId: string) => {
     if (aiAnalyzing) return;
@@ -4872,6 +4697,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "📱 Telegram Settings",
               "🍀 Lucky Number Giveaway",
               "🎁 Lucky Draw Winner",
+              "🎡 Lucky Spin Live Event",
             ].map((btn) => (
               <button
                 key={btn}
@@ -12784,6 +12610,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             <LuckyDrawWinnerManager />
           )}
 
+          {activeTab === "🎡 Lucky Spin Live Event" && (
+            <LuckySpinAdminView />
+          )}
+
           {activeTab === "📄 Ads.txt Manager" && (
             <div className="space-y-6">
               {/* Header Panel */}
@@ -14283,6 +14113,18 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
                     {settingsTab === "💸 Withdrawal Settings" && (
                       <div className="space-y-6 max-w-5xl pb-32">
+                        {systemSettingsSuccess && (
+                          <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-2xl flex items-center gap-3">
+                            <span className="text-xl">✅</span>
+                            <span className="font-medium text-sm">{systemSettingsSuccess}</span>
+                          </div>
+                        )}
+                        {systemSettingsError && (
+                          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-2xl flex items-center gap-3">
+                            <span className="text-xl">🚨</span>
+                            <span className="font-medium text-sm">{systemSettingsError}</span>
+                          </div>
+                        )}
                         {/* Summary Header */}
                         <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-xl">
                           <div>
@@ -14699,7 +14541,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                   Reset
                                 </button>
                                 <button
-                                  onClick={saveSystemSettings}
+                                  onClick={() => saveSystemSettings(systemSettings)}
                                   disabled={systemSettingsSaving}
                                   className="px-4 py-2 bg-white text-indigo-600 hover:bg-indigo-50 font-bold rounded-xl text-xs transition disabled:opacity-50 cursor-pointer"
                                 >
