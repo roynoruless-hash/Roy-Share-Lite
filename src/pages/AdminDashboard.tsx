@@ -1661,7 +1661,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const deleteWalkthrough = async (id: string) => {
     if (!confirm("Are you sure you want to delete this walkthrough?")) return;
     try {
-      const res = await authenticatedFetch("/api/admin/gamemonetize/walkthroughs/${id}", {
+      const res = await authenticatedFetch(`/api/admin/gamemonetize/walkthroughs/${id}`, {
         method: "DELETE"
       });
       const data = await res.json();
@@ -1751,7 +1751,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const handleDeleteGpTask = async (id: string) => {
     if (!confirm("Are you sure you want to delete this GP links task?")) return;
     try {
-      const res = await authenticatedFetch("/api/admin/gplinks-tasks/${id}", {
+      const res = await authenticatedFetch(`/api/admin/gplinks-tasks/${id}`, {
         method: "DELETE"
       });
       if (!res.ok) throw new Error("Failed to delete GP links task");
@@ -1764,7 +1764,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const handleToggleGpTaskStatus = async (task: any) => {
     try {
       const newStatus = task.status === "Active" ? "Paused" : "Active";
-      const res = await authenticatedFetch("/api/admin/gplinks-tasks/${task.id}", {
+      const res = await authenticatedFetch(`/api/admin/gplinks-tasks/${task.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...task, status: newStatus })
@@ -2524,7 +2524,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setProvidersError("");
     setProvidersSuccess("");
     try {
-      const res = await authenticatedFetch("/api/admin/ads-txt-providers/${id}", {
+      const res = await authenticatedFetch(`/api/admin/ads-txt-providers/${id}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -2553,7 +2553,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setProvidersSuccess("");
     const newStatus = !currentStatus;
     try {
-      const res = await authenticatedFetch("/api/admin/ads-txt-providers/${id}/toggle", {
+      const res = await authenticatedFetch(`/api/admin/ads-txt-providers/${id}/toggle`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: newStatus }),
@@ -2990,7 +2990,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     if (!window.confirm("Are you sure you want to delete this category?")) return;
     setCategoryError(null);
     try {
-      const res = await authenticatedFetch("/api/admin/game-categories/${id}", {
+      const res = await authenticatedFetch(`/api/admin/game-categories/${id}`, {
         method: "DELETE"
       });
       const data = await res.json();
@@ -3186,7 +3186,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
   const updatePublishedGameStatus = async (gameId: string, updates: any) => {
     try {
-      const res = await authenticatedFetch("/api/admin/games/${gameId}", {
+      const res = await authenticatedFetch(`/api/admin/games/${gameId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
@@ -3214,7 +3214,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setEditGameError("");
     setEditGameSuccess("");
     try {
-      const res = await authenticatedFetch("/api/admin/games/${editingGame.id}", {
+      const res = await authenticatedFetch(`/api/admin/games/${editingGame.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editingGame)
@@ -3244,7 +3244,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       return;
     }
     try {
-      const res = await authenticatedFetch("/api/admin/games/${gameId}", {
+      const res = await authenticatedFetch(`/api/admin/games/${gameId}`, {
         method: "DELETE"
       });
       const data = await res.json();
@@ -3683,7 +3683,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
     setBackupLoading(true);
     try {
-      const res = await authenticatedFetch("/api/admin/backups/${id}/restore", {
+      const res = await authenticatedFetch(`/api/admin/backups/${id}/restore`, {
         method: "POST",
       });
       if (res.ok) {
@@ -3710,7 +3710,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
     setBackupLoading(true);
     try {
-      const res = await authenticatedFetch("/api/admin/backups/${id}", {
+      const res = await authenticatedFetch(`/api/admin/backups/${id}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -4306,7 +4306,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     if (confirm("Are you sure you want to approve this withdrawal request?")) {
                       setModalLoading(true);
                       try {
-                        const res = await authenticatedFetch("/api/admin/withdrawals/${selectedWithdrawal.id}/approve", {
+                        const res = await authenticatedFetch(`/api/admin/withdrawals/${selectedWithdrawal.id}/approve`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" }
                         });
@@ -4341,7 +4341,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       return;
                     }
                     setModalLoading(true);
-                    authenticatedFetch("/api/admin/withdrawals/${selectedWithdrawal.id}/reject", {
+                    authenticatedFetch(`/api/admin/withdrawals/${selectedWithdrawal.id}/reject`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ rejectReason: reason, rejectionType: "normal" })
@@ -4381,7 +4381,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     }
                     setModalLoading(true);
                     try {
-                      const res = await authenticatedFetch("/api/admin/withdrawals/${selectedWithdrawal.id}/paid", {
+                      const res = await authenticatedFetch(`/api/admin/withdrawals/${selectedWithdrawal.id}/paid`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ transactionReference: reference })
@@ -4416,7 +4416,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       return;
                     }
                     setModalLoading(true);
-                    authenticatedFetch("/api/admin/withdrawals/${selectedWithdrawal.id}/reject", {
+                    authenticatedFetch(`/api/admin/withdrawals/${selectedWithdrawal.id}/reject`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ rejectReason: reason, rejectionType: "normal" })

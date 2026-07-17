@@ -794,27 +794,36 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
   });
 
   app.post("/api/admin/withdrawals/:id/approve", requireAdminDb, async (req, res) => {
+    console.log(`[Admin] Attempting to approve withdrawal: ${req.params.id}`);
     try {
       const { id } = req.params;
       const ref = doc(db, "withdrawals", id);
       const snap = await getDoc(ref);
-      if (!snap.exists()) return res.status(404).json({ error: "Not found" });
+      if (!snap.exists()) {
+        console.warn(`[Admin] Withdrawal not found: ${id}`);
+        return res.status(404).json({ error: "Withdrawal request not found." });
+      }
       
       const wData = snap.data();
       if (wData.status === "Approved") {
+        console.warn(`[Admin] Withdrawal ${id} is already approved.`);
         return res.status(400).json({ error: "Withdrawal is already approved" });
       }
 
+      console.log(`[Admin] Updating withdrawal ${id} status to Approved...`);
       await setDoc(ref, { 
         status: "Approved", 
         approvedAt: new Date().toISOString() 
       }, { merge: true });
       
+      console.log(`[Admin] Sending Telegram notification to user ${wData.userId}...`);
       await sendTgMessage(wData.userId, `✅ <b>Withdrawal Approved</b>\n\nAmount: ₹${wData.amount}\nStatus: Approved\n\nThe payment has been approved and will be transferred shortly.`);
+      
+      console.log(`[Admin] Withdrawal ${id} approved successfully.`);
       res.json({ success: true, message: "Withdrawal approved successfully." });
     } catch (e: any) {
-      console.error("Admin approve error:", e);
-      res.status(500).json({ error: "Server error" });
+      console.error("[Admin] Admin approve error:", e);
+      res.status(500).json({ error: "Internal server error: " + e.message });
     }
   });
 
@@ -907,15 +916,20 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
   });
 
   app.post("/api/admin/withdrawals/:id/reject", requireAdminDb, async (req, res) => {
+    console.log(`[Admin] Attempting to reject withdrawal: ${req.params.id}`);
     try {
       const { id } = req.params;
       const { rejectReason } = req.body;
       const ref = doc(db, "withdrawals", id);
       const snap = await getDoc(ref);
-      if (!snap.exists()) return res.status(404).json({ error: "Not found" });
+      if (!snap.exists()) {
+        console.warn(`[Admin] Withdrawal not found for rejection: ${id}`);
+        return res.status(404).json({ error: "Withdrawal request not found." });
+      }
       
       const wData = snap.data();
       if (wData.status === "Rejected" || wData.status === "Cancelled" || wData.status === "Failed") {
+        console.warn(`[Admin] Withdrawal ${id} already finalized as ${wData.status}`);
         return res.status(400).json({ error: "Withdrawal already finalized as " + wData.status });
       }
 
@@ -924,6 +938,8 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
       const isUsdt = (wData.method || "").toUpperCase().includes("USDT") || !!wData.walletAddress;
       const USDT_RATE = 90;
       const inrRequestedAmount = isUsdt ? (requestedAmount * USDT_RATE) : requestedAmount;
+
+      console.log(`[Admin] Rejecting withdrawal ${id} for user ${wData.userId}. Reason: ${finalReason}`);
 
       // Update withdrawal doc
       await setDoc(ref, { 
@@ -945,6 +961,8 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         
         const newPending = Math.max(0, currentPending - inrRequestedAmount);
         
+        console.log(`[Admin] Refunding user ${wData.userId}: Deducting ${inrRequestedAmount} from pendingWithdrawals.`);
+
         // Recalculate availableBalance
         const fileEarnings = userData?.fileEarnings || 0;
         const linkEarnings = userData?.linkEarnings || 0;
@@ -962,6 +980,7 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         }, { merge: true });
 
         // Transaction History Record
+        console.log(`[Admin] Creating rejection transaction record for user ${wData.userId}...`);
         await addDoc(collection(db, "transactions"), {
           userId: wData.userId,
           type: "Withdrawal Rejected",
@@ -975,14 +994,16 @@ const otpStore = new Map<string, string>(); // Store OTPs by mobile
         });
 
         // Notify User via Telegram
+        console.log(`[Admin] Sending rejection notification to user ${wData.userId} via Telegram...`);
         const tgMessage = `❌ <b>Withdrawal Rejected</b>\n\nAmount: ${isUsdt ? `${requestedAmount} USDT` : `₹${requestedAmount}`}\nReason: ${finalReason}\n\nThe amount has been returned to your wallet.`;
         await sendTgMessage(wData.userId, tgMessage);
       }
 
-      res.json({ success: true, message: "Withdrawal request rejected and user refunded." });
+      console.log(`[Admin] Withdrawal ${id} rejected successfully.`);
+      res.json({ success: true, message: "Withdrawal rejected successfully and amount refunded." });
     } catch (e: any) {
-      console.error("Admin reject error:", e);
-      res.status(500).json({ error: "Server error: " + e.message });
+      console.error("[Admin] Admin reject error:", e);
+      res.status(500).json({ error: "Internal server error: " + e.message });
     }
   });
 
