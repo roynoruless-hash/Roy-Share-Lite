@@ -17523,12 +17523,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                 Reward Callback URL (Auto-Generated)
                               </span>
                               <code className="text-xs font-mono text-slate-300 block select-all break-all bg-slate-950 p-2.5 rounded border border-slate-850">
-                                https://royshare.online/reward?userid=[userid]
+                                https://royshare.online/reward?userid=[userId]
                               </code>
                             </div>
                             <button
                               onClick={() => {
-                                const url = "https://royshare.online/reward?userid=[userid]";
+                                const url = "https://royshare.online/reward?userid=[userId]";
                                 navigator.clipboard.writeText(url);
                                 alert("Reward Callback URL copied to clipboard!");
                               }}
