@@ -1197,33 +1197,10 @@ export default function DailyBonusPage() {
                   <p className="text-emerald-400 text-xs font-bold">
                     Congratulations! Card cleared successfully!
                   </p>
-                  <p className="text-slate-500 text-[10px] font-semibold">
-                    Tap the Claim button below to claim your ₹{Number(revealedReward?.amount).toFixed(2)}.
-                  </p>
                 </>
               )}
             </div>
             
-            {scratchedPercent > 50 && revealedReward && !claimSuccess && (
-              <button 
-                onClick={handleClaim} 
-                disabled={claiming}
-                className="w-64 py-4.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-3xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-emerald-900/20 flex items-center justify-center gap-2"
-              >
-                {claiming ? (
-                  <>
-                    <Disc className="w-5 h-5 animate-spin" />
-                    <span>Claiming...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trophy className="w-5 h-5" />
-                    <span>Claim Reward</span>
-                  </>
-                )}
-              </button>
-            )}
-
             {claimSuccess && (
               <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-3xl text-center animate-bounce">
                 <p className="text-emerald-400 font-black text-sm">REWARD CLAIMED! 🎉</p>
