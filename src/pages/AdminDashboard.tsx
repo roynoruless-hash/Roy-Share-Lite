@@ -184,7 +184,11 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [supportSettings, setSupportSettings] = useState<any>(null);
   const [supportSettingsLoading, setSupportSettingsLoading] = useState(false);
   const [systemSettings, setSystemSettings] = useState<any>(null);
+  const [originalSystemSettings, setOriginalSystemSettings] = useState<any>(null);
   const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
+  const [systemSettingsSaving, setSystemSettingsSaving] = useState(false);
+  const [systemSettingsSuccess, setSystemSettingsSuccess] = useState("");
+  const [systemSettingsError, setSystemSettingsError] = useState("");
   const [taskForm, setTaskForm] = useState<any>(null);
   const [taskLogs, setTaskLogs] = useState<any[]>([]);
   const [taskLogsLoading, setTaskLogsLoading] = useState(false);
@@ -2307,6 +2311,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           },
         };
         setSystemSettings(normalizedData);
+        setOriginalSystemSettings(JSON.parse(JSON.stringify(normalizedData)));
       }
     } catch (err) {
       console.error(err);
@@ -2315,24 +2320,34 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const hasUnsavedSettings = () => {
+    if (!systemSettings || !originalSystemSettings) return false;
+    return JSON.stringify(systemSettings) !== JSON.stringify(originalSystemSettings);
+  };
+
   const saveSystemSettings = async (settingsToSave: any = systemSettings) => {
-    setSystemSettingsLoading(true);
+    setSystemSettingsSaving(true);
+    setSystemSettingsSuccess("");
+    setSystemSettingsError("");
     try {
       const res = await authenticatedFetch("/api/admin/system-settings", {
         method: "PUT",
         body: JSON.stringify(settingsToSave),
       });
       if (res.ok) {
-        alert("System settings saved successfully!");
+        setSystemSettingsSuccess("✅ Withdrawal Settings Saved Successfully");
+        setOriginalSystemSettings(JSON.parse(JSON.stringify(settingsToSave)));
         setSystemSettings(settingsToSave);
+        setTimeout(() => setSystemSettingsSuccess(""), 5000);
       } else {
-        alert("Failed to save system settings.");
+        const errorData = await res.json().catch(() => ({}));
+        setSystemSettingsError(errorData.error || "Failed to save system settings.");
       }
     } catch (err) {
       console.error(err);
-      alert("Error saving system settings.");
+      setSystemSettingsError("Error saving system settings.");
     } finally {
-      setSystemSettingsLoading(false);
+      setSystemSettingsSaving(false);
     }
   };
 
@@ -3801,6 +3816,18 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   };
 
   useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedSettings()) {
+        const message = "You have unsaved changes. Do you want to save them?";
+        e.returnValue = message;
+        return message;
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [systemSettings, originalSystemSettings]);
+
+  useEffect(() => {
     let supportInterval: any = null;
     if (activeTab === "Overview") {
       fetchDashboardData();
@@ -5018,6 +5045,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               <button
                 key={btn}
                 onClick={() => {
+                  if (activeTab === "⚙️ System Settings" && settingsTab === "💸 Withdrawal Settings" && hasUnsavedSettings()) {
+                    if (window.confirm("You have unsaved changes. Do you want to save them?")) {
+                      saveSystemSettings();
+                    } else {
+                      return;
+                    }
+                  }
                   setActiveTab(btn);
                   if (btn === "💰 Verified Tasks") fetchVerifiedTasks();
                   if (btn === "🔗 Shortener Tasks") fetchGpTasks();
@@ -15108,7 +15142,16 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                     ].map((tab) => (
                       <button
                         key={tab}
-                        onClick={() => setSettingsTab(tab)}
+                        onClick={() => {
+                          if (hasUnsavedSettings() && settingsTab === "💸 Withdrawal Settings") {
+                            if (window.confirm("You have unsaved changes. Do you want to save them?")) {
+                              saveSystemSettings();
+                            } else {
+                              return;
+                            }
+                          }
+                          setSettingsTab(tab);
+                        }}
                         className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors ${settingsTab === tab ? "bg-indigo-600 text-white" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}
                       >
                         {tab}
@@ -16451,6 +16494,29 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                   />
                                 </div>
                               </div>
+                              
+                              <div className="pt-2 border-t border-slate-800/50">
+                                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                                  Maximum Transaction Amount (₹/$)
+                                </label>
+                                <input
+                                  type="number"
+                                  value={systemSettings?.withdrawalSettings?.maxTransactionAmount ?? 10000}
+                                  onChange={(e) => {
+                                    setSystemSettings({
+                                      ...systemSettings,
+                                      withdrawalSettings: {
+                                        ...(systemSettings?.withdrawalSettings || {}),
+                                        maxTransactionAmount: parseFloat(e.target.value) || 0,
+                                      },
+                                    });
+                                  }}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  Global limit for a single withdrawal transaction across all methods.
+                                </p>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -16641,6 +16707,44 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                               />
                             </div>
                           </div>
+                        </div>
+
+                        {/* Sticky Save Footer */}
+                        <div className="sticky bottom-4 left-0 right-0 bg-slate-900/90 backdrop-blur-md border border-slate-800 p-5 rounded-2xl flex justify-between items-center z-10 shadow-2xl mt-6">
+                          <div className="flex flex-col">
+                            {systemSettingsSuccess && (
+                              <span className="text-emerald-400 text-sm font-bold flex items-center gap-1">
+                                {systemSettingsSuccess}
+                              </span>
+                            )}
+                            {systemSettingsError && (
+                              <span className="text-red-400 text-sm font-medium">
+                                {systemSettingsError}
+                              </span>
+                            )}
+                            {!systemSettingsSuccess && !systemSettingsError && (
+                              <span className="text-slate-500 text-xs">
+                                {hasUnsavedSettings() ? "● You have unsaved changes" : "✓ Withdrawal settings are up to date"}
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => saveSystemSettings()}
+                            disabled={systemSettingsSaving || !hasUnsavedSettings()}
+                            className="flex items-center gap-2 px-8 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 text-white font-black rounded-xl transition-all shadow-xl shadow-indigo-500/20 cursor-pointer"
+                          >
+                            {systemSettingsSaving ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                Saving Changes...
+                              </>
+                            ) : (
+                              <>
+                                <Save className="w-4 h-4" />
+                                Save Withdrawal Settings
+                              </>
+                            )}
+                          </button>
                         </div>
                       </div>
                     )}
