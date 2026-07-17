@@ -68,6 +68,10 @@ import {
   Tablet,
   Send,
   MessageSquare,
+  Disc,
+  UserCheck,
+  Image as ImageIcon,
+  Loader2,
 } from "lucide-react";
 
 
@@ -136,7 +140,15 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         console.error("Failed to copy build info:", err);
       });
   };
-  const [aiGenSettings, setAiGenSettings] = useState<any>({});
+  const [aiGenSettings, setAiGenSettings] = useState<any>({
+    slots: 8,
+    minReward: 1,
+    maxReward: 100,
+    betterLuckSlots: 2,
+    dailyBudget: 200,
+    totalUsers: 10000,
+    profitMargin: 20,
+  });
   const [aiPreviewRewards, setAiPreviewRewards] = useState<any>(null);
   const [usersError, setUsersError] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
@@ -2022,17 +2034,22 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     setAiPreviewRewards(null);
     setAiGenMessage(null);
     try {
-      const res = await fetch(
-        `${API_BASE}/api/admin/daily-bonus/auto-generate`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(aiGenSettings),
-        },
-      );
+      // Use the specialized scratch card generator if type is scratch
+      const endpoint = type === 'scratch' 
+        ? `${API_BASE}/api/admin/scratch-card/ai-generate`
+        : `${API_BASE}/api/admin/daily-bonus/auto-generate`;
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...aiGenSettings,
+          type
+        }),
+      });
       const data = await res.json();
       if (data.success) {
-        setAiPreviewRewards(data.rewards);
+        setAiPreviewRewards(type === 'scratch' ? data.distribution : data.rewards);
         if (data.isLocalFallback) {
           setAiGenMessage({
             text: "AI Generator is temporarily unavailable. Using Smart Local Generator.",
@@ -2040,7 +2057,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           });
         } else {
           setAiGenMessage({
-            text: `🤖 AI successfully generated ${data.rewards.length} reward slots! Please review the preview table and click "Save and Apply".`,
+            text: `🤖 AI successfully generated ${type === 'scratch' ? data.distribution.length : data.rewards.length} reward slots! Please review the preview table and click "Save and Apply".`,
             type: "success",
           });
         }
@@ -7165,21 +7182,40 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             : "🔴 Disabled"}
                         </button>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">
-                          🕒 Global Reset Time (UTC)
-                        </label>
-                        <input
-                          type="time"
-                          value={bonusSettings.resetTime || "00:00"}
-                          onChange={(e) =>
-                            setBonusSettings({
-                              ...bonusSettings,
-                              resetTime: e.target.value,
-                            })
-                          }
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white"
-                        />
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">
+                            🕒 Global Reset Time (UTC)
+                          </label>
+                          <input
+                            type="time"
+                            value={bonusSettings.resetTime || "00:00"}
+                            onChange={(e) =>
+                              setBonusSettings({
+                                ...bonusSettings,
+                                resetTime: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">
+                            💰 Global Daily Bonus Budget (₹)
+                          </label>
+                          <input
+                            type="number"
+                            value={bonusSettings.dailyBudget || 10000}
+                            onChange={(e) =>
+                              setBonusSettings({
+                                ...bonusSettings,
+                                dailyBudget: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -7212,44 +7248,182 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                           </button>
                         </div>
                         <div className="p-4 space-y-4">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                              Daily Limit
-                            </label>
-                            <input
-                              type="number"
-                              value={bonusSettings[type]?.dailyLimit ?? 0}
-                              onChange={(e) =>
-                                setBonusSettings({
-                                  ...bonusSettings,
-                                  [type]: {
-                                    ...bonusSettings[type],
-                                    dailyLimit: parseInt(e.target.value) || 0,
-                                  },
-                                })
-                              }
-                              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
-                            />
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
+                                Limit
+                              </label>
+                              <input
+                                type="number"
+                                value={bonusSettings[type]?.dailyLimit ?? 0}
+                                onChange={(e) =>
+                                  setBonusSettings({
+                                    ...bonusSettings,
+                                    [type]: {
+                                      ...bonusSettings[type],
+                                      dailyLimit: parseInt(e.target.value) || 0,
+                                    },
+                                  })
+                                }
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
+                                Cooldown
+                              </label>
+                              <input
+                                type="number"
+                                value={bonusSettings[type]?.cooldown ?? 0}
+                                onChange={(e) =>
+                                  setBonusSettings({
+                                    ...bonusSettings,
+                                    [type]: {
+                                      ...bonusSettings[type],
+                                      cooldown: parseInt(e.target.value) || 0,
+                                    },
+                                  })
+                                }
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
+                              />
+                            </div>
                           </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                              Cooldown (Min)
-                            </label>
-                            <input
-                              type="number"
-                              value={bonusSettings[type]?.cooldown ?? 0}
-                              onChange={(e) =>
-                                setBonusSettings({
-                                  ...bonusSettings,
-                                  [type]: {
-                                    ...bonusSettings[type],
-                                    cooldown: parseInt(e.target.value) || 0,
-                                  },
-                                })
-                              }
-                              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
-                            />
-                          </div>
+
+                          {type === 'scratch' && (
+                            <div className="space-y-3 pt-2 border-t border-slate-800/50">
+                               <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-[10px] font-black text-amber-500 uppercase mb-1">
+                                      Daily Budget (₹)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={bonusSettings.scratch?.dailyBudget ?? 200}
+                                      onChange={(e) =>
+                                        setBonusSettings({
+                                          ...bonusSettings,
+                                          scratch: {
+                                            ...bonusSettings.scratch,
+                                            dailyBudget: parseInt(e.target.value) || 0,
+                                          },
+                                        })
+                                      }
+                                      className="w-full bg-slate-950 border border-amber-900/30 rounded-lg px-3 py-1.5 text-white text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-black text-amber-500 uppercase mb-1">
+                                      Target Users
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={bonusSettings.scratch?.totalUsersTarget ?? 10000}
+                                      onChange={(e) =>
+                                        setBonusSettings({
+                                          ...bonusSettings,
+                                          scratch: {
+                                            ...bonusSettings.scratch,
+                                            totalUsersTarget: parseInt(e.target.value) || 0,
+                                          },
+                                        })
+                                      }
+                                      className="w-full bg-slate-950 border border-amber-900/30 rounded-lg px-3 py-1.5 text-white text-sm"
+                                    />
+                                  </div>
+                               </div>
+
+                               <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-[10px] font-black text-indigo-400 uppercase mb-1">
+                                      Unlock Ad Type
+                                    </label>
+                                    <select
+                                      value={bonusSettings.scratch?.unlockAdType || "Reward"}
+                                      onChange={(e) =>
+                                        setBonusSettings({
+                                          ...bonusSettings,
+                                          scratch: {
+                                            ...bonusSettings.scratch,
+                                            unlockAdType: e.target.value,
+                                          },
+                                        })
+                                      }
+                                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-[11px]"
+                                    >
+                                      <option value="Reward">Reward Video</option>
+                                      <option value="Interstitial">Interstitial</option>
+                                      <option value="Task">Task (External)</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-black text-emerald-400 uppercase mb-1">
+                                      Claim Ad Type
+                                    </label>
+                                    <select
+                                      value={bonusSettings.scratch?.claimAdType || "Interstitial"}
+                                      onChange={(e) =>
+                                        setBonusSettings({
+                                          ...bonusSettings,
+                                          scratch: {
+                                            ...bonusSettings.scratch,
+                                            claimAdType: e.target.value,
+                                          },
+                                        })
+                                      }
+                                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-[11px]"
+                                    >
+                                      <option value="Reward">Reward Video</option>
+                                      <option value="Interstitial">Interstitial</option>
+                                      <option value="Task">Task (External)</option>
+                                    </select>
+                                  </div>
+                               </div>
+
+                               <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
+                                      Min Reward
+                                    </label>
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      value={bonusSettings.scratch?.minReward ?? 0.1}
+                                      onChange={(e) =>
+                                        setBonusSettings({
+                                          ...bonusSettings,
+                                          scratch: {
+                                            ...bonusSettings.scratch,
+                                            minReward: parseFloat(e.target.value) || 0,
+                                          },
+                                        })
+                                      }
+                                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
+                                      Max Reward
+                                    </label>
+                                    <input
+                                      type="number"
+                                      step="1"
+                                      value={bonusSettings.scratch?.maxReward ?? 10}
+                                      onChange={(e) =>
+                                        setBonusSettings({
+                                          ...bonusSettings,
+                                          scratch: {
+                                            ...bonusSettings.scratch,
+                                            maxReward: parseFloat(e.target.value) || 0,
+                                          },
+                                        })
+                                      }
+                                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm"
+                                    />
+                                  </div>
+                               </div>
+                            </div>
+                          )}
+
                           <div className="flex items-center justify-between pt-2">
                             <span className="text-xs font-bold text-slate-400">
                               Require Ad
@@ -7304,96 +7478,115 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                      <div>
-                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">
-                          Minimum Reward (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={aiGenSettings.minReward}
-                          onChange={(e) =>
-                            setAiGenSettings({
-                              ...aiGenSettings,
-                              minReward: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm"
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+                        <div>
+                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                            Min Reward (₹)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={aiGenSettings.minReward}
+                            onChange={(e) =>
+                              setAiGenSettings({
+                                ...aiGenSettings,
+                                minReward: parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                            Max Reward (₹)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={aiGenSettings.maxReward}
+                            onChange={(e) =>
+                              setAiGenSettings({
+                                ...aiGenSettings,
+                                maxReward: parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                            Slots (5-30)
+                          </label>
+                          <input
+                            type="number"
+                            min="5"
+                            max="30"
+                            value={aiGenSettings.slots}
+                            onChange={(e) =>
+                              setAiGenSettings({
+                                ...aiGenSettings,
+                                slots: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                            Better Luck %
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={aiGenSettings.betterLuckSlots} // Using this field for percentage in UI
+                            onChange={(e) =>
+                              setAiGenSettings({
+                                ...aiGenSettings,
+                                betterLuckSlots: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                            Daily Budget (₹)
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={aiGenSettings.dailyBudget}
+                            onChange={(e) =>
+                              setAiGenSettings({
+                                ...aiGenSettings,
+                                dailyBudget: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black uppercase text-slate-400 mb-1.5">
+                            Profit Margin %
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={aiGenSettings.profitMargin}
+                            onChange={(e) =>
+                              setAiGenSettings({
+                                ...aiGenSettings,
+                                profitMargin: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white font-bold text-sm"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">
-                          Maximum Reward (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={aiGenSettings.maxReward}
-                          onChange={(e) =>
-                            setAiGenSettings({
-                              ...aiGenSettings,
-                              maxReward: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">
-                          Slots count (5-30)
-                        </label>
-                        <input
-                          type="number"
-                          min="5"
-                          max="30"
-                          value={aiGenSettings.slots}
-                          onChange={(e) =>
-                            setAiGenSettings({
-                              ...aiGenSettings,
-                              slots: parseInt(e.target.value) || 0,
-                            })
-                          }
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">
-                          Better Luck Slots
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={aiGenSettings.betterLuckSlots}
-                          onChange={(e) =>
-                            setAiGenSettings({
-                              ...aiGenSettings,
-                              betterLuckSlots: parseInt(e.target.value) || 0,
-                            })
-                          }
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">
-                          Daily Budget (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={aiGenSettings.dailyBudget}
-                          onChange={(e) =>
-                            setAiGenSettings({
-                              ...aiGenSettings,
-                              dailyBudget: parseInt(e.target.value) || 0,
-                            })
-                          }
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm"
-                        />
-                      </div>
-                    </div>
 
                     <button
                       onClick={() =>
@@ -7651,46 +7844,81 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                          Unique Users
-                        </span>
-                        <span className="text-2xl font-black text-white">
-                          {dailyBonusStats?.today?.uniqueUsers || 0}
-                        </span>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
+                            Unique Users
+                          </span>
+                          <span className="text-2xl font-black text-white">
+                            {dailyBonusStats?.today?.uniqueUsers || 0}
+                          </span>
+                        </div>
+                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
+                            Today Claims
+                          </span>
+                          <span className="text-2xl font-black text-white">
+                            {dailyBonusStats?.today?.totalClaims || 0}
+                          </span>
+                        </div>
+                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
+                            Total Scratches
+                          </span>
+                          <span className="text-2xl font-black text-white">
+                            {dailyBonusStats?.today?.totalScratches || 0}
+                          </span>
+                        </div>
+                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
+                            Scratch Ad Views
+                          </span>
+                          <span className="text-2xl font-black text-indigo-400">
+                            {(dailyBonusStats?.today?.totalAdsBeforeScratch || 0) + (dailyBonusStats?.today?.totalAdsBeforeClaim || 0)}
+                          </span>
+                        </div>
+                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
+                            Rewards Won
+                          </span>
+                          <span className="text-2xl font-black text-emerald-400">
+                            ₹
+                            {Number(
+                              dailyBonusStats?.today?.totalRewards || 0,
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
+                            Scratch Spent
+                          </span>
+                          <span className="text-2xl font-black text-amber-500">
+                            ₹
+                            {Number(
+                              dailyBonusStats?.today?.scratchSpentToday || 0,
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
+                            Avg Reward
+                          </span>
+                          <span className="text-2xl font-black text-indigo-400">
+                            ₹
+                            {Number(
+                              dailyBonusStats?.today?.averageReward || 0,
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
+                            Budget Remaining
+                          </span>
+                          <span className="text-2xl font-black text-emerald-500">
+                            ₹{Math.max(0, (bonusSettings?.dailyBudget || 10000) - (dailyBonusStats?.today?.totalRewards || 0)).toFixed(2)}
+                          </span>
+                        </div>
                       </div>
-                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                          Total Claims
-                        </span>
-                        <span className="text-2xl font-black text-white">
-                          {dailyBonusStats?.today?.totalClaims || 0}
-                        </span>
-                      </div>
-                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                          Rewards Won
-                        </span>
-                        <span className="text-2xl font-black text-emerald-400">
-                          ₹
-                          {Number(
-                            dailyBonusStats?.today?.totalRewards || 0,
-                          ).toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">
-                          Avg Reward
-                        </span>
-                        <span className="text-2xl font-black text-indigo-400">
-                          ₹
-                          {Number(
-                            dailyBonusStats?.today?.averageReward || 0,
-                          ).toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                       {/* Top Winners */}
@@ -16004,67 +16232,23 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             />
                           </div>
                         ))}
-                        <div className="flex items-center gap-4 mt-6">
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input
-                              type="radio"
-                              name="earningsEnabled"
-                              checked={
-                                systemSettings?.earningSettings?.enabled ===
-                                true
-                              }
-                              onChange={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  earningSettings: {
-                                    ...systemSettings.earningSettings,
-                                    enabled: true,
-                                  },
-                                })
-                              }
-                              className="w-4 h-4 text-indigo-600"
-                            />
-                            Enable Earnings
-                          </label>
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input
-                              type="radio"
-                              name="earningsEnabled"
-                              checked={
-                                systemSettings?.earningSettings?.enabled ===
-                                false
-                              }
-                              onChange={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  earningSettings: {
-                                    ...systemSettings.earningSettings,
-                                    enabled: false,
-                                  },
-                                })
-                              }
-                              className="w-4 h-4 text-indigo-600"
-                            />
-                            Disable Earnings
-                          </label>
-                        </div>
                       </div>
                     )}
 
                     {settingsTab === "💸 Withdrawal Settings" && (
-                      <div className="space-y-6 max-w-4xl">
+                      <div className="space-y-6 max-w-5xl pb-32">
                         {/* Summary Header */}
-                        <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-xl">
                           <div>
-                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                              💸 Global Withdrawal Policies
+                            <h3 className="text-xl font-black text-white flex items-center gap-2">
+                              💸 Withdrawal Control Center
                             </h3>
-                            <p className="text-slate-400 text-xs mt-1">
-                              Configure payment gateways, automatic review rules, daily submission limits, and anti-fraud filters.
+                            <p className="text-slate-400 text-sm mt-1">
+                              Global policies for payment gateways, auto-review rules, and security.
                             </p>
                           </div>
-                          <div className="flex gap-4 shrink-0">
-                            <label className="flex items-center gap-2 text-white text-sm font-medium cursor-pointer bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+                          <div className="flex gap-4 shrink-0 bg-slate-950 p-2 rounded-2xl border border-slate-800">
+                            <label className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-black cursor-pointer transition-all ${systemSettings?.withdrawalSettings?.enabled !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-500'}`}>
                               <input
                                 type="radio"
                                 name="withdrawalsEnabledGlobal"
@@ -16078,11 +16262,11 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                     },
                                   });
                                 }}
-                                className="w-4 h-4 text-indigo-500 bg-slate-950 border-slate-800"
+                                className="sr-only"
                               />
-                              🟢 Enabled
+                              🟢 Global Enabled
                             </label>
-                            <label className="flex items-center gap-2 text-white text-sm font-medium cursor-pointer bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+                            <label className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-black cursor-pointer transition-all ${systemSettings?.withdrawalSettings?.enabled === false ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'text-slate-500'}`}>
                               <input
                                 type="radio"
                                 name="withdrawalsEnabledGlobal"
@@ -16096,9 +16280,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                     },
                                   });
                                 }}
-                                className="w-4 h-4 text-indigo-500 bg-slate-950 border-slate-800"
+                                className="sr-only"
                               />
-                              🔴 Disabled
+                              🔴 Global Disabled
                             </label>
                           </div>
                         </div>
@@ -16106,9 +16290,9 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                         {/* SECTION 1: METHOD CONFIGURATIONS */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                           {/* Card 1: UPI */}
-                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                              <h4 className="font-bold text-white flex items-center gap-2">
+                          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-lg">
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                              <h4 className="font-black text-white flex items-center gap-2 uppercase tracking-wider text-sm">
                                 🇮🇳 UPI Method
                               </h4>
                               <label className="relative inline-flex items-center cursor-pointer">
@@ -16126,13 +16310,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                   }}
                                   className="sr-only peer"
                                 />
-                                <div className="w-9 h-5 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                                <div className="w-11 h-6 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-1 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                               </label>
                             </div>
                             
                             <div>
-                              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                UPI Minimum (₹)
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">
+                                Minimum Withdrawal (₹)
                               </label>
                               <input
                                 type="number"
@@ -16146,33 +16330,31 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                     },
                                   });
                                 }}
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white font-bold text-sm focus:border-indigo-500 outline-none transition-colors"
                               />
                             </div>
 
-                            <div className="pt-2 border-t border-slate-800/50 space-y-3">
-                              <label className="flex items-center justify-between text-xs text-slate-300 cursor-pointer">
-                                <span>⚡ Auto-Approve</span>
-                                <input
-                                  type="checkbox"
-                                  checked={!!systemSettings?.withdrawalSettings?.upiAutoApprove}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        upiAutoApprove: e.target.checked,
-                                      },
-                                    });
-                                  }}
-                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700"
-                                />
-                              </label>
+                            <div className="pt-4 border-t border-slate-800/50 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-400">⚡ Auto-Approve</span>
+                                <button 
+                                  onClick={() => setSystemSettings({
+                                    ...systemSettings,
+                                    withdrawalSettings: {
+                                      ...(systemSettings?.withdrawalSettings || {}),
+                                      upiAutoApprove: !systemSettings?.withdrawalSettings?.upiAutoApprove,
+                                    },
+                                  })}
+                                  className={`text-[10px] px-2.5 py-1 rounded-lg font-black transition-all ${systemSettings?.withdrawalSettings?.upiAutoApprove ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' : 'bg-slate-950 text-slate-600 border border-slate-800'}`}
+                                >
+                                  {systemSettings?.withdrawalSettings?.upiAutoApprove ? 'ON' : 'OFF'}
+                                </button>
+                              </div>
 
                               {systemSettings?.withdrawalSettings?.upiAutoApprove && (
-                                <div>
-                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
-                                    Max Auto-Approve (₹)
+                                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+                                  <label className="block text-[10px] font-black text-slate-600 uppercase mb-1.5">
+                                    Limit (₹)
                                   </label>
                                   <input
                                     type="number"
@@ -16186,18 +16368,18 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                         },
                                       });
                                     }}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white font-bold text-sm"
                                   />
-                                </div>
+                                </motion.div>
                               )}
                             </div>
                           </div>
 
                           {/* Card 2: Bank */}
-                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                              <h4 className="font-bold text-white flex items-center gap-2">
-                                🏦 Bank Account
+                          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-lg">
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                              <h4 className="font-black text-white flex items-center gap-2 uppercase tracking-wider text-sm">
+                                🏦 Bank Transfer
                               </h4>
                               <label className="relative inline-flex items-center cursor-pointer">
                                 <input
@@ -16214,13 +16396,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                   }}
                                   className="sr-only peer"
                                 />
-                                <div className="w-9 h-5 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                                <div className="w-11 h-6 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-1 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                               </label>
                             </div>
                             
                             <div>
-                              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                Bank Minimum (₹)
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">
+                                Minimum Withdrawal (₹)
                               </label>
                               <input
                                 type="number"
@@ -16234,58 +16416,34 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                     },
                                   });
                                 }}
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white font-bold text-sm focus:border-indigo-500 outline-none transition-colors"
                               />
                             </div>
 
-                            <div className="pt-2 border-t border-slate-800/50 space-y-3">
-                              <label className="flex items-center justify-between text-xs text-slate-300 cursor-pointer">
-                                <span>⚡ Auto-Approve</span>
-                                <input
-                                  type="checkbox"
-                                  checked={!!systemSettings?.withdrawalSettings?.bankAutoApprove}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        bankAutoApprove: e.target.checked,
-                                      },
-                                    });
-                                  }}
-                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700"
-                                />
-                              </label>
-
-                              {systemSettings?.withdrawalSettings?.bankAutoApprove && (
-                                <div>
-                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
-                                    Max Auto-Approve (₹)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={systemSettings?.withdrawalSettings?.bankAutoApproveLimit ?? 1000}
-                                    onChange={(e) => {
-                                      setSystemSettings({
-                                        ...systemSettings,
-                                        withdrawalSettings: {
-                                          ...(systemSettings?.withdrawalSettings || {}),
-                                          bankAutoApproveLimit: parseFloat(e.target.value) || 0,
-                                        },
-                                      });
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
-                                  />
-                                </div>
-                              )}
+                            <div className="pt-4 border-t border-slate-800/50 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-400">⚡ Auto-Approve</span>
+                                <button 
+                                  onClick={() => setSystemSettings({
+                                    ...systemSettings,
+                                    withdrawalSettings: {
+                                      ...(systemSettings?.withdrawalSettings || {}),
+                                      bankAutoApprove: !systemSettings?.withdrawalSettings?.bankAutoApprove,
+                                    },
+                                  })}
+                                  className={`text-[10px] px-2.5 py-1 rounded-lg font-black transition-all ${systemSettings?.withdrawalSettings?.bankAutoApprove ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' : 'bg-slate-950 text-slate-600 border border-slate-800'}`}
+                                >
+                                  {systemSettings?.withdrawalSettings?.bankAutoApprove ? 'ON' : 'OFF'}
+                                </button>
+                              </div>
                             </div>
                           </div>
 
                           {/* Card 3: USDT */}
-                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                              <h4 className="font-bold text-white flex items-center gap-2">
-                                💵 USDT TRC20
+                          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-lg">
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                              <h4 className="font-black text-white flex items-center gap-2 uppercase tracking-wider text-sm">
+                                ₮ USDT (TRC-20)
                               </h4>
                               <label className="relative inline-flex items-center cursor-pointer">
                                 <input
@@ -16302,17 +16460,17 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                   }}
                                   className="sr-only peer"
                                 />
-                                <div className="w-9 h-5 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                                <div className="w-11 h-6 bg-slate-950 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-1 after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                               </label>
                             </div>
                             
                             <div>
-                              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                USDT Minimum ($)
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">
+                                Minimum Withdrawal (₹)
                               </label>
                               <input
                                 type="number"
-                                value={systemSettings?.withdrawalSettings?.usdtMin ?? 10}
+                                value={systemSettings?.withdrawalSettings?.usdtMin ?? 1000}
                                 onChange={(e) => {
                                   setSystemSettings({
                                     ...systemSettings,
@@ -16322,429 +16480,221 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                                     },
                                   });
                                 }}
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white font-bold text-sm focus:border-indigo-500 outline-none transition-colors"
                               />
                             </div>
 
-                            <div className="pt-2 border-t border-slate-800/50 space-y-3">
-                              <label className="flex items-center justify-between text-xs text-slate-300 cursor-pointer">
-                                <span>⚡ Auto-Approve</span>
-                                <input
-                                  type="checkbox"
-                                  checked={!!systemSettings?.withdrawalSettings?.usdtAutoApprove}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        usdtAutoApprove: e.target.checked,
-                                      },
-                                    });
-                                  }}
-                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700"
-                                />
-                              </label>
-
-                              {systemSettings?.withdrawalSettings?.usdtAutoApprove && (
-                                <div>
-                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
-                                    Max Auto-Approve ($)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={systemSettings?.withdrawalSettings?.usdtAutoApproveLimit ?? 10}
-                                    onChange={(e) => {
-                                      setSystemSettings({
-                                        ...systemSettings,
-                                        withdrawalSettings: {
-                                          ...(systemSettings?.withdrawalSettings || {}),
-                                          usdtAutoApproveLimit: parseFloat(e.target.value) || 0,
-                                        },
-                                      });
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
-                                  />
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* SECTION 2: AD INTEGRATION & LIMITS */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          {/* Ad Trigger Selection */}
-                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                            <h4 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-                              📺 Adsgram Verification Integration
-                            </h4>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                Ads Type Before Withdrawal
-                              </label>
-                              <select
-                                value={systemSettings?.withdrawalSettings?.adsTypeBeforeWithdrawal || "Reward"}
-                                onChange={(e) => {
-                                  setSystemSettings({
+                            <div className="pt-4 border-t border-slate-800/50 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-400">⚡ Auto-Approve</span>
+                                <button 
+                                  onClick={() => setSystemSettings({
                                     ...systemSettings,
                                     withdrawalSettings: {
                                       ...(systemSettings?.withdrawalSettings || {}),
-                                      adsTypeBeforeWithdrawal: e.target.value,
+                                      usdtAutoApprove: !systemSettings?.withdrawalSettings?.usdtAutoApprove,
                                     },
-                                  });
-                                }}
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
-                              >
-                                <option value="Reward">Reward Video Ad (Recommended)</option>
-                                <option value="Interstitial">Interstitial Ad</option>
-                                <option value="Task">Task Video Ad</option>
-                              </select>
-                              <p className="text-[10px] text-slate-500 mt-2">
-                                The chosen ad format will be rendered programmatically in the user's wallet app and must be fully viewed before the withdrawal forms can be submitted.
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Daily Limits & Submission Cooldowns */}
-                          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                            <h4 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-                              🕒 Cooldown & Daily Submission Limits
-                            </h4>
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                  Daily Limit (Count)
-                                </label>
-                                <input
-                                  type="number"
-                                  value={systemSettings?.withdrawalSettings?.dailyLimit ?? 3}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        dailyLimit: parseInt(e.target.value) || 1,
-                                      },
-                                    });
-                                  }}
-                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                  Request Cooldown (Hrs)
-                                </label>
-                                <input
-                                  type="number"
-                                  value={systemSettings?.withdrawalSettings?.cooldownHours ?? 24}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        cooldownHours: parseInt(e.target.value) || 0,
-                                      },
-                                    });
-                                  }}
-                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                                />
-                              </div>
-
-                              <div className="col-span-2 grid grid-cols-2 gap-3 pt-2 border-t border-slate-800/50">
-                                <div>
-                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
-                                    Window Open Hour (0-23 IST)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max="23"
-                                    value={systemSettings?.withdrawalSettings?.windowStartHour ?? 0}
-                                    onChange={(e) => {
-                                      setSystemSettings({
-                                        ...systemSettings,
-                                        withdrawalSettings: {
-                                          ...(systemSettings?.withdrawalSettings || {}),
-                                          windowStartHour: parseInt(e.target.value) || 0,
-                                        },
-                                      });
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
-                                    Window Close Hour (0-23 IST)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max="23"
-                                    value={systemSettings?.withdrawalSettings?.windowEndHour ?? 24}
-                                    onChange={(e) => {
-                                      setSystemSettings({
-                                        ...systemSettings,
-                                        withdrawalSettings: {
-                                          ...(systemSettings?.withdrawalSettings || {}),
-                                          windowEndHour: parseInt(e.target.value) || 24,
-                                        },
-                                      });
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
-                                  />
-                                </div>
-                              </div>
-                              
-                              <div className="pt-2 border-t border-slate-800/50">
-                                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                  Maximum Transaction Amount (₹/$)
-                                </label>
-                                <input
-                                  type="number"
-                                  value={systemSettings?.withdrawalSettings?.maxTransactionAmount ?? 10000}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        maxTransactionAmount: parseFloat(e.target.value) || 0,
-                                      },
-                                    });
-                                  }}
-                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                                />
-                                <p className="text-[10px] text-slate-500 mt-1">
-                                  Global limit for a single withdrawal transaction across all methods.
-                                </p>
+                                  })}
+                                  className={`text-[10px] px-2.5 py-1 rounded-lg font-black transition-all ${systemSettings?.withdrawalSettings?.usdtAutoApprove ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' : 'bg-slate-950 text-slate-600 border border-slate-800'}`}
+                                >
+                                  {systemSettings?.withdrawalSettings?.usdtAutoApprove ? 'ON' : 'OFF'}
+                                </button>
                               </div>
                             </div>
                           </div>
                         </div>
 
-                        {/* SECTION 3: ANTI-FRAUD SECURITY COMPLIANCE */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                          <h4 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-                            🛡️ Real-time Anti-Fraud & Auto-Rejection Compliance
-                          </h4>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-4">
-                              <label className="flex items-center justify-between text-sm text-slate-300 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 cursor-pointer hover:bg-slate-950/60 transition">
-                                <div className="space-y-0.5">
-                                  <span className="font-semibold block">⚠️ Decline Low Trust Score</span>
-                                  <span className="text-[10px] text-slate-500 block">Auto-reject requests from suspicious accounts.</span>
-                                </div>
-                                <input
-                                  type="checkbox"
-                                  checked={!!systemSettings?.withdrawalSettings?.autoRejectLowTrust}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        autoRejectLowTrust: e.target.checked,
-                                      },
-                                    });
-                                  }}
-                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700 shrink-0"
-                                />
-                              </label>
-
-                              {systemSettings?.withdrawalSettings?.autoRejectLowTrust && (
-                                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                    Score Threshold Limit (Reject if below)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={systemSettings?.withdrawalSettings?.trustScoreThreshold ?? 20}
-                                    onChange={(e) => {
-                                      setSystemSettings({
-                                        ...systemSettings,
-                                        withdrawalSettings: {
-                                          ...(systemSettings?.withdrawalSettings || {}),
-                                          trustScoreThreshold: parseInt(e.target.value) || 20,
-                                        },
-                                      });
-                                    }}
-                                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
-                                  />
-                                </div>
-                              )}
-
-                              <label className="flex items-center justify-between text-sm text-slate-300 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 cursor-pointer hover:bg-slate-950/60 transition">
-                                <div className="space-y-0.5">
-                                  <span className="font-semibold block">👥 Block Duplicate Gateways</span>
-                                  <span className="text-[10px] text-slate-500 block">Prevent multiple accounts registering the same UPI ID/Bank No.</span>
-                                </div>
-                                <input
-                                  type="checkbox"
-                                  checked={!!systemSettings?.withdrawalSettings?.autoRejectDuplicateDetails}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        autoRejectDuplicateDetails: e.target.checked,
-                                      },
-                                    });
-                                  }}
-                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700 shrink-0"
-                                />
-                              </label>
-
-                              <label className="flex items-center justify-between text-sm text-slate-300 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 cursor-pointer hover:bg-slate-950/60 transition">
-                                <div className="space-y-0.5">
-                                  <span className="font-semibold block">🎫 Block with Active Tickets</span>
-                                  <span className="text-[10px] text-slate-500 block">Decline new withdrawals if an open support ticket exists.</span>
-                                </div>
-                                <input
-                                  type="checkbox"
-                                  checked={!!systemSettings?.withdrawalSettings?.autoRejectActiveSupportTicket}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        autoRejectActiveSupportTicket: e.target.checked,
-                                      },
-                                    });
-                                  }}
-                                  className="w-4 h-4 text-indigo-500 rounded bg-slate-950 border-slate-700 shrink-0"
-                                />
-                              </label>
-                            </div>
-
-                            <div className="space-y-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-                                  Rejection Message Prefix
-                                </label>
-                                <input
-                                  type="text"
-                                  value={systemSettings?.withdrawalSettings?.rejectReasonPrefix || "Auto-Rejected: "}
-                                  onChange={(e) => {
-                                    setSystemSettings({
-                                      ...systemSettings,
-                                      withdrawalSettings: {
-                                        ...(systemSettings?.withdrawalSettings || {}),
-                                        rejectReasonPrefix: e.target.value,
-                                      },
-                                    });
-                                  }}
-                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                                  placeholder="Auto-Rejected: "
-                                />
-                                <p className="text-[10px] text-slate-500 mt-1.5">
-                                  This text prefix will automatically precede any system-generated rejection reasons.
-                                </p>
+                        {/* SECTION 2: ANTI-FRAUD & ADS */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-lg">
+                              <h4 className="font-black text-white border-b border-slate-800 pb-4 uppercase tracking-widest text-xs flex items-center gap-2">
+                                <Shield className="w-4 h-4 text-rose-500" />
+                                Anti-Fraud & Security
+                              </h4>
+                              <div className="grid grid-cols-2 gap-4">
+                                 <div>
+                                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Max Daily Sum (₹)</label>
+                                    <input 
+                                       type="number"
+                                       value={systemSettings?.withdrawalSettings?.dailyLimitAmount ?? 5000}
+                                       onChange={(e) => setSystemSettings({
+                                          ...systemSettings,
+                                          withdrawalSettings: { ...systemSettings.withdrawalSettings, dailyLimitAmount: parseFloat(e.target.value) || 0 }
+                                       })}
+                                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white font-bold text-sm"
+                                    />
+                                 </div>
+                                 <div>
+                                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Max Per Tx (₹)</label>
+                                    <input 
+                                       type="number"
+                                       value={systemSettings?.withdrawalSettings?.maxTransactionAmount ?? 2000}
+                                       onChange={(e) => setSystemSettings({
+                                          ...systemSettings,
+                                          withdrawalSettings: { ...systemSettings.withdrawalSettings, maxTransactionAmount: parseFloat(e.target.value) || 0 }
+                                       })}
+                                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white font-bold text-sm"
+                                    />
+                                 </div>
                               </div>
-                            </div>
-                          </div>
-                        </div>
+                              <div className="space-y-3">
+                                 <div className="flex items-center justify-between p-3 bg-slate-950 rounded-2xl border border-slate-800">
+                                    <div className="flex flex-col">
+                                       <span className="text-xs font-black text-white">Trust Score Filter</span>
+                                       <span className="text-[10px] text-slate-500">Auto-reject low trust accounts</span>
+                                    </div>
+                                    <button 
+                                       onClick={() => setSystemSettings({
+                                          ...systemSettings,
+                                          withdrawalSettings: { ...systemSettings.withdrawalSettings, autoRejectLowTrust: !systemSettings?.withdrawalSettings?.autoRejectLowTrust }
+                                       })}
+                                       className={`text-[10px] px-3 py-1.5 rounded-xl font-black ${systemSettings?.withdrawalSettings?.autoRejectLowTrust ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-900 text-slate-600 border border-slate-800'}`}
+                                    >
+                                       {systemSettings?.withdrawalSettings?.autoRejectLowTrust ? 'ACTIVE' : 'OFF'}
+                                    </button>
+                                 </div>
+                                 <div className="flex items-center justify-between p-3 bg-slate-950 rounded-2xl border border-slate-800">
+                                    <div className="flex flex-col">
+                                       <span className="text-xs font-black text-white">Duplicate Gateway Block</span>
+                                       <span className="text-[10px] text-slate-500">Block duplicate UPI/Bank details</span>
+                                    </div>
+                                    <button 
+                                       onClick={() => setSystemSettings({
+                                          ...systemSettings,
+                                          withdrawalSettings: { ...systemSettings.withdrawalSettings, autoRejectDuplicateDetails: !systemSettings?.withdrawalSettings?.autoRejectDuplicateDetails }
+                                       })}
+                                       className={`text-[10px] px-3 py-1.5 rounded-xl font-black ${systemSettings?.withdrawalSettings?.autoRejectDuplicateDetails ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-900 text-slate-600 border border-slate-800'}`}
+                                    >
+                                       {systemSettings?.withdrawalSettings?.autoRejectDuplicateDetails ? 'ACTIVE' : 'OFF'}
+                                    </button>
+                                 </div>
+                              </div>
+                           </div>
 
-                        {/* SECTION 4: TAXES AND EXTRA COMPLIANCE */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                          <h4 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-                            📉 Fine & Processing Penalty (Taxes)
-                          </h4>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-400 mb-1">
-                                UPI Correction Penalty (%)
-                              </label>
-                              <input
-                                type="number"
-                                value={systemSettings?.withdrawalTaxSettings?.upiTax ?? 5}
-                                onChange={(e) =>
-                                  setSystemSettings({
-                                    ...systemSettings,
-                                    withdrawalTaxSettings: {
-                                      ...(systemSettings?.withdrawalTaxSettings || {}),
-                                      upiTax: parseFloat(e.target.value) || 0,
-                                    },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-400 mb-1">
-                                Bank Correction Penalty (%)
-                              </label>
-                              <input
-                                type="number"
-                                value={systemSettings?.withdrawalTaxSettings?.bankTax ?? 10}
-                                onChange={(e) =>
-                                  setSystemSettings({
-                                    ...systemSettings,
-                                    withdrawalTaxSettings: {
-                                      ...(systemSettings?.withdrawalTaxSettings || {}),
-                                      bankTax: parseFloat(e.target.value) || 0,
-                                    },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-400 mb-1">
-                                USDT TRC20 Correction Penalty (%)
-                              </label>
-                              <input
-                                type="number"
-                                value={systemSettings?.withdrawalTaxSettings?.usdtTax ?? 15}
-                                onChange={(e) =>
-                                  setSystemSettings({
-                                    ...systemSettings,
-                                    withdrawalTaxSettings: {
-                                      ...(systemSettings?.withdrawalTaxSettings || {}),
-                                      usdtTax: parseFloat(e.target.value) || 0,
-                                    },
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                          </div>
+                           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-lg">
+                              <h4 className="font-black text-white border-b border-slate-800 pb-4 uppercase tracking-widest text-xs flex items-center gap-2">
+                                <Disc className="w-4 h-4 text-indigo-500" />
+                                Ad Requirement Configuration
+                              </h4>
+                              <div className="space-y-4">
+                                 <div>
+                                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Required Ad Type</label>
+                                    <select 
+                                       value={systemSettings?.withdrawalSettings?.adsType ?? 'none'}
+                                       onChange={(e) => setSystemSettings({
+                                          ...systemSettings,
+                                          withdrawalSettings: { ...systemSettings.withdrawalSettings, adsType: e.target.value }
+                                       })}
+                                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white font-bold text-sm outline-none focus:border-indigo-500 transition-colors"
+                                    >
+                                       <option value="none">No Ad Required (Free)</option>
+                                       <option value="Reward">Adsgram: Reward Video (Mandatory)</option>
+                                       <option value="Interstitial">Adsgram: Interstitial (Transition)</option>
+                                       <option value="Task">Adsgram: Task Ad</option>
+                                    </select>
+                                 </div>
+                                 <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
+                                    <p className="text-[11px] text-slate-400 leading-relaxed italic">
+                                       Users will be forced to complete the chosen ad view before they can submit their withdrawal request. This ensures sustainability by covering payout gateway fees.
+                                    </p>
+                                 </div>
+                                 <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                       <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Window Start (0-23)</label>
+                                       <input 
+                                          type="number"
+                                          min="0"
+                                          max="23"
+                                          value={systemSettings?.withdrawalSettings?.windowStartHour ?? 0}
+                                          onChange={(e) => setSystemSettings({
+                                             ...systemSettings,
+                                             withdrawalSettings: { ...systemSettings.withdrawalSettings, windowStartHour: parseInt(e.target.value) || 0 }
+                                          })}
+                                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white font-bold text-sm"
+                                       />
+                                    </div>
+                                    <div>
+                                       <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Window End (0-23)</label>
+                                       <input 
+                                          type="number"
+                                          min="0"
+                                          max="23"
+                                          value={systemSettings?.withdrawalSettings?.windowEndHour ?? 24}
+                                          onChange={(e) => setSystemSettings({
+                                             ...systemSettings,
+                                             withdrawalSettings: { ...systemSettings.withdrawalSettings, windowEndHour: parseInt(e.target.value) || 24 }
+                                          })}
+                                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white font-bold text-sm"
+                                       />
+                                    </div>
+                                 </div>
+                              </div>
+                           </div>
                         </div>
 
                         {/* Sticky Save Footer */}
-                        <div className="sticky bottom-4 left-0 right-0 bg-slate-900/90 backdrop-blur-md border border-slate-800 p-5 rounded-2xl flex justify-between items-center z-10 shadow-2xl mt-6">
-                          <div className="flex flex-col">
-                            {systemSettingsSuccess && (
-                              <span className="text-emerald-400 text-sm font-bold flex items-center gap-1">
-                                {systemSettingsSuccess}
-                              </span>
-                            )}
-                            {systemSettingsError && (
-                              <span className="text-red-400 text-sm font-medium">
-                                {systemSettingsError}
-                              </span>
-                            )}
-                            {!systemSettingsSuccess && !systemSettingsError && (
-                              <span className="text-slate-500 text-xs">
-                                {hasUnsavedSettings() ? "● You have unsaved changes" : "✓ Withdrawal settings are up to date"}
-                              </span>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => saveSystemSettings()}
-                            disabled={systemSettingsSaving || !hasUnsavedSettings()}
-                            className="flex items-center gap-2 px-8 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 text-white font-black rounded-xl transition-all shadow-xl shadow-indigo-500/20 cursor-pointer"
-                          >
-                            {systemSettingsSaving ? (
-                              <>
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                                Saving Changes...
-                              </>
-                            ) : (
-                              <>
-                                <Save className="w-4 h-4" />
-                                Save Withdrawal Settings
-                              </>
-                            )}
-                          </button>
+                        <AnimatePresence>
+                          {hasUnsavedSettings() && (
+                            <motion.div 
+                              initial={{ y: 100, opacity: 0 }}
+                              animate={{ y: 0, opacity: 1 }}
+                              exit={{ y: 100, opacity: 0 }}
+                              className="fixed bottom-6 left-6 right-6 md:left-1/2 md:-translate-x-1/2 md:max-w-4xl bg-slate-900/90 backdrop-blur-2xl border border-indigo-500/30 p-5 rounded-[2.5rem] flex items-center justify-between z-[100] shadow-[0_20px_50px_rgba(79,70,229,0.3)]"
+                            >
+                              <div className="flex items-center gap-4 pl-2">
+                                <div className="w-10 h-10 bg-indigo-500/20 rounded-full flex items-center justify-center text-indigo-400">
+                                  <AlertTriangle className="w-5 h-5 animate-pulse" />
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className="text-white font-black text-sm uppercase tracking-wider">Unsaved Changes</span>
+                                  <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">You have modified withdrawal settings</span>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-3">
+                                <button
+                                  onClick={() => setSystemSettings(originalSystemSettings)}
+                                  className="px-6 py-3 text-slate-400 font-black text-xs uppercase tracking-widest hover:text-white transition-colors"
+                                >
+                                  Discard
+                                </button>
+                                <button
+                                  onClick={() => saveSystemSettings()}
+                                  disabled={systemSettingsSaving}
+                                  className="bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white font-black px-8 py-3.5 rounded-full text-xs uppercase tracking-widest shadow-xl shadow-indigo-500/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-2"
+                                >
+                                  {systemSettingsSaving ? (
+                                    <>
+                                      <RefreshCw className="w-4 h-4 animate-spin" />
+                                      <span>Saving...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Save className="w-4 h-4" />
+                                      <span>Save & Apply</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Status Messages */}
+                        <div className="fixed bottom-24 right-8 z-[110] pointer-events-none">
+                           <AnimatePresence>
+                              {systemSettingsSuccess && (
+                                 <motion.div initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }} className="bg-emerald-500 text-white px-6 py-4 rounded-3xl font-black text-sm shadow-2xl flex items-center gap-3 border-4 border-emerald-400">
+                                    <Sparkles className="w-5 h-5" />
+                                    {systemSettingsSuccess}
+                                 </motion.div>
+                              )}
+                              {systemSettingsError && (
+                                 <motion.div initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }} className="bg-rose-500 text-white px-6 py-4 rounded-3xl font-black text-sm shadow-2xl border-4 border-rose-400">
+                                    ❌ {systemSettingsError}
+                                 </motion.div>
+                              )}
+                           </AnimatePresence>
                         </div>
                       </div>
                     )}
@@ -16757,474 +16707,24 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       <div className="space-y-6">
                         <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between">
                           <div>
-                            <h4 className="text-white font-bold text-sm">
-                              🎁 Daily Bonus Configuration
-                            </h4>
-                            <p className="text-slate-400 text-xs mt-0.5">
-                              Manage Wheel, Mystery Box, and Scratch Card
-                              settings.
-                            </p>
+                            <h4 className="text-white font-bold text-sm">🎁 Daily Bonus Configuration</h4>
+                            <p className="text-slate-400 text-xs mt-0.5">Manage Wheel, Mystery Box, and Scratch Card settings.</p>
                           </div>
-                          <button
-                            onClick={() => saveBonusSettings(bonusSettings)}
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition"
-                          >
-                            💾 Save All Settings
-                          </button>
+                          <button onClick={() => saveBonusSettings(bonusSettings)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition">💾 Save All Settings</button>
                         </div>
-
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                           <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">
-                              Global Status
-                            </label>
+                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Global Status</label>
                             <div className="flex gap-4">
                               <label className="flex items-center gap-2 text-white text-sm cursor-pointer">
-                                <input
-                                  type="radio"
-                                  checked={
-                                    bonusSettings?.dailyBonusEnabled === true
-                                  }
-                                  onChange={() =>
-                                    setBonusSettings({
-                                      ...bonusSettings,
-                                      dailyBonusEnabled: true,
-                                    })
-                                  }
-                                  className="w-4 h-4 text-indigo-600"
-                                />{" "}
-                                🟢 Enabled
+                                <input type="radio" checked={bonusSettings?.dailyBonusEnabled === true} onChange={() => setBonusSettings({...bonusSettings, dailyBonusEnabled: true})} className="w-4 h-4 text-indigo-600" /> 🟢 Enabled
                               </label>
                               <label className="flex items-center gap-2 text-white text-sm cursor-pointer">
-                                <input
-                                  type="radio"
-                                  checked={
-                                    bonusSettings?.dailyBonusEnabled === false
-                                  }
-                                  onChange={() =>
-                                    setBonusSettings({
-                                      ...bonusSettings,
-                                      dailyBonusEnabled: false,
-                                    })
-                                  }
-                                  className="w-4 h-4 text-indigo-600"
-                                />{" "}
-                                🔴 Disabled
+                                <input type="radio" checked={bonusSettings?.dailyBonusEnabled === false} onChange={() => setBonusSettings({...bonusSettings, dailyBonusEnabled: false})} className="w-4 h-4 text-indigo-600" /> 🔴 Disabled
                               </label>
                             </div>
-                          </div>
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">
-                              Daily Reset Time (HH:MM)
-                            </label>
-                            <input
-                              type="time"
-                              value={bonusSettings?.resetTime || "00:00"}
-                              onChange={(e) =>
-                                setBonusSettings({
-                                  ...bonusSettings,
-                                  resetTime: e.target.value,
-                                })
-                              }
-                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">
-                              Daily Budget (₹)
-                            </label>
-                            <input
-                              type="number"
-                              value={bonusSettings?.dailyBudget || 500}
-                              onChange={(e) =>
-                                setBonusSettings({
-                                  ...bonusSettings,
-                                  dailyBudget: parseFloat(e.target.value),
-                                })
-                              }
-                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                            />
                           </div>
                         </div>
-
-                        {/* AI Generator Section */}
-                        <div className="bg-slate-900 p-6 rounded-2xl border border-indigo-500/20 shadow-xl">
-                          <div className="flex items-center gap-3 mb-6">
-                            <div className="p-2 bg-indigo-600/20 rounded-lg text-indigo-400">
-                              <Sparkles className="w-5 h-5" />
-                            </div>
-                            <div>
-                              <h4 className="text-white font-bold text-sm">
-                                🤖 Smart AI Reward Generator
-                              </h4>
-                              <p className="text-slate-500 text-[10px] font-medium uppercase tracking-widest">
-                                Balanced Distribution System
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Min Reward
-                              </label>
-                              <input
-                                type="number"
-                                value={aiGenSettings.minReward}
-                                onChange={(e) =>
-                                  setAiGenSettings({
-                                    ...aiGenSettings,
-                                    minReward: parseFloat(e.target.value),
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Max Reward
-                              </label>
-                              <input
-                                type="number"
-                                value={aiGenSettings.maxReward}
-                                onChange={(e) =>
-                                  setAiGenSettings({
-                                    ...aiGenSettings,
-                                    maxReward: parseFloat(e.target.value),
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Slots
-                              </label>
-                              <input
-                                type="number"
-                                value={aiGenSettings.slots}
-                                onChange={(e) =>
-                                  setAiGenSettings({
-                                    ...aiGenSettings,
-                                    slots: parseInt(e.target.value),
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Better Luck
-                              </label>
-                              <input
-                                type="number"
-                                value={aiGenSettings.betterLuckSlots}
-                                onChange={(e) =>
-                                  setAiGenSettings({
-                                    ...aiGenSettings,
-                                    betterLuckSlots:
-                                      parseInt(e.target.value) || 0,
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Budget (₹)
-                              </label>
-                              <input
-                                type="number"
-                                value={aiGenSettings.dailyBudget}
-                                onChange={(e) =>
-                                  setAiGenSettings({
-                                    ...aiGenSettings,
-                                    dailyBudget: parseInt(e.target.value) || 0,
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleAIGenerateRewards("wheel")}
-                              disabled={generatingAI}
-                              className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50"
-                            >
-                              Generate Wheel
-                            </button>
-                            <button
-                              onClick={() => handleAIGenerateRewards("box")}
-                              disabled={generatingAI}
-                              className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50"
-                            >
-                              Generate Boxes
-                            </button>
-                            <button
-                              onClick={() => handleAIGenerateRewards("scratch")}
-                              disabled={generatingAI}
-                              className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50"
-                            >
-                              Generate Scratch
-                            </button>
-                          </div>
-
-                          {generatingAI && (
-                            <div className="mt-4 p-3 rounded-xl border bg-indigo-500/10 border-indigo-500/20 text-indigo-400 text-xs font-medium flex items-center gap-2 animate-pulse">
-                              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
-                              <span>
-                                AI Generator is calculating optimal reward
-                                distributions... Please wait...
-                              </span>
-                            </div>
-                          )}
-
-                          {aiGenMessage && (
-                            <div
-                              className={`mt-4 p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
-                                aiGenMessage.type === "success"
-                                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                                  : aiGenMessage.type === "warning"
-                                    ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
-                                    : "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                              }`}
-                            >
-                              <span>{aiGenMessage.text}</span>
-                            </div>
-                          )}
-                          <div className="hidden"></div>
-                        </div>
-
-                        {/* Modular Settings */}
-                        {["wheel", "box", "scratch"].map((type) => (
-                          <div
-                            key={type}
-                            className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden"
-                          >
-                            <div className="p-4 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between">
-                              <h4 className="text-sm font-bold text-white capitalize flex items-center gap-2">
-                                {type === "wheel"
-                                  ? "🎡 Wheel Spin"
-                                  : type === "box"
-                                    ? "📦 Mystery Box"
-                                    : "🎫 Scratch Card"}
-                              </h4>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">
-                                  Status:
-                                </span>
-                                <button
-                                  onClick={() =>
-                                    setBonusSettings({
-                                      ...bonusSettings,
-                                      [type]: {
-                                        ...(bonusSettings[type] || {}),
-                                        enabled: !bonusSettings[type]?.enabled,
-                                      },
-                                    })
-                                  }
-                                  className={`px-3 py-1 rounded-lg text-[10px] font-black transition ${bonusSettings[type]?.enabled ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-500"}`}
-                                >
-                                  {bonusSettings[type]?.enabled
-                                    ? "ACTIVE"
-                                    : "INACTIVE"}
-                                </button>
-                              </div>
-                            </div>
-                            <div className="p-4 space-y-4">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                                    Daily Limit
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={bonusSettings[type]?.dailyLimit || 0}
-                                    onChange={(e) =>
-                                      setBonusSettings({
-                                        ...bonusSettings,
-                                        [type]: {
-                                          ...(bonusSettings[type] || {}),
-                                          dailyLimit: parseInt(e.target.value),
-                                        },
-                                      })
-                                    }
-                                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                                    Cooldown (Minutes)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={bonusSettings[type]?.cooldown || 0}
-                                    onChange={(e) =>
-                                      setBonusSettings({
-                                        ...bonusSettings,
-                                        [type]: {
-                                          ...(bonusSettings[type] || {}),
-                                          cooldown: parseInt(e.target.value),
-                                        },
-                                      })
-                                    }
-                                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none"
-                                  />
-                                </div>
-                              </div>
-
-                              <div>
-                                <div className="flex justify-between items-center mb-2">
-                                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                    Rewards Pool
-                                  </label>
-                                  <button
-                                    onClick={() => {
-                                      const newRewards = [
-                                        ...(bonusSettings[type]?.rewards || []),
-                                        {
-                                          amount: 1,
-                                          weight: 10,
-                                          label: "₹1.00",
-                                        },
-                                      ];
-                                      setBonusSettings({
-                                        ...bonusSettings,
-                                        [type]: {
-                                          ...(bonusSettings[type] || {}),
-                                          rewards: newRewards,
-                                        },
-                                      });
-                                    }}
-                                    className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
-                                  >
-                                    + Add New Reward
-                                  </button>
-                                </div>
-                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
-                                  {(bonusSettings[type]?.rewards || [])
-                                    .length === 0 && (
-                                    <p className="text-[10px] text-slate-600 italic text-center py-4 bg-slate-900/30 rounded-xl border border-dashed border-slate-800">
-                                      No rewards added yet
-                                    </p>
-                                  )}
-                                  {(bonusSettings[type]?.rewards || []).map(
-                                    (reward: any, idx: number) => (
-                                      <div
-                                        key={idx}
-                                        className="flex gap-2 items-center bg-slate-900/50 p-2 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors"
-                                      >
-                                        <div className="w-16">
-                                          <input
-                                            type="number"
-                                            placeholder="Amt"
-                                            value={reward.amount}
-                                            onChange={(e) => {
-                                              const newRewards = [
-                                                ...bonusSettings[type].rewards,
-                                              ];
-                                              newRewards[idx].amount =
-                                                parseFloat(e.target.value) || 0;
-                                              setBonusSettings({
-                                                ...bonusSettings,
-                                                [type]: {
-                                                  ...bonusSettings[type],
-                                                  rewards: newRewards,
-                                                },
-                                              });
-                                            }}
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[10px] text-emerald-400 font-bold focus:outline-none"
-                                          />
-                                        </div>
-                                        <div className="w-16">
-                                          <input
-                                            type="number"
-                                            placeholder="Weight"
-                                            value={reward.weight}
-                                            onChange={(e) => {
-                                              const newRewards = [
-                                                ...bonusSettings[type].rewards,
-                                              ];
-                                              newRewards[idx].weight =
-                                                parseFloat(e.target.value) || 0;
-                                              setBonusSettings({
-                                                ...bonusSettings,
-                                                [type]: {
-                                                  ...bonusSettings[type],
-                                                  rewards: newRewards,
-                                                },
-                                              });
-                                            }}
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[10px] text-white focus:outline-none"
-                                          />
-                                        </div>
-                                        <div className="flex-1">
-                                          <input
-                                            type="text"
-                                            placeholder="Label"
-                                            value={reward.label}
-                                            onChange={(e) => {
-                                              const newRewards = [
-                                                ...bonusSettings[type].rewards,
-                                              ];
-                                              newRewards[idx].label =
-                                                e.target.value;
-                                              setBonusSettings({
-                                                ...bonusSettings,
-                                                [type]: {
-                                                  ...bonusSettings[type],
-                                                  rewards: newRewards,
-                                                },
-                                              });
-                                            }}
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[10px] text-white focus:outline-none"
-                                          />
-                                        </div>
-                                        <button
-                                          onClick={() => {
-                                            const newRewards = bonusSettings[
-                                              type
-                                            ].rewards.filter(
-                                              (_: any, i: number) => i !== idx,
-                                            );
-                                            setBonusSettings({
-                                              ...bonusSettings,
-                                              [type]: {
-                                                ...bonusSettings[type],
-                                                rewards: newRewards,
-                                              },
-                                            });
-                                          }}
-                                          className="text-red-500 hover:text-red-400 p-1.5 transition-colors"
-                                        >
-                                          <svg
-                                            className="w-3.5 h-3.5"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                          >
-                                            <path
-                                              strokeLinecap="round"
-                                              strokeLinejoin="round"
-                                              strokeWidth="2"
-                                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                            ></path>
-                                          </svg>
-                                        </button>
-                                      </div>
-                                    ),
-                                  )}
-                                </div>
-                                <p className="text-[9px] text-slate-500 mt-2 px-1">
-                                  Probability is calculated as (Weight / Total
-                                  Weights). Higher weight means higher chance.
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
                       </div>
                     )}
 

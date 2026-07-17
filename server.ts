@@ -8253,7 +8253,17 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Default modular settings
       const wheelConfig = settings.wheel || { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] };
       const boxConfig = settings.box || { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] };
-      const scratchConfig = settings.scratch || { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] };
+      const scratchConfig = settings.scratch || { 
+        enabled: true, 
+        dailyLimit: 3, 
+        cooldown: 0, 
+        rewards: [],
+        dailyBudget: 200,
+        totalUsersTarget: 10000,
+        minReward: 0.1,
+        maxReward: 10,
+        betterLuckPercentage: 20
+      };
 
       if (!enabled) {
         return res.json({ enabled: false, message: "Daily Bonus is currently disabled by administrator." });
@@ -8276,7 +8286,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         lastResetDate: todayDateStr,
         wheel: { count: 0, lastTime: null },
         box: { count: 0, lastTime: null },
-        scratch: { count: 0, lastTime: null },
+        scratch: { count: 0, lastTime: null, unlocked: false, adsViewedBeforeScratch: 0, adsViewedBeforeClaim: 0 },
         pendingRewards: {}
       };
 
@@ -8301,8 +8311,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (!statsSnap.exists()) {
           await setDoc(statsRef, { date: today, uniqueUsers: 1, totalClaims: 0, totalRewards: 0 });
         } else {
-          // Check if this user was already counted today (we can use a separate collection for this or just rely on the first status call)
-          // For simplicity, let's track unique users by checking a 'visitedUsers' array or similar, but for high traffic it's better to use a subcollection.
           const userVisitRef = doc(db, "daily_bonus_stats", `${today}_visits_${userId}`);
           const visitSnap = await getDoc(userVisitRef);
           if (!visitSnap.exists()) {
@@ -8332,7 +8340,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           cooldownRemaining: isOnCooldown ? Math.ceil((nextAvailable - now) / 1000) : 0,
           lastClaimAt: state?.lastTime || null,
           nextAvailableAt: isOnCooldown ? new Date(nextAvailable).toISOString() : null,
-          rewards: config?.rewards || []
+          rewards: config?.rewards || [],
+          // Specialized scratch settings
+          unlockAdType: config?.unlockAdType || "Reward",
+          claimAdType: config?.claimAdType || "Interstitial",
+          // Specialized scratch stats
+          unlocked: state?.unlocked ?? false,
+          adsViewedBeforeScratch: state?.adsViewedBeforeScratch ?? 0,
+          adsViewedBeforeClaim: state?.adsViewedBeforeClaim ?? 0
         };
       };
 
@@ -8349,6 +8364,33 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       });
     } catch (e: any) {
       console.error("Error in /api/daily-bonus/status:", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  app.post("/api/daily-bonus/unlock-scratch", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+      const stateDocRef = doc(db, "daily_bonus_state", userId);
+      const stateSnap = await getDoc(stateDocRef);
+      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
+
+      const stateData = stateSnap.data();
+      await updateDoc(stateDocRef, {
+        "scratch.unlocked": true,
+        "scratch.adsViewedBeforeScratch": increment(1)
+      });
+
+      // Update Today's Stats
+      const today = new Date().toISOString().split("T")[0];
+      const statsRef = doc(db, "daily_bonus_stats", today);
+      await setDoc(statsRef, { totalAdsBeforeScratch: increment(1) }, { merge: true });
+
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error in /api/daily-bonus/unlock-scratch:", e);
       res.status(500).json({ error: e.message || "Server error" });
     }
   });
@@ -8373,7 +8415,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         lastResetDate: todayDateStr,
         wheel: { count: 0, lastTime: null },
         box: { count: 0, lastTime: null },
-        scratch: { count: 0, lastTime: null },
+        scratch: { count: 0, lastTime: null, unlocked: false, adsViewedBeforeScratch: 0, adsViewedBeforeClaim: 0 },
         pendingRewards: {}
       };
 
@@ -8390,9 +8432,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
       const stateData = stateSnap.data();
 
+      // For scratch, must be unlocked first
+      if (type === 'scratch' && !stateData.scratch?.unlocked) {
+        return res.status(400).json({ error: "Scratch card is locked. Watch an ad to unlock." });
+      }
+
       // Check if there's an unclaimed pending reward of the same type
       if (stateData.pendingRewards?.[type] && !stateData.pendingRewards[type].claimed) {
-        // Return existing reward to prevent refresh exploit
         return res.json({
           ok: true,
           reward: {
@@ -8419,22 +8465,46 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Budget Protection
       const today = new Date().toISOString().split("T")[0];
       const statsSnap = await getDoc(doc(db, "daily_bonus_stats", today));
-      const statsData = statsSnap.exists() ? statsSnap.data() : { totalRewards: 0 };
+      const statsData = statsSnap.exists() ? statsSnap.data() : { totalRewards: 0, totalScratches: 0 };
       const currentPayout = statsData.totalRewards || 0;
-      const budget = Number(settings.dailyBudget) || Infinity;
+      
+      // Global Daily Bonus Budget
+      const globalBudget = Number(settings.dailyBudget) || Infinity;
+      
+      // Specialized Scratch Budget
+      const scratchBudget = Number(config.dailyBudget) || globalBudget;
+      const scratchSpentToday = statsData.scratchSpentToday || 0;
+      const totalUsersTarget = Number(config.totalUsersTarget) || 1000;
+      const scratchCountToday = statsData.totalScratches || 0;
 
       let rewards = [...(config.rewards || [])];
       if (rewards.length === 0) return res.status(500).json({ error: "No rewards configured" });
 
-      // If budget reached, only keep "Better Luck Next Time" or lowest rewards
-      if (currentPayout >= budget) {
+      // DYNAMIC REWARD ADJUSTMENT
+      const budgetExhausted = currentPayout >= globalBudget || scratchSpentToday >= scratchBudget;
+      
+      if (budgetExhausted) {
         const betterLuckRewards = rewards.filter(r => (r.label || "").toLowerCase().includes("better luck") || Number(r.amount) === 0);
         if (betterLuckRewards.length > 0) {
           rewards = betterLuckRewards;
         } else {
-          // Fallback to the reward with minimum amount
           const minAmount = Math.min(...rewards.map(r => Number(r.amount)));
           rewards = rewards.filter(r => Number(r.amount) === minAmount);
+        }
+      } else if (type === 'scratch') {
+        // Smart distribution check
+        const remainingBudget = scratchBudget - scratchSpentToday;
+        const remainingUsers = Math.max(1, totalUsersTarget - scratchCountToday);
+        const dynamicAvgMax = remainingBudget / remainingUsers;
+        
+        // Filter rewards that are too high for remaining budget
+        if (dynamicAvgMax < config.maxReward) {
+          rewards = rewards.map(r => {
+            if (Number(r.amount) > dynamicAvgMax) {
+              return { ...r, amount: dynamicAvgMax, label: `₹${dynamicAvgMax.toFixed(2)}` };
+            }
+            return r;
+          });
         }
       }
 
@@ -8458,6 +8528,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const updatedState = {
         ...stateData,
         [type]: {
+          ...usage,
           count: usage.count + 1,
           lastTime: now
         },
@@ -8473,7 +8544,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       };
       await setDoc(stateDocRef, updatedState);
 
-      // Update statistics (Spins count)
+      // Update statistics
       try {
         const statsRef = doc(db, "daily_bonus_stats", today);
         const fieldName = type === "wheel" ? "totalSpins" : type === "box" ? "totalOpens" : "totalScratches";
@@ -8499,137 +8570,44 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.post("/api/daily-bonus/claim", async (req, res) => {
+  app.post("/api/daily-bonus/claim", async (req: any, res: any) => {
     try {
-      const { userId, type } = req.body;
+      const { userId, type, adStatus } = req.body;
       if (!userId || !type) return res.status(400).json({ error: "Missing parameters" });
 
-      const userDocRef = doc(db, "users", userId);
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
+      const userData = userSnap.data();
+
       const stateDocRef = doc(db, "daily_bonus_state", userId);
-      const today = new Date().toISOString().split("T")[0];
-      const statsRef = doc(db, "daily_bonus_stats", today);
-      const globalSettingsRef = doc(db, "settings", "daily_bonus");
-
-      let rewardAmount = 0;
-      let userName = "User";
-      let tgUserId = "";
-
-      const settingsSnap = await getDoc(globalSettingsRef);
-      const settings = settingsSnap.exists() ? settingsSnap.data() : {};
-
-      // Determine the potential reward amount before initiating transaction
-      const stateSnapPre = await getDoc(stateDocRef);
-      let potentialAmount = 0.50;
-      if (stateSnapPre.exists()) {
-        const stateData = stateSnapPre.data();
-        const pending = stateData.pendingRewards?.[type];
-        if (pending && !pending.claimed) {
-          potentialAmount = Number(pending.amount);
-        } else {
-          const config = settings[type] || {};
-          const rewards = config.rewards || [];
-          if (rewards.length > 0) {
-            potentialAmount = Number(rewards[0].amount || 0.50);
-          }
-        }
+      const stateSnap = await getDoc(stateDocRef);
+      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
+      const stateData = stateSnap.data();
+      const pending = stateData.pendingRewards?.[type];
+      
+      if (!pending || pending.claimed) {
+        return res.status(400).json({ error: "Reward already claimed or not found." });
       }
 
-      // Evaluate via Smart Reward Engine (before transaction)
-      const economyEval = await evaluateReward(userId, potentialAmount, "daily_bonus");
+      const rewardAmountRaw = Number(pending.amount);
+      const economyEval = await evaluateReward(userId, rewardAmountRaw, "daily_bonus");
       if (!economyEval.allowed) {
-        return res.status(400).json({ error: economyEval.message || "Daily limit reached. Please come back tomorrow." });
+        return res.status(400).json({ error: economyEval.message || "Daily limit reached." });
       }
 
-      const evalAmount = economyEval.finalAmount;
+      const rewardAmount = economyEval.finalAmount;
       const evalPending = economyEval.isPending;
+      const userName = userData.name || userData.firstName || userData.username || "User";
+      const tgUserId = userData.telegramId || "";
 
-      // Start Firestore Transaction
       await runTransaction(db, async (transaction) => {
-        const userRef = doc(db, "users", userId);
-        const userSnap = await transaction.get(userRef);
-        if (!userSnap.exists()) throw new Error("User not found");
-        const uData = userSnap.data();
-        userName = uData.name || uData.firstName || uData.username || "User";
-        tgUserId = uData.telegramId || "";
-
-        const stateRef = doc(db, "daily_bonus_state", userId);
-        const stateSnap = await transaction.get(stateRef);
-        
-        let stateData: any;
-        if (!stateSnap.exists()) {
-          stateData = {
-            userId,
-            lastResetDate: today,
-            wheel: { count: 0, lastTime: null },
-            box: { count: 0, lastTime: null },
-            scratch: { count: 0, lastTime: null },
-            pendingRewards: {}
-          };
-          transaction.set(stateRef, stateData);
-        } else {
-          stateData = stateSnap.data();
-          if (stateData.lastResetDate !== today) {
-            stateData.lastResetDate = today;
-            stateData.wheel = { count: stateData.wheel?.count || 0, lastTime: stateData.wheel?.lastTime || null };
-            stateData.box = { count: stateData.box?.count || 0, lastTime: stateData.box?.lastTime || null };
-            stateData.scratch = { count: stateData.scratch?.count || 0, lastTime: stateData.scratch?.lastTime || null };
-            transaction.set(stateRef, stateData, { merge: true });
-          }
-        }
-
-        let pending = stateData.pendingRewards?.[type];
-        if (!pending || pending.claimed) {
-          // Auto-generate a valid pending reward if missing or already claimed to avoid throwing an error
-          const config = settings[type] || {};
-          const rewards = config.rewards || [];
-          let amount = 0.50; // default fallback
-          let label = "₹0.50";
-
-          if (rewards.length > 0) {
-            const totalWeight = rewards.reduce((sum: number, r: any) => sum + (Number(r.weight) || 0), 0);
-            if (totalWeight > 0) {
-              let random = Math.random() * totalWeight;
-              let selected = rewards[0];
-              for (const r of rewards) {
-                if (random < (Number(r.weight) || 0)) {
-                  selected = r;
-                  break;
-                }
-                random -= (Number(r.weight) || 0);
-              }
-              amount = Number(selected.amount);
-              label = selected.label || `₹${amount.toFixed(2)}`;
-            } else {
-              const randReward = rewards[Math.floor(Math.random() * rewards.length)];
-              amount = Number(randReward.amount);
-              label = randReward.label || `₹${amount.toFixed(2)}`;
-            }
-          }
-
-          pending = {
-            amount,
-            label,
-            timestamp: new Date().toISOString(),
-            claimed: false
-          };
-
-          // Update state data object in-memory and in Firestore
-          if (!stateData.pendingRewards) {
-            stateData.pendingRewards = {};
-          }
-          stateData.pendingRewards[type] = pending;
-
-          transaction.set(stateRef, {
-            pendingRewards: stateData.pendingRewards
-          }, { merge: true });
-        }
-
-        rewardAmount = evalAmount;
-        const isSb = uData.shadowBanned === true;
-        const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(uData.status || "Normal") || (uData?.trustScore !== undefined && uData.trustScore < 20) || evalPending;
+        const uSnap = await transaction.get(userRef);
+        const u = uSnap.data() || {};
+        const isSb = u.shadowBanned === true;
+        const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(u.status || "Normal") || (u?.trustScore !== undefined && u.trustScore < 20) || evalPending;
 
         if (isSb) {
-          // Update Shadow balances for banned users
           transaction.update(userRef, {
             shadowBonusBalance: increment(rewardAmount),
             shadowAvailableBalance: increment(rewardAmount),
@@ -8637,116 +8615,42 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
             shadowTotalEarnings: increment(rewardAmount),
             shadowBalance: increment(rewardAmount)
           });
-        } else if (isFlagged) {
-          // Flagged or economy-pending users: skip instant balance increment
-        } else {
-          // Update Real User Balances
+        } else if (!isFlagged) {
           transaction.update(userRef, {
             bonusBalance: increment(rewardAmount),
             availableBalance: increment(rewardAmount),
             earnings: increment(rewardAmount),
             totalEarnings: increment(rewardAmount)
           });
-
-          // Update Global Distributed Rewards
           const globalRef = doc(db, "settings", "global");
           transaction.set(globalRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
         }
 
-        // Mark as Claimed
-        transaction.update(stateRef, {
-          [`pendingRewards.${type}.claimed`]: true
-        });
+        const updateData: any = { [`pendingRewards.${type}.claimed`]: true };
+        if (type === 'scratch') updateData["scratch.unlocked"] = false;
+        transaction.update(stateDocRef, updateData);
 
-        // Update Statistics
         const statsDocRef = doc(db, "user_statistics", userId);
         const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
-        
         if (isSb) {
           const shadowRewardField = type === "wheel" ? "shadowWheelRewards" : type === "box" ? "shadowBoxRewards" : "shadowScratchRewards";
-          transaction.set(statsDocRef, { 
-            [shadowRewardField]: increment(rewardAmount),
-            shadowTotalClaims: increment(1),
-            shadowTotalRewards: increment(rewardAmount)
-          }, { merge: true });
+          transaction.set(statsDocRef, { [shadowRewardField]: increment(rewardAmount), shadowTotalClaims: increment(1), shadowTotalRewards: increment(rewardAmount) }, { merge: true });
         } else {
-          transaction.set(statsDocRef, { 
-            [rewardField]: increment(rewardAmount),
-            totalClaims: increment(1),
-            totalRewards: increment(rewardAmount)
-          }, { merge: true });
+          transaction.set(statsDocRef, { [rewardField]: increment(rewardAmount), totalClaims: increment(1), totalRewards: increment(rewardAmount) }, { merge: true });
+        }
+
+        const today = new Date().toISOString().split("T")[0];
+        const statsRef = doc(db, "daily_bonus_stats", today);
+        transaction.set(statsRef, { totalRewards: increment(rewardAmount), totalClaims: increment(1) }, { merge: true });
+        if (type === 'scratch') {
+          transaction.set(statsRef, { scratchSpentToday: increment(rewardAmount), scratchClaimsToday: increment(1) }, { merge: true });
         }
       });
 
-      const userSnapCheck = await getDoc(doc(db, "users", userId));
-      const uDataCheck = userSnapCheck.exists() ? userSnapCheck.data() : {};
-      const isSb = uDataCheck?.shadowBanned === true;
-      const isFlagged = ["Pending Review", "High Risk", "Shadow Monitor"].includes(uDataCheck?.status || "Normal") || (uDataCheck?.trustScore !== undefined && uDataCheck.trustScore < 20) || evalPending;
-
-      // Increase Trust Score for Daily Bonus Claim (+3) only if not flagged/pending
-      if (!isFlagged) {
-        adjustTrustScore(userId, 3, "Daily Bonus Claim").catch(() => {});
-      }
-
-      // After transaction success, Add to history
-      await addDoc(collection(db, "claimHistory"), {
-        userId,
-        userName,
-        amount: rewardAmount,
-        type,
-        date: new Date().toISOString(),
-        adStatus: isFlagged ? "Pending Review" : "Verified",
-        shadow_banned: isSb,
-        is_flagged: isFlagged
-      });
-
-      if (isSb) {
-        await addDoc(collection(db, "shadow_blocked_rewards"), {
-          userId: String(userId),
-          username: userName,
-          amount: rewardAmount,
-          type: `daily_bonus_${type}`,
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      // Send Telegram Notification
-      try {
-        const tgSettingsRef = doc(db, "settings", "telegram");
-        const telegramSettingsSnap = await getDoc(tgSettingsRef);
-        if (telegramSettingsSnap.exists()) {
-          const { botToken, rewardChannelId } = telegramSettingsSnap.data();
-          if (botToken && (rewardChannelId || tgUserId)) {
-            const emoji = type === "wheel" ? "🎡" : type === "box" ? "📦" : type === "scratch" ? "🎫" : "🪙";
-            const typeLabel = type === "wheel" ? "Wheel Spin" : type === "box" ? "Mystery Box" : type === "scratch" ? "Scratch Card" : "Coin Rain";
-            const message = `🎊 *Daily Bonus Claimed!*\n\n👤 *User:* ${userName}\n💰 *Reward:* ₹${rewardAmount.toFixed(2)}\n🎯 *Source:* ${emoji} ${typeLabel}\n📅 *Date:* ${new Date().toLocaleString()}\n\nCongratulations! 🥳`;
-            
-            if (rewardChannelId) {
-              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  chat_id: rewardChannelId,
-                  text: message,
-                  parse_mode: "Markdown"
-                })
-              });
-            }
-            if (tgUserId) {
-              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  chat_id: tgUserId,
-                  text: message,
-                  parse_mode: "Markdown"
-                })
-              });
-            }
-          }
-        }
-      } catch (tgErr) {
-        console.error("Error sending TG notification for daily bonus:", tgErr);
+      if (tgUserId) {
+        const emoji = type === 'wheel' ? '🎡' : type === 'box' ? '📦' : '🎫';
+        const msg = `${emoji} <b>Daily Bonus Claimed!</b>\n\nReward: <b>₹${rewardAmount}</b>\nModule: ${type.toUpperCase()}\nStatus: ${evalPending ? 'Pending Review' : 'Credited'}\n\nKeep participating to earn more!`;
+        sendTgMessage(tgUserId, msg);
       }
 
       return res.json({ ok: true, amount: rewardAmount });
@@ -8756,33 +8660,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-
-
-  // --- NEW: OTP Authentication Flow (Redesigned) ---
-
-  const hashOTP = (otp: string) => {
-    return crypto.createHash("sha256").update(otp).digest("hex");
-  };
-
-  app.post("/api/auth/send-otp", async (req, res) => {
+  app.post("/api/auth/send-otp", async (req: any, res: any) => {
     try {
       const { mobile, telegramId } = req.body;
-      if (!mobile) {
-        return res.status(400).json({ error: "Mobile number is required" });
-      }
-      if (!telegramId) {
-        return res.status(400).json({ error: "Telegram User ID is required" });
+      if (!mobile || !telegramId) {
+        return res.status(400).json({ error: "Mobile and Telegram ID required" });
       }
 
       const cleanMobile = mobile.trim();
       const tgIdStr = String(telegramId).trim();
 
-      // Look up user in Firestore to get their name
       const userRef = doc(db, "users", tgIdStr);
       const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        return res.status(404).json({ error: "User profile not found in database." });
-      }
+      if (!userSnap.exists()) return res.status(404).json({ error: "User profile not found." });
 
       const userData = userSnap.data();
       const username = userData.firstName || userData.username || "User";
@@ -8790,30 +8680,23 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const now = new Date();
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
-      // Rate Limiting: Max 5 OTPs per hour per TG ID
       const rateSnap = await getDocs(query(collection(db, "otpRequests"), 
         where("telegramId", "==", tgIdStr), 
         where("createdAt", ">=", oneHourAgo.toISOString())));
       
       if (rateSnap.size >= 5) {
-        return res.status(429).json({ error: "Maximum OTP requests (5/hour) exceeded. Please try again later." });
+        return res.status(429).json({ error: "OTP limit exceeded. Try again in an hour." });
       }
 
-      // Generate secure 6-digit OTP
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      const hashedOtp = hashOTP(otpCode);
-      const expiresAt = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
+      const hashedOtp = crypto.createHash("sha256").update(otpCode).digest("hex");
+      const expiresAt = new Date(now.getTime() + 5 * 60 * 1000);
 
-      // Invalidate previous OTPs for this user
       const oldSnap = await getDocs(query(collection(db, "otps"), 
         where("telegramId", "==", tgIdStr), 
         where("used", "==", false)));
-        
-      for (const oldDoc of oldSnap.docs) {
-        await updateDoc(oldDoc.ref, { used: true });
-      }
+      for (const oldDoc of oldSnap.docs) await updateDoc(oldDoc.ref, { used: true });
 
-      // Store new OTP attempt linked to telegramId and mobile
       await addDoc(collection(db, "otps"), {
         telegramId: tgIdStr,
         mobile: cleanMobile,
@@ -8823,51 +8706,40 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         used: false
       });
 
-      // Log Request
       await addDoc(collection(db, "otpRequests"), {
         telegramId: tgIdStr,
         mobile: cleanMobile,
         createdAt: now.toISOString()
       });
 
-      // Send OTP via Telegram Bot
-      const botToken = await getBotToken();
-      if (!botToken) throw new Error("Bot token missing");
+      const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
+      const botToken = telegramSettingsDoc.data()?.botToken;
+      if (botToken) {
+        const msg = `🔐 <b>RoyShare Verification</b>\n\nHello <b>${username}</b> 👋\n\nYour Verification Code\n\n<code>${otpCode}</code>\n\n⏳ Valid for 5 Minutes`;
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: tgIdStr, text: msg, parse_mode: "HTML" })
+        });
+      }
 
-      const msg = `🔐 <b>RoyShare Verification</b>\n\nHello <b>${username}</b> 👋\n\nYour Verification Code\n\n<code>${otpCode}</code>\n\n⏳ Valid for 5 Minutes\n\nNever share this code with anyone.\n\nTap or long press the code above to copy it.`;
-      
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: tgIdStr,
-          text: msg,
-          parse_mode: "HTML"
-        })
-      });
-
-      console.log(`[OTP] Redesigned 6-digit code sent to telegramId ${tgIdStr} (${username})`);
-      res.json({ success: true, message: "OTP sent to your Telegram bot." });
-
+      res.json({ success: true, message: "OTP sent." });
     } catch (e: any) {
       console.error("Error in /api/auth/send-otp:", e);
-      res.status(500).json({ error: "Failed to send OTP. Check if you have started the bot." });
+      res.status(500).json({ error: "Failed to send OTP." });
     }
   });
 
-  app.post("/api/auth/verify-otp", async (req, res) => {
+  app.post("/api/auth/verify-otp", async (req: any, res: any) => {
     try {
       const { mobile, otp, telegramId } = req.body;
-      if (!mobile || !otp || !telegramId) {
-        return res.status(400).json({ error: "Mobile, OTP and Telegram ID are required" });
-      }
+      if (!mobile || !otp || !telegramId) return res.status(400).json({ error: "Missing parameters" });
 
       const cleanMobile = mobile.trim();
       const tgIdStr = String(telegramId).trim();
-      const hashedInput = hashOTP(otp);
+      const hashedInput = crypto.createHash("sha256").update(otp).digest("hex");
       const now = new Date().toISOString();
 
-      // Find valid OTP
       const otpSnap = await getDocs(query(collection(db, "otps"), 
         where("telegramId", "==", tgIdStr),
         where("mobile", "==", cleanMobile), 
@@ -8875,38 +8747,20 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         where("used", "==", false), 
         where("expiresAt", ">=", now)));
       
-      if (otpSnap.empty) {
-        return res.status(400).json({ error: "Invalid or expired OTP code." });
-      }
+      if (otpSnap.empty) return res.status(400).json({ error: "Invalid or expired OTP." });
 
-      // Mark OTP as used
-      const otpDoc = otpSnap.docs[0];
-      await updateDoc(otpDoc.ref, { used: true });
+      await updateDoc(otpSnap.docs[0].ref, { used: true });
 
-      // Link the verified mobile number permanently to the user's Telegram ID
       const userRef = doc(db, "users", tgIdStr);
-      const userSnap = await getDoc(userRef);
-      
-      if (!userSnap.exists()) {
-        return res.status(404).json({ error: "User profile not found. Please register again." });
-      }
-
       await updateDoc(userRef, { 
         lastLogin: now,
         isVerified: true,
         verifiedAt: now,
         phoneVerifiedInMiniApp: true,
-        phone: cleanMobile,
         mobile: cleanMobile
       });
 
-      console.log(`[OTP] Successfully verified mobile ${cleanMobile} for telegramId ${tgIdStr}`);
-
-      res.json({ 
-        success: true, 
-        message: "Verification successful!"
-      });
-
+      res.json({ success: true, message: "Verified!" });
     } catch (e: any) {
       console.error("Error in /api/auth/verify-otp:", e);
       res.status(500).json({ error: "Verification failed" });

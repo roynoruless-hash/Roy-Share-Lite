@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../config/api";
+import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { motion, AnimatePresence } from "motion/react";
-import { Gift, Disc, AlertTriangle, ArrowLeft, Star, Package, CreditCard, ChevronRight, Trophy } from "lucide-react";
+import { Gift, Disc, AlertTriangle, ArrowLeft, Star, Package, CreditCard, ChevronRight, Trophy, Sparkles } from "lucide-react";
 import confetti from "canvas-confetti";
+import { loadAdsgramSDK, getAdsgramConfig } from "../lib/adsManager";
 
 // --- Types ---
 interface RewardItem {
@@ -22,6 +24,7 @@ interface BonusModuleStatus {
   isOnCooldown: boolean;
   cooldownRemaining: number;
   rewards?: RewardItem[];
+  unlocked?: boolean;
 }
 
 interface BonusStatusResponse {
@@ -47,7 +50,7 @@ const formatTime = (seconds: number) => {
 // --- Components ---
 
 export default function DailyBonusPage() {
-  const [userId, setUserId] = useState<string | null>(null);
+  const { user, tg, isInsideTelegram, waitForTelegramParams } = useTelegramAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [status, setStatus] = useState<BonusStatusResponse | null>(null);
   const [activeView, setActiveView] = useState<'selection' | 'wheel' | 'box' | 'scratch'>('selection');
@@ -73,6 +76,7 @@ export default function DailyBonusPage() {
   
   // Scratch Card States
   const [scratchedPercent, setScratchedPercent] = useState(0);
+  const [unlockingScratch, setUnlockingScratch] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Custom Scratch Drawing and Particle Refs
@@ -89,38 +93,28 @@ export default function DailyBonusPage() {
 
   // Initialization
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const queryUserId = params.get("userId");
-    const tg = (window as any).Telegram?.WebApp;
-    if (tg) tg.expand();
-    const tgUserId = tg?.initDataUnsafe?.user?.id;
-    const resolvedId = queryUserId || (tgUserId ? String(tgUserId) : null);
-    
-    if (resolvedId) {
-      setUserId(resolvedId);
+    if (user?.id) {
       try {
-        const saved = localStorage.getItem(`daily_bonus_active_view_${resolvedId}`);
+        const saved = localStorage.getItem(`daily_bonus_active_view_${user.id}`);
         if (saved && ['selection', 'wheel', 'box', 'scratch'].includes(saved)) {
           setActiveView(saved as any);
         }
       } catch (e) {}
-    } else {
-      setLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
-    if (userId) {
+    if (user?.id) {
       try {
-        localStorage.setItem(`daily_bonus_active_view_${userId}`, activeView);
+        localStorage.setItem(`daily_bonus_active_view_${user.id}`, activeView);
       } catch (e) {}
     }
-  }, [activeView, userId]);
+  }, [activeView, user?.id]);
 
   const fetchStatus = async () => {
-    if (!userId) return;
+    if (!user?.id) return;
     try {
-      const res = await fetch(`${API_BASE}/api/daily-bonus/status?userId=${userId}`);
+      const res = await fetch(`${API_BASE}/api/daily-bonus/status?userId=${user.id}`);
       const data = await res.json();
       if (data.success) setStatus(data);
     } catch (err) {
@@ -131,10 +125,12 @@ export default function DailyBonusPage() {
   };
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 30000); // Auto refresh every 30s
-    return () => clearInterval(interval);
-  }, [userId]);
+    if (user?.id) {
+      fetchStatus();
+      const interval = setInterval(fetchStatus, 30000); // Auto refresh every 30s
+      return () => clearInterval(interval);
+    }
+  }, [user?.id]);
 
   // --- Actions ---
 
@@ -162,14 +158,14 @@ export default function DailyBonusPage() {
   };
 
   const autoClaimRewardForType = async (type: string, reward: any) => {
-    if (!userId || !reward) return;
+    if (!user?.id || !reward) return;
     setClaiming(true);
     try {
       const res = await fetch(`${API_BASE}/api/daily-bonus/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          userId, 
+          userId: user.id, 
           type,
           adStatus: 'Verified'
         })
@@ -196,13 +192,22 @@ export default function DailyBonusPage() {
   };
 
   const handleReveal = async (type: string, index?: number) => {
-    if (revealing || !userId) return;
+    if (revealing || !user?.id) return;
     
     // Prevent re-playing if reward already revealed but not claimed
     if (revealedReward && !claimSuccess) return;
 
     if (type === 'box' && index !== undefined) {
       setSelectedBox(index);
+    }
+
+    // For scratch, we need to check if it's unlocked in the status
+    if (type === 'scratch') {
+      const scratchMod = status?.modules.scratch;
+      if (!scratchMod?.unlocked) {
+        alert("Please unlock the scratch card first!");
+        return;
+      }
     }
 
     setRevealing(true);
@@ -213,7 +218,7 @@ export default function DailyBonusPage() {
       const res = await fetch(`${API_BASE}/api/daily-bonus/reveal`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, type })
+        body: JSON.stringify({ userId: user.id, type })
       });
       const data = await res.json();
       
@@ -318,16 +323,86 @@ export default function DailyBonusPage() {
 
 
 
+  const handleUnlockScratch = async () => {
+    if (unlockingScratch || !user?.id) return;
+    
+    setUnlockingScratch(true);
+    try {
+      const scratchMod = status?.modules.scratch as any;
+      const adType = scratchMod?.unlockAdType || "Reward";
+
+      console.log(`[DailyBonus] Unlocking scratch card with ad type: ${adType}`);
+
+      // Ensure Telegram is ready
+      if (tg) {
+        console.log("[DailyBonus] Calling tg.ready() before Adsgram...");
+        tg.ready();
+      }
+
+      // Step 1: Load and show ad
+      const adsgram = await loadAdsgramSDK();
+      const adConfig = await getAdsgramConfig(adType);
+      
+      console.log(`[DailyBonus] [Debug] Block ID for unlock: ${adConfig.blockId}`);
+
+      const adController = adsgram.init({ blockId: adConfig.blockId });
+      await adController.show();
+      console.log("[DailyBonus] Adsgram unlock ad successfully watched.");
+
+      // Step 2: Notify backend
+      const res = await fetch(`${API_BASE}/api/daily-bonus/unlock-scratch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id })
+      });
+      
+      if (res.ok) {
+        fetchStatus();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to unlock scratch card.");
+      }
+    } catch (err: any) {
+      console.error("Unlock scratch error:", err);
+      alert("Please complete the task to unlock your scratch card.");
+    } finally {
+      setUnlockingScratch(false);
+    }
+  };
+
   const handleClaim = async () => {
-    if (claiming || !userId || !revealedReward) return;
+    if (claiming || !user?.id || !revealedReward) return;
 
     setClaiming(true);
     try {
+      // For scratch cards, show an ad before claiming
+      if (activeView === 'scratch') {
+        const scratchMod = status?.modules.scratch as any;
+        const adType = scratchMod?.claimAdType || "Interstitial";
+
+        console.log(`[DailyBonus] Claiming scratch reward with ad type: ${adType}`);
+        
+        // Ensure Telegram is ready
+        if (tg) {
+          console.log("[DailyBonus] Calling tg.ready() before Adsgram claim...");
+          tg.ready();
+        }
+
+        const adsgram = await loadAdsgramSDK();
+        const adConfig = await getAdsgramConfig(adType);
+        
+        console.log(`[DailyBonus] [Debug] Block ID for claim: ${adConfig.blockId}`);
+
+        const adController = adsgram.init({ blockId: adConfig.blockId });
+        await adController.show();
+        console.log("[DailyBonus] Adsgram claim ad successfully watched.");
+      }
+
       const res = await fetch(`${API_BASE}/api/daily-bonus/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          userId, 
+          userId: user.id, 
           type: activeView,
           adStatus: 'Verified'
         })
@@ -344,7 +419,7 @@ export default function DailyBonusPage() {
         });
         fetchStatus();
       } else {
-        alert(data.error || "Failed to claim reward. Ensure you watched the ad fully.");
+        alert(data.error || "Failed to claim reward. Ensure you completed the task fully.");
       }
     } catch (err: any) {
       console.error("Claim error:", err);
@@ -575,8 +650,13 @@ export default function DailyBonusPage() {
 
   const handleScratchStart = (e: any) => {
     const canvas = canvasRef.current;
-    if (!canvas || !revealedReward || revealedReward.claimed || claimSuccess) return;
+    if (!canvas || claimSuccess) return;
     
+    // Auto-reveal when scratch starts if not already revealed
+    if (!revealedReward && !revealing) {
+      handleReveal('scratch');
+    }
+
     isScratchingRef.current = true;
     const { x, y } = getCoordinates(e, canvas);
     lastXRef.current = x;
@@ -682,13 +762,13 @@ export default function DailyBonusPage() {
     );
   }
 
-  if (!userId || !status || !status.dailyBonusEnabled) {
+  if (!user?.id || !status || !status.dailyBonusEnabled) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
         <AlertTriangle className="w-16 h-16 text-rose-500 mb-4" />
-        <h1 className="text-2xl font-bold mb-2">{!userId ? "Access Denied" : "System Maintenance"}</h1>
+        <h1 className="text-2xl font-bold mb-2">{!user?.id ? "Access Denied" : "System Maintenance"}</h1>
         <p className="text-slate-400 max-w-sm mb-6">
-          {!userId ? "Please open this page directly from the RoyShare Telegram Bot menu." : "Daily Bonus system is currently disabled by administrator. Please check back later."}
+          {!user?.id ? "Please open this page directly from the RoyShare Telegram Bot menu." : "Daily Bonus system is currently disabled by administrator. Please check back later."}
         </p>
       </div>
     );
@@ -1043,92 +1123,147 @@ export default function DailyBonusPage() {
     </div>
   );
 
-  const ScratchView = () => (
-    <div className="flex flex-col items-center space-y-8 py-4">
-      {/* Scratch Card Frame */}
-      <div className="relative w-full max-w-[280px] aspect-[4/3] bg-slate-900 rounded-3xl border-4 border-amber-600 shadow-2xl overflow-hidden group">
-         
-         {/* Underlying Mystery Reward - revealed when scratchPercent > 50 */}
-         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-            <Trophy className="w-12 h-12 text-amber-500 mb-2 opacity-25 animate-pulse" />
-            <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-500 to-orange-500">
-               {scratchedPercent > 50 && revealedReward ? `₹${Number(revealedReward.amount).toFixed(2)}` : '₹??'}
-            </span>
-            <span className="text-[10px] font-bold text-slate-500 uppercase mt-2 tracking-widest">
-               {scratchedPercent > 50 ? 'Your Won Reward' : 'Mystery Reward'}
-            </span>
-         </div>
+  const ScratchView = () => {
+    const scratchMod = status?.modules.scratch;
+    const isUnlocked = scratchMod?.unlocked || !!(status?.pendingRewards?.scratch && !status.pendingRewards.scratch.claimed);
 
-         {/* Scratchable coating canvas */}
-         <canvas
-            ref={canvasRef}
-            width={280}
-            height={210}
-            className="absolute inset-0 cursor-crosshair touch-none z-10"
-            onMouseDown={handleScratchStart}
-            onMouseMove={handleScratchMove}
-            onMouseUp={handleScratchEnd}
-            onMouseLeave={handleScratchEnd}
-            onTouchStart={handleScratchStart}
-            onTouchMove={handleScratchMove}
-            onTouchEnd={handleScratchEnd}
-         />
-
-         {/* Particle layer canvas */}
-         <canvas
-            ref={particleCanvasRef}
-            width={280}
-            height={210}
-            className="absolute inset-0 pointer-events-none z-20"
-         />
-
-         {/* Cleared state overlay */}
-         {scratchedPercent > 50 && !revealedReward?.claimed && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.8 }} 
-              animate={{ opacity: 1, scale: 1 }} 
-              className="absolute inset-0 bg-black/40 backdrop-blur-[1px] pointer-events-none flex items-center justify-center z-30"
+    return (
+      <div className="flex flex-col items-center space-y-8 py-4">
+        {!isUnlocked ? (
+          <div className="flex flex-col items-center space-y-6">
+            <div className="w-64 h-48 bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-800 flex flex-col items-center justify-center p-6 text-center">
+              <CreditCard className="w-12 h-12 text-slate-700 mb-3" />
+              <p className="text-slate-500 text-sm font-medium">Unlock your daily scratch card to win real rewards!</p>
+            </div>
+            <button 
+              onClick={handleUnlockScratch} 
+              disabled={unlockingScratch}
+              className="w-64 py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-3xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-amber-900/20 flex items-center justify-center gap-2"
             >
-              <div className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-950">
-                ✨ Cleared! ✨
-              </div>
-            </motion.div>
-         )}
-      </div>
-
-      {/* Helper Guidance Text */}
-      <div className="text-center space-y-1">
-        {scratchedPercent <= 50 ? (
-          <>
-            <p className="text-slate-300 text-xs font-semibold">
-              Scratch at least 50% of the area to reveal reward.
-            </p>
-            <p className="text-amber-500 text-[10px] font-bold uppercase tracking-widest animate-pulse">
-              Scratched: {Math.floor(scratchedPercent)}%
-            </p>
-          </>
+              {unlockingScratch ? (
+                <>
+                  <Disc className="w-5 h-5 animate-spin" />
+                  <span>Unlocking...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-5 h-5" />
+                  <span>Unlock Card</span>
+                </>
+              )}
+            </button>
+          </div>
         ) : (
           <>
-            <p className="text-emerald-400 text-xs font-bold">
-              Congratulations! Card cleared successfully!
-            </p>
-            <p className="text-slate-500 text-[10px] font-semibold">
-              Tap the Claim button below to claim your ₹{Number(revealedReward?.amount).toFixed(2)}.
-            </p>
+            {/* Scratch Card Frame */}
+            <div className="relative w-full max-w-[280px] aspect-[4/3] bg-slate-900 rounded-3xl border-4 border-amber-600 shadow-2xl overflow-hidden group">
+               
+               {/* Underlying Mystery Reward - revealed when scratchPercent > 50 */}
+               <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+                  <Trophy className="w-12 h-12 text-amber-500 mb-2 opacity-25 animate-pulse" />
+                  <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-500 to-orange-500">
+                     {scratchedPercent > 50 && revealedReward ? `₹${Number(revealedReward.amount).toFixed(2)}` : '₹??'}
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase mt-2 tracking-widest">
+                     {scratchedPercent > 50 ? 'Your Won Reward' : 'Mystery Reward'}
+                  </span>
+               </div>
+      
+               {/* Scratchable coating canvas */}
+               <canvas
+                  ref={canvasRef}
+                  width={280}
+                  height={210}
+                  className="absolute inset-0 cursor-crosshair touch-none z-10"
+                  onMouseDown={handleScratchStart}
+                  onMouseMove={handleScratchMove}
+                  onMouseUp={handleScratchEnd}
+                  onMouseLeave={handleScratchEnd}
+                  onTouchStart={handleScratchStart}
+                  onTouchMove={handleScratchMove}
+                  onTouchEnd={handleScratchEnd}
+               />
+      
+               {/* Particle layer canvas */}
+               <canvas
+                  ref={particleCanvasRef}
+                  width={280}
+                  height={210}
+                  className="absolute inset-0 pointer-events-none z-20"
+               />
+      
+               {/* Cleared state overlay */}
+               {scratchedPercent > 50 && !revealedReward?.claimed && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.8 }} 
+                    animate={{ opacity: 1, scale: 1 }} 
+                    className="absolute inset-0 bg-black/40 backdrop-blur-[1px] pointer-events-none flex items-center justify-center z-30"
+                  >
+                    <div className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-950">
+                      ✨ Cleared! ✨
+                    </div>
+                  </motion.div>
+               )}
+            </div>
+      
+            {/* Helper Guidance Text */}
+            <div className="text-center space-y-1">
+              {!revealedReward ? (
+                <p className="text-slate-400 text-xs font-semibold">
+                  Start scratching to reveal your mystery card!
+                </p>
+              ) : scratchedPercent <= 50 ? (
+                <>
+                  <p className="text-slate-300 text-xs font-semibold">
+                    Scratch at least 50% of the area to reveal reward.
+                  </p>
+                  <p className="text-amber-500 text-[10px] font-bold uppercase tracking-widest animate-pulse">
+                    Scratched: {Math.floor(scratchedPercent)}%
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-emerald-400 text-xs font-bold">
+                    Congratulations! Card cleared successfully!
+                  </p>
+                  <p className="text-slate-500 text-[10px] font-semibold">
+                    Tap the Claim button below to claim your ₹{Number(revealedReward?.amount).toFixed(2)}.
+                  </p>
+                </>
+              )}
+            </div>
+            
+            {scratchedPercent > 50 && revealedReward && !claimSuccess && (
+              <button 
+                onClick={handleClaim} 
+                disabled={claiming}
+                className="w-64 py-4.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-3xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-emerald-900/20 flex items-center justify-center gap-2"
+              >
+                {claiming ? (
+                  <>
+                    <Disc className="w-5 h-5 animate-spin" />
+                    <span>Claiming...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trophy className="w-5 h-5" />
+                    <span>Claim Reward</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {claimSuccess && (
+              <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-3xl text-center animate-bounce">
+                <p className="text-emerald-400 font-black text-sm">REWARD CLAIMED! 🎉</p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold">Credit added to your RoyShare Wallet</p>
+              </div>
+            )}
           </>
         )}
       </div>
-      
-      {!revealedReward && (
-        <button 
-          onClick={() => handleReveal('scratch')} 
-          className="w-56 py-3.5 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-amber-900/20"
-        >
-          Get Scratch Card
-        </button>
-      )}
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[#020617] text-white font-sans flex flex-col">

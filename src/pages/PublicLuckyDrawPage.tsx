@@ -2,12 +2,12 @@ import React, { useState, useEffect } from "react";
 import { ArrowLeft, Clock, Trophy, Users, Info, Calendar, CheckCircle, AlertCircle, Loader2, Lock, Sparkles, RefreshCw } from "lucide-react";
 import { db } from "../lib/firebase";
 import { doc, onSnapshot, collection, query, where, getDocs } from "firebase/firestore";
-import { useTelegramUser } from "../hooks/useTelegramUser";
+import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { parseInKolkata, formatFriendlyKolkata, getGiveawayStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
-import { getAdsgramConfig } from "../lib/adsManager";
+import { getAdsgramConfig, loadAdsgramSDK } from "../lib/adsManager";
 
 export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId: string; onBack: () => void }) {
-  const { user } = useTelegramUser();
+  const { user, tg, isInsideTelegram, waitForTelegramParams } = useTelegramAuth();
   const [giveaway, setGiveaway] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
   const [error, setError] = useState("");
@@ -206,9 +206,6 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
   const requirements = getRequirementsList();
   const allRequirementsMet = requirements.every(req => req.isMet);
 
-  const tg = (window as any).Telegram?.WebApp;
-  const isInsideTelegram = !!(tg && (tg.initData || tg.platform));
-
   // Membership Verification Action
   const handleVerifyMembership = async () => {
     if (!user?.telegramId) {
@@ -294,45 +291,9 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     }
   };
 
-  // Helper to ensure the Adsgram script is loaded and initialized
-  const ensureAdsgramLoaded = (): Promise<any> => {
-    return new Promise((resolve) => {
-      const existing = (window as any).Adsgram;
-      if (existing) {
-        resolve(existing);
-        return;
-      }
-
-      console.log("[LuckyDraw] Adsgram not found in window, checking for script or loading dynamically...");
-      const scriptId = "adsgram-sdk-script";
-      let script = document.getElementById(scriptId) as HTMLScriptElement;
-      
-      if (!script) {
-        script = document.createElement("script");
-        script.id = scriptId;
-        script.src = "https://sad.adsgram.ai/js/sad.min.js";
-        script.async = true;
-        document.head.appendChild(script);
-      }
-
-      let checkCount = 0;
-      const interval = setInterval(() => {
-        const sdk = (window as any).Adsgram;
-        if (sdk) {
-          clearInterval(interval);
-          resolve(sdk);
-        } else if (checkCount > 50) { // 5 seconds timeout
-          clearInterval(interval);
-          resolve(null);
-        }
-        checkCount++;
-      }, 100);
-    });
-  };
-
   // Lucky Draw Enrollment Action
   const handleEnrollInLuckyDraw = async () => {
-    if (!user?.telegramId || !giveawayId) {
+    if (!user?.id || !giveawayId) {
       setEnrollError("User or campaign details not available.");
       return;
     }
@@ -343,11 +304,10 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     }
 
     // Ensure Telegram.WebApp.ready() is called before Adsgram initialization
-    const currentTg = (window as any).Telegram?.WebApp;
-    if (currentTg) {
+    if (tg) {
       console.log("[LuckyDraw] Calling Telegram.WebApp.ready() before Adsgram initialization...");
       try {
-        currentTg.ready();
+        tg.ready();
         console.log("[LuckyDraw] Telegram Mini App is fully ready.");
       } catch (tgErr) {
         console.error("[LuckyDraw] Error calling Telegram.WebApp.ready():", tgErr);
@@ -365,59 +325,34 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
       if (config && config.blockId) {
         activeBlockId = config.blockId;
         console.log(`[LuckyDraw] Loaded active Adsgram block ID from database for "${adType}":`, activeBlockId);
-      } else {
-        const configRes = await fetch("/api/adsgram-settings");
-        if (configRes.ok) {
-          const configData = await configRes.json();
-          if (configData.success && configData.settings?.adsgramBlockId) {
-            activeBlockId = configData.settings.adsgramBlockId;
-            console.log("[LuckyDraw] Loaded active Adsgram block ID from database:", activeBlockId);
-          }
-        }
       }
     } catch (e) {
       console.error("[LuckyDraw] Error loading Adsgram config, using default:", e);
     }
     
-    const adsgram = await ensureAdsgramLoaded();
-    
-    if (adsgram) {
-      console.log("[LuckyDraw] Adsgram SDK is initialized correctly in the window scope.");
-      try {
-        console.log("[Adsgram] Callback: loaded | Initializing ad controller with blockId:", activeBlockId);
-        const adController = adsgram.init({ blockId: activeBlockId });
-        console.log("[Adsgram] Ad controller initialized:", adController);
-        
-        console.log("[Adsgram] Callback: opened | Displaying rewarded video ad...");
-        adController.show()
-          .then((result: any) => {
-            console.log("[Adsgram] Callback: rewarded | User successfully watched the full ad!", result);
-            // After successful ad reward callback, proceed to enroll
-            completeEnrollment();
-          })
-          .catch((err: any) => {
-            console.error("[Adsgram] Callback: failed or closed | Ad closed prematurely or failed to load. Exact error details below:");
-            console.error("[LuckyDraw] Adsgram Show exact error object:", err);
-            
-            const errStr = typeof err === "object" ? (err?.message || err?.description || JSON.stringify(err)) : String(err);
-            setEnrollError(`Please watch the full ad to participate. Error details: ${errStr || "Ad closed or failed"}`);
-            setEnrolling(false);
-          });
-      } catch (err: any) {
-        console.error("[LuckyDraw] Failed to initialize Adsgram. Callback: failed. Exact error details below:");
-        console.error("[LuckyDraw] Adsgram Init exact error object:", err);
-        console.error("[LuckyDraw] Adsgram Init error stack:", err?.stack || err);
-        
-        setEnrollError(`Failed to load sponsored ad. Error details: ${err.message || String(err)}`);
-        setEnrolling(false);
+    try {
+      console.log("[LuckyDraw] Loading Adsgram SDK...");
+      const adsgram = await loadAdsgramSDK();
+      
+      if (!adsgram) {
+        throw new Error("Adsgram SDK failed to resolve.");
       }
-    } else {
-      console.error("[LuckyDraw] Adsgram SDK failed to load/resolve in window.");
-      if (isInsideTelegram) {
-        setEnrollError("Adsgram SDK failed to load. Please verify your internet connection or check if an adblocker is active.");
-      } else {
-        setEnrollError("Adsgram SDK failed to load. Please ensure you are running inside Telegram and have a stable internet connection.");
-      }
+
+      console.log("[LuckyDraw] Adsgram SDK is initialized correctly.");
+      console.log("[Adsgram] Callback: loaded | Initializing ad controller with blockId:", activeBlockId);
+      const adController = adsgram.init({ blockId: activeBlockId });
+      
+      console.log("[Adsgram] Displaying rewarded video ad...");
+      await adController.show();
+      
+      console.log("[Adsgram] Callback: rewarded | User successfully watched the full ad!");
+      // After successful ad reward, proceed to enroll
+      await completeEnrollment();
+      
+    } catch (err: any) {
+      console.error("[LuckyDraw] Adsgram flow failed:", err);
+      const errStr = typeof err === "object" ? (err?.message || err?.description || JSON.stringify(err)) : String(err);
+      setEnrollError(`Please watch the full ad to participate. Detail: ${errStr || "Ad closed or failed"}`);
       setEnrolling(false);
     }
   };

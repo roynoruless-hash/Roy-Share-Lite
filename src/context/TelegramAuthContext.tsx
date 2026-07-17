@@ -10,8 +10,12 @@ interface TelegramAuthContextType {
   error: string | null;
   isAuthenticated: boolean;
   startParam: string | null;
+  initData: string | null;
+  isInsideTelegram: boolean;
+  tg: any | null;
   verifyAuth: () => Promise<void>;
   completeProfile: (details: Partial<User>) => Promise<void>;
+  waitForTelegramParams: (timeoutSeconds?: number) => Promise<boolean>;
 }
 
 const TelegramAuthContext = createContext<TelegramAuthContextType | undefined>(undefined);
@@ -51,7 +55,56 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [startParam, setStartParam] = useState<string | null>(null);
+  const [initData, setInitData] = useState<string | null>(null);
+  const [tg, setTg] = useState<any>(null);
+  const [isInsideTelegram, setIsInsideTelegram] = useState<boolean>(false);
   const isVerifyingRef = React.useRef(false);
+
+  const waitForTelegramParams = async (timeoutSeconds = 5): Promise<boolean> => {
+    console.log(`[TelegramAuthContext] Starting wait for Telegram parameters (timeout: ${timeoutSeconds}s)...`);
+    const startTime = Date.now();
+    const timeoutMs = timeoutSeconds * 1000;
+
+    return new Promise((resolve) => {
+      const check = () => {
+        const currentTg = (window as any).Telegram?.WebApp;
+        const currentInitData = currentTg?.initData;
+        const currentPlatform = currentTg?.platform;
+
+        // Logs for debugging
+        console.log("[TelegramAuthContext] Polling check:", {
+          hasTg: !!currentTg,
+          hasInitData: !!currentInitData,
+          platform: currentPlatform,
+          elapsed: Date.now() - startTime
+        });
+
+        if (currentTg && (currentInitData || currentPlatform)) {
+          console.log("[TelegramAuthContext] Telegram parameters found!");
+          setTg(currentTg);
+          setInitData(currentInitData || null);
+          setIsInsideTelegram(true);
+          try {
+            currentTg.ready();
+            currentTg.expand();
+          } catch (e) {
+            console.error("[TelegramAuthContext] Error calling ready/expand:", e);
+          }
+          resolve(true);
+          return;
+        }
+
+        if (Date.now() - startTime > timeoutMs) {
+          console.warn("[TelegramAuthContext] Timed out waiting for Telegram parameters.");
+          resolve(false);
+          return;
+        }
+
+        setTimeout(check, 200);
+      };
+      check();
+    });
+  };
 
   const verifyAuth = async () => {
     console.log("[TelegramAuthContext] verifyAuth execution started");
@@ -63,10 +116,13 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     }
     isVerifyingRef.current = true;
 
-    const tg = (window as any).Telegram?.WebApp;
-    console.log("[TelegramAuthContext] [STEP 1] WebApp initialization. tg object exists:", !!tg);
-    if (tg) {
-      console.log("[TelegramAuthContext] WebApp detailed metadata - version:", tg.version, "platform:", tg.platform, "colorScheme:", tg.colorScheme);
+    // Wait for TG to be ready
+    const tgReady = await waitForTelegramParams(4);
+    const currentTg = (window as any).Telegram?.WebApp;
+    
+    if (currentTg) {
+      setTg(currentTg);
+      console.log("[TelegramAuthContext] WebApp detailed metadata - version:", currentTg.version, "platform:", currentTg.platform, "colorScheme:", currentTg.colorScheme);
     }
 
     const params = new URLSearchParams(window.location.search);
@@ -74,27 +130,24 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     console.log("[TelegramAuthContext] [STEP 3] Checked query parameters. queryUserId:", queryUserId);
 
     // If no Telegram object AND no queryUserId in query param, we are not in a Mini App context
-    if (!tg && !queryUserId) {
+    if (!currentTg && !queryUserId) {
       console.log("[TelegramAuthContext] Early return: No Telegram WebApp object found and no queryUserId parameter found. App is not running inside Telegram Mini App context.");
       setLoading(false);
       isVerifyingRef.current = false;
       return;
     }
 
-    const initData = tg?.initData;
-    console.log("[TelegramAuthContext] [STEP 2] Check initData availability. initData exists:", !!initData, "initData length:", initData ? initData.length : 0);
+    const currentInitData = currentTg?.initData;
+    setInitData(currentInitData || null);
+    setIsInsideTelegram(!!(currentTg && (currentInitData || currentTg.platform)));
+    console.log("[TelegramAuthContext] [STEP 2] Check initData availability. initData exists:", !!currentInitData, "initData length:", currentInitData ? currentInitData.length : 0);
 
     // Fallback: If we have queryUserId but no initData, use the direct user retrieval API
-    if (!initData && queryUserId) {
+    if (!currentInitData && queryUserId) {
       console.log("[TelegramAuthContext] Fallback scenario: queryUserId is available but initData is missing. Triggering direct user profile retrieval flow.");
       setLoading(true);
       setError(null);
       try {
-        if (tg) {
-          console.log("[TelegramAuthContext] Calling tg.ready() and tg.expand() inside fallback user profile block");
-          tg.ready();
-          tg.expand();
-        }
         const profileUrl = `${API_BASE}/api/user/profile/${queryUserId}`;
         const response = await fetchWithTimeout(profileUrl);
         const data = await response.json();
@@ -118,7 +171,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     }
 
     // If no initData and no queryUserId, skipping verification
-    if (!initData) {
+    if (!currentInitData) {
       console.log("[TelegramAuthContext] Early return: initData is empty and queryUserId is missing. Skipping verification.");
       setLoading(false);
       isVerifyingRef.current = false;
@@ -129,22 +182,15 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     setLoading(true);
     setError(null);
     try {
-      const tg = (window as any).Telegram?.WebApp;
       const urlParams = new URLSearchParams(window.location.search);
-      const sp = tg?.initDataUnsafe?.start_param || urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start_param") || "";
+      const sp = currentTg?.initDataUnsafe?.start_param || urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start_param") || "";
       setStartParam(sp);
-
-      if (tg) {
-        console.log("[TelegramAuthContext] Calling tg.ready() and tg.expand() inside standard verification block");
-        tg.ready();
-        tg.expand();
-      }
 
       const verifyUrl = `${API_BASE}/api/auth/telegram-verify`;
       const response = await fetchWithTimeout(verifyUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData, startParam: sp }),
+        body: JSON.stringify({ initData: currentInitData, startParam: sp }),
       });
 
       const data: TelegramAuthResponse = await response.json();
@@ -256,8 +302,12 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         error,
         isAuthenticated: !!user,
         startParam,
+        initData,
+        isInsideTelegram,
+        tg,
         verifyAuth,
         completeProfile,
+        waitForTelegramParams,
       }}
     >
       {children}

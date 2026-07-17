@@ -100,11 +100,10 @@ const postGiveawayToChannel = async (giveawayId: string, title: string, descript
   }
 
   try {
-    const totalBudget = prizeAmount * totalWinners;
     const caption = `🔥 <b>NEW LUCKY NUMBER GIVEAWAY CAMPAIGN!</b> 🔥\n\n` +
       `🏆 <b>${title}</b>\n\n` +
       `${description || ""}\n\n` +
-      `💰 Prize per Winner: <b>₹${prizeAmount}</b>\n` +
+      `💰 Total Prize Budget: <b>₹${prizeAmount}</b>\n` +
       `🎁 Lucky Winners: <b>${totalWinners} Winners</b>\n\n` +
       `👇 Click the button below to reserve your lucky number inside our Telegram Mini App!`;
 
@@ -1128,8 +1127,11 @@ router.get("/analytics/:giveawayId", async (req: any, res: any) => {
     const approvedEntries = entries.filter(e => e.status === "Winner" && e.paymentStatus === "Paid").length / 2;
     const rejectedEntries = entries.filter(e => e.status === "Rejected").length / 2;
 
-    const distributedBudget = approvedEntries * Number(campaign.prizeAmount || 100);
-    const totalBudget = Number(campaign.totalWinners || 10) * Number(campaign.prizeAmount || 100);
+    const distributedBudget = (campaign.drawnWinners || [])
+      .filter((w: any) => w && w.status === "Approved")
+      .reduce((sum: number, w: any) => sum + Number(w.allocatedPrize || 0), 0);
+    
+    const totalBudget = Number(campaign.prizeAmount || 0);
     const remainingBudget = Math.max(0, totalBudget - distributedBudget);
 
     const usersSnap = await getDocs(collection(db, "users"));
