@@ -50,7 +50,7 @@ const formatTime = (seconds: number) => {
 // --- Components ---
 
 export default function DailyBonusPage() {
-  const { user, tg, isInsideTelegram, waitForTelegramParams } = useTelegramAuth();
+  const { user, tg, isInsideTelegram, waitForTelegramParams, showAd } = useTelegramAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [status, setStatus] = useState<BonusStatusResponse | null>(null);
   const [activeView, setActiveView] = useState<'selection' | 'wheel' | 'box' | 'scratch'>('selection');
@@ -331,23 +331,8 @@ export default function DailyBonusPage() {
       const scratchMod = status?.modules.scratch as any;
       const adType = scratchMod?.unlockAdType || "Reward";
 
-      console.log(`[DailyBonus] Unlocking scratch card with ad type: ${adType}`);
-
-      // Ensure Telegram is ready
-      if (tg) {
-        console.log("[DailyBonus] Calling tg.ready() before Adsgram...");
-        tg.ready();
-      }
-
-      // Step 1: Load and show ad
-      const adsgram = await loadAdsgramSDK();
-      const adConfig = await getAdsgramConfig(adType);
-      
-      console.log(`[DailyBonus] [Debug] Block ID for unlock: ${adConfig.blockId}`);
-
-      const adController = adsgram.init({ blockId: adConfig.blockId });
-      await adController.show();
-      console.log("[DailyBonus] Adsgram unlock ad successfully watched.");
+      // Use the centralized showAd implementation
+      await showAd(adType);
 
       // Step 2: Notify backend
       const res = await fetch(`${API_BASE}/api/daily-bonus/unlock-scratch`, {
@@ -380,22 +365,8 @@ export default function DailyBonusPage() {
         const scratchMod = status?.modules.scratch as any;
         const adType = scratchMod?.claimAdType || "Interstitial";
 
-        console.log(`[DailyBonus] Claiming scratch reward with ad type: ${adType}`);
-        
-        // Ensure Telegram is ready
-        if (tg) {
-          console.log("[DailyBonus] Calling tg.ready() before Adsgram claim...");
-          tg.ready();
-        }
-
-        const adsgram = await loadAdsgramSDK();
-        const adConfig = await getAdsgramConfig(adType);
-        
-        console.log(`[DailyBonus] [Debug] Block ID for claim: ${adConfig.blockId}`);
-
-        const adController = adsgram.init({ blockId: adConfig.blockId });
-        await adController.show();
-        console.log("[DailyBonus] Adsgram claim ad successfully watched.");
+        // Use the centralized showAd implementation
+        await showAd(adType);
       }
 
       const res = await fetch(`${API_BASE}/api/daily-bonus/claim`, {

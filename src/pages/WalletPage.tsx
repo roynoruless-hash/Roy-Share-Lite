@@ -19,10 +19,9 @@ import {
 } from "lucide-react";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { loadAdsgramSDK, getAdsgramConfig } from "../lib/adsManager";
 
 export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> = ({ onBack, initialTab = "wallet" }) => {
-  const { user } = useTelegramAuth();
+  const { user, showAd, isInsideTelegram } = useTelegramAuth();
   const [activeTab, setActiveTab] = useState<string>(initialTab);
 
   // Form State
@@ -265,79 +264,18 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
     }
 
     // Trigger Adsgram flow before submit
-    const isInsideMiniApp = typeof window !== "undefined" && !!((window as any).Telegram?.WebApp?.initData || (window as any).Telegram?.WebApp?.platform);
     setAdLoading(true);
 
     try {
-      console.log("[Withdrawal Flow] Starting withdrawal flow validation...");
-      
-      // 1. Ensure Telegram is ready and we have params
-      console.log("[Withdrawal Flow] [Debug] Telegram.WebApp exists?", !!(window as any).Telegram?.WebApp);
-      
-      const tgReady = await (window as any).Telegram?.WebApp ? true : false;
-      if (tgReady) {
-        console.log("[Withdrawal Flow] Calling Telegram.WebApp.ready()...");
-        (window as any).Telegram.WebApp.ready();
-      }
-
-      // 2. Wait for launch parameters if they are missing
-      const hasInitData = !!(window as any).Telegram?.WebApp?.initData;
-      console.log("[Withdrawal Flow] [Debug] initData available?", hasInitData);
-      console.log("[Withdrawal Flow] [Debug] initDataUnsafe available?", !!(window as any).Telegram?.WebApp?.initDataUnsafe);
-      console.log("[Withdrawal Flow] [Debug] User ID detected?", (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || user.id);
-
-      if (!hasInitData && isInsideMiniApp) {
-        console.log("[Withdrawal Flow] initData missing in Mini App, retrying...");
-        // If we have access to context's waitForTelegramParams we'd use it, 
-        // but since we are in a component we can just wait a bit or trust the context already did it.
-        // Let's add a small local retry for extra safety as requested.
-        let retryCount = 0;
-        while (retryCount < 5 && !(window as any).Telegram?.WebApp?.initData) {
-          await new Promise(r => setTimeout(r, 500));
-          retryCount++;
-          console.log(`[Withdrawal Flow] Retry ${retryCount} for initData...`);
-        }
-      }
-
-      // 3. Determine active ad type and block ID
+      // Use the centralized showAd implementation
       const selectedAdType = withdrawalSettings?.adsTypeBeforeWithdrawal || "Reward";
-      console.log(`[Withdrawal Ad] Loading configuration for type: ${selectedAdType}`);
-      
-      let activeAppId = "";
-      let activeBlockId = "3856"; // Fallback to Adsgram test block ID
-      const adConfig = await getAdsgramConfig(selectedAdType);
-      if (adConfig && adConfig.blockId) {
-        activeAppId = adConfig.appId;
-        activeBlockId = adConfig.blockId;
-      }
-      
-      console.log("[Withdrawal Flow] [Debug] App ID:", activeAppId || "Not Configured");
-      console.log("[Withdrawal Flow] [Debug] Block ID:", activeBlockId);
-
-      // 4. Load Adsgram SDK
-      console.log("[Withdrawal Flow] Loading Adsgram SDK...");
-      const adsgram = await loadAdsgramSDK();
-      if (!adsgram) {
-        console.error("[Withdrawal Flow] [Debug] Adsgram initialization status: FAILED (SDK not found)");
-        throw new Error("Adsgram SDK failed to resolve.");
-      }
-      console.log("[Withdrawal Flow] [Debug] Adsgram initialization status: SUCCESS");
-
-      // 5. Initialize and show ad
-      console.log(`[Withdrawal Ad] Initializing ad controller with block ID: ${activeBlockId}`);
-      const adController = adsgram.init({ blockId: activeBlockId });
-      
-      console.log("[Withdrawal Ad] Showing ad...");
-      await adController.show();
-      console.log("[Withdrawal Ad] User successfully completed ad viewing.");
-
+      await showAd(selectedAdType);
     } catch (adError: any) {
       console.error("[Withdrawal Ad] Ad presentation failed or skipped:", adError);
       const errStr = typeof adError === "object" ? (adError?.message || adError?.description || JSON.stringify(adError)) : String(adError);
-      console.error("[Withdrawal Flow] [Debug] Exact error if initialization fails:", errStr);
       
       // If we are in real Telegram app, require complete view
-      if (isInsideMiniApp) {
+      if (isInsideTelegram) {
         setError(`Security verification failed: Please watch the full sponsored ad to verify and submit your withdrawal. (Detail: ${errStr || "ad closed"})`);
         setAdLoading(false);
         return;

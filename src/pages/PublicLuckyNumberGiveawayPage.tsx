@@ -18,7 +18,6 @@ import {
   ChevronRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { loadAdsgramSDK, getAdsgramConfig } from "../lib/adsManager";
 
 interface PublicLuckyNumberGiveawayPageProps {
   giveawayId: string;
@@ -27,7 +26,7 @@ interface PublicLuckyNumberGiveawayPageProps {
 }
 
 export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNavigate }: PublicLuckyNumberGiveawayPageProps) {
-  const { user } = useTelegramAuth();
+  const { user, showAd, isInsideTelegram } = useTelegramAuth();
   
   const [giveaway, setGiveaway] = useState<any>(null);
   const [entries, setEntries] = useState<any[]>([]);
@@ -212,61 +211,45 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
         return;
       }
 
-      // Step 2: Load and run the Adsgram Ad matching the configured ad type
+      // Step 2: Show Ad using centralized implementation
       const adType = giveaway.adsType || "Reward";
-      console.log(`[LuckyNumber] Initializing ad of type: ${adType}`);
       
-      const adsgram = await loadAdsgramSDK();
-      if (!adsgram) {
-        throw new Error("Adsgram SDK failed to load. Check your internet connection or adblocker settings.");
-      }
-
-      const adConfig = await getAdsgramConfig(adType);
-      if (!adConfig.blockId) {
-        throw new Error("Ad verification configuration is missing in settings.");
-      }
-
-      const controller = adsgram.init({ blockId: adConfig.blockId.trim() });
-      if (!controller) {
-        throw new Error("Could not initialize ad controller.");
-      }
-
-      controller.show()
-        .then(async () => {
-          // Ad successfully completed! Confirm permanently.
-          const confirmRes = await fetch(`${API_BASE}/api/lucky-number-giveaway/confirm-number`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              giveawayId: giveaway.id,
-              telegramId: user.telegramId
-            })
-          });
-
-          const confirmData = await confirmRes.json();
-          if (confirmRes.ok && confirmData.success) {
-            setSuccessMsg(`🎉 Number ${selectedNum} Reserved Successfully!`);
-          } else {
-            setEnrollError(confirmData.error || "Failed to confirm participation.");
-          }
-          setEnrolling(false);
-        })
-        .catch(async (err: any) => {
-          // User closed ad early or load failed. Release the reservation.
-          console.warn("[LuckyNumber] Ad failed or closed prematurely. Releasing reservation...", err);
-          await fetch(`${API_BASE}/api/lucky-number-giveaway/release-number`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              giveawayId: giveaway.id,
-              telegramId: user.telegramId
-            })
-          });
-
-          const errMsg = err?.message || err?.description || "Ad closed prematurely.";
-          setEnrollError(`Please watch the sponsored ad completely to secure your lucky number! (${errMsg})`);
-          setEnrolling(false);
+      try {
+        await showAd(adType);
+        
+        // Ad successfully completed! Confirm permanently.
+        const confirmRes = await fetch(`${API_BASE}/api/lucky-number-giveaway/confirm-number`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            giveawayId: giveaway.id,
+            telegramId: user.telegramId
+          })
         });
+
+        const confirmData = await confirmRes.json();
+        if (confirmRes.ok && confirmData.success) {
+          setSuccessMsg(`🎉 Number ${selectedNum} Reserved Successfully!`);
+        } else {
+          setEnrollError(confirmData.error || "Failed to confirm participation.");
+        }
+        setEnrolling(false);
+      } catch (adError: any) {
+        // User closed ad early or load failed. Release the reservation.
+        console.warn("[LuckyNumber] Ad failed or closed prematurely. Releasing reservation...", adError);
+        await fetch(`${API_BASE}/api/lucky-number-giveaway/release-number`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            giveawayId: giveaway.id,
+            telegramId: user.telegramId
+          })
+        });
+
+        const errMsg = typeof adError === "object" ? (adError?.message || adError?.description || JSON.stringify(adError)) : String(adError);
+        setEnrollError(`Please watch the sponsored ad completely to secure your lucky number! (${errMsg})`);
+        setEnrolling(false);
+      }
 
     } catch (err: any) {
       console.error("Enrollment crash:", err);

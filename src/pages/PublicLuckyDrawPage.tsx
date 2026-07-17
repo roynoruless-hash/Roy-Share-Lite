@@ -4,10 +4,9 @@ import { db } from "../lib/firebase";
 import { doc, onSnapshot, collection, query, where, getDocs } from "firebase/firestore";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { parseInKolkata, formatFriendlyKolkata, getGiveawayStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
-import { getAdsgramConfig, loadAdsgramSDK } from "../lib/adsManager";
 
 export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId: string; onBack: () => void }) {
-  const { user, tg, isInsideTelegram, waitForTelegramParams } = useTelegramAuth();
+  const { user, tg, isInsideTelegram, waitForTelegramParams, showAd } = useTelegramAuth();
   const [giveaway, setGiveaway] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
   const [error, setError] = useState("");
@@ -317,35 +316,12 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     setEnrolling(true);
     setEnrollError("");
     
-    let activeBlockId = "3856"; // Default/fallback to Adsgram test block ID
     try {
       const adType = giveaway?.adsgramType || "Reward";
-      console.log(`[LuckyDraw] Loading Adsgram configuration for type: ${adType}`);
-      const config = await getAdsgramConfig(adType);
-      if (config && config.blockId) {
-        activeBlockId = config.blockId;
-        console.log(`[LuckyDraw] Loaded active Adsgram block ID from database for "${adType}":`, activeBlockId);
-      }
-    } catch (e) {
-      console.error("[LuckyDraw] Error loading Adsgram config, using default:", e);
-    }
-    
-    try {
-      console.log("[LuckyDraw] Loading Adsgram SDK...");
-      const adsgram = await loadAdsgramSDK();
       
-      if (!adsgram) {
-        throw new Error("Adsgram SDK failed to resolve.");
-      }
-
-      console.log("[LuckyDraw] Adsgram SDK is initialized correctly.");
-      console.log("[Adsgram] Callback: loaded | Initializing ad controller with blockId:", activeBlockId);
-      const adController = adsgram.init({ blockId: activeBlockId });
+      // Use the centralized showAd implementation
+      await showAd(adType);
       
-      console.log("[Adsgram] Displaying rewarded video ad...");
-      await adController.show();
-      
-      console.log("[Adsgram] Callback: rewarded | User successfully watched the full ad!");
       // After successful ad reward, proceed to enroll
       await completeEnrollment();
       
