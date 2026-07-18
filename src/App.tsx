@@ -49,6 +49,7 @@ const ReferralProgramPage = lazy(() => import("./pages/ReferralProgramPage"));
 const EnterpriseSecurityPage = lazy(() => import("./pages/EnterpriseSecurityPage"));
 const FastGlobalDeliveryPage = lazy(() => import("./pages/FastGlobalDeliveryPage"));
 const ReferralLandingPage = lazy(() => import("./pages/ReferralLandingPage"));
+const AdsbitvexTestPage = lazy(() => import("./pages/AdsbitvexTestPage"));
 
 import MoreMenu from "./components/MoreMenu";
 
@@ -219,6 +220,10 @@ export default function App() {
     
     if (window.location.pathname === "/advertiser" || window.location.pathname.startsWith("/advertiser/")) {
       return <AdvertiserPanel />;
+    }
+
+    if (window.location.pathname === "/adsbitvex-test" || window.location.pathname === "/test/adsbitvex") {
+      return <AdsbitvexTestPage />;
     }
 
     if (window.location.pathname === "/dashboard/admin") {

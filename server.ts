@@ -13357,15 +13357,23 @@ Gmail: ${email}`;
     try {
       const { sdkEndpoint, appId, rewardScript, initScript, integrationStatus } = req.body;
 
-      // Validate URL if provided
+      // Validate URL or complete script tag if provided
       let cleanEndpoint = (sdkEndpoint || "").trim();
       if (cleanEndpoint) {
+        // If they pasted a complete <script src="...">...</script> tag, extract the src URL
+        if (cleanEndpoint.toLowerCase().startsWith("<script") || cleanEndpoint.includes("src=")) {
+          const srcMatch = cleanEndpoint.match(/src=["']([^"']+)["']/i);
+          if (srcMatch && srcMatch[1]) {
+            cleanEndpoint = srcMatch[1].trim();
+          }
+        }
+
         if (!cleanEndpoint.startsWith("http://") && !cleanEndpoint.startsWith("https://")) {
-          return res.status(400).json({ error: "Invalid SDK Endpoint: Must be a valid URL starting with http:// or https://" });
+          return res.status(400).json({ error: "Invalid SDK Endpoint: Must be a valid URL starting with http:// or https://, or a complete <script src='...'> tag." });
         }
         // Prevent unsafe HTML/Javascript injection in the URL itself
         if (cleanEndpoint.includes("<") || cleanEndpoint.includes(">") || cleanEndpoint.includes('"') || cleanEndpoint.includes("'")) {
-          return res.status(400).json({ error: "Invalid SDK Endpoint: Special characters (<, >, \", ') are not allowed." });
+          return res.status(400).json({ error: "Invalid SDK Endpoint URL after parsing. Special characters are not allowed in the URL query parameters." });
         }
       }
 
@@ -13378,32 +13386,24 @@ Gmail: ${email}`;
         }
       }
 
-      // Validate Reward and Init script to prevent malicious HTML/script tag injections
       const cleanRewardScript = (rewardScript || "").trim();
       const cleanInitScript = (initScript || "").trim();
-      
-      const hasScriptTag = (str: string) => {
-        const lower = str.toLowerCase();
-        return lower.includes("<script") || lower.includes("</script") || lower.includes("<iframe") || lower.includes("<object");
-      };
-
-      if (hasScriptTag(cleanRewardScript) || hasScriptTag(cleanInitScript)) {
-        return res.status(400).json({ error: "Scripts cannot contain arbitrary HTML tags such as <script> or <iframe>. Please only write raw JavaScript." });
-      }
 
       // Generate head script
       let finalSdkUrl = "";
       let generatedHeadScript = "";
-      if (cleanEndpoint && cleanAppId) {
+      if (cleanEndpoint) {
         let endpoint = cleanEndpoint;
-        if (endpoint.includes("YOUR_APP_ID")) {
-          endpoint = endpoint.replace(/YOUR_APP_ID/g, cleanAppId);
-        } else if (!endpoint.includes(cleanAppId)) {
-          if (endpoint.includes("appid=")) {
-            endpoint = endpoint.replace(/appid=[^&]*/, `appid=${cleanAppId}`);
-          } else {
-            const sep = endpoint.includes("?") ? "&" : "?";
-            endpoint = `${endpoint}${sep}appid=${cleanAppId}`;
+        if (cleanAppId) {
+          if (endpoint.includes("YOUR_APP_ID")) {
+            endpoint = endpoint.replace(/YOUR_APP_ID/g, cleanAppId);
+          } else if (!endpoint.includes(cleanAppId)) {
+            if (endpoint.includes("appid=")) {
+              endpoint = endpoint.replace(/appid=[^&]*/, `appid=${cleanAppId}`);
+            } else {
+              const sep = endpoint.includes("?") ? "&" : "?";
+              endpoint = `${endpoint}${sep}appid=${cleanAppId}`;
+            }
           }
         }
         finalSdkUrl = endpoint;
@@ -13431,7 +13431,7 @@ Gmail: ${email}`;
 
       // Instantly update server cache
       cachedAdsbitvexSettings = updatedData;
-      debugLog("[AdsBitvex] Cached settings updated successfully!");
+      debugLog(`[AdsBitvex] Cached settings updated successfully! ${JSON.stringify(updatedData)}`);
 
       return res.json({ success: true, settings: updatedData });
     } catch (e: any) {
