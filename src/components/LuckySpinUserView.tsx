@@ -664,14 +664,20 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
     setFormError("");
 
     // AdsBitvex Reward Ad Integration
-    if (typeof (window as any).showadsbitvex !== "function") {
-      setFormError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
-      return;
-    }
-
     try {
       setJoining(true);
-      await (window as any).showadsbitvex();
+      const configRes = await fetch("/api/adsbitvex-config");
+      if (configRes.ok) {
+        const configData = await configRes.json();
+        if (configData.masterEnabled && configData.luckySpinEnabled) {
+          if (typeof (window as any).showadsbitvex !== "function") {
+            setFormError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
+            setJoining(false);
+            return;
+          }
+          await (window as any).showadsbitvex();
+        }
+      }
     } catch (err: any) {
       setJoining(false);
       setFormError(`Ad failed: ${err?.message || err}`);

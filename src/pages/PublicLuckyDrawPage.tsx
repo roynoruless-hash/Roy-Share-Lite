@@ -298,14 +298,20 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
     }
 
     // AdsBitvex Reward Ad Integration
-    if (typeof (window as any).showadsbitvex !== "function") {
-      setEnrollError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
-      return;
-    }
-
     try {
       setEnrolling(true);
-      await (window as any).showadsbitvex();
+      const configRes = await fetch("/api/adsbitvex-config");
+      if (configRes.ok) {
+        const configData = await configRes.json();
+        if (configData.masterEnabled && configData.luckyDrawEnabled) {
+          if (typeof (window as any).showadsbitvex !== "function") {
+            setEnrollError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
+            setEnrolling(false);
+            return;
+          }
+          await (window as any).showadsbitvex();
+        }
+      }
     } catch (err: any) {
       setEnrolling(false);
       setEnrollError(`Ad failed: ${err?.message || err}`);

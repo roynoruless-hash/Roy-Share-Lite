@@ -13321,7 +13321,12 @@ Gmail: ${email}`;
           rewardScript: `window.showadsbitvex()\n.then(()=>{\nconsole.log("Reward earned");\n})\n.catch(e=>{\nconsole.error(e);\n});`,
           initScript: `window.showadsbitvex_init()\n.then(()=>{\nconsole.log("Init Closed");\n})\n.catch(e=>{\nconsole.error(e);\n});`,
           generatedHeadScript: "",
-          integrationStatus: {}
+          integrationStatus: {},
+          masterEnabled: false,
+          withdrawalEnabled: false,
+          luckyDrawEnabled: false,
+          luckySpinEnabled: false,
+          luckyNumberEnabled: false
         });
       }
       return res.json(cachedAdsbitvexSettings);
@@ -13342,7 +13347,12 @@ Gmail: ${email}`;
           rewardScript: `window.showadsbitvex()\n.then(()=>{\nconsole.log("Reward earned");\n})\n.catch(e=>{\nconsole.error(e);\n});`,
           initScript: `window.showadsbitvex_init()\n.then(()=>{\nconsole.log("Init Closed");\n})\n.catch(e=>{\nconsole.error(e);\n});`,
           generatedHeadScript: "",
-          integrationStatus: {}
+          integrationStatus: {},
+          masterEnabled: false,
+          withdrawalEnabled: false,
+          luckyDrawEnabled: false,
+          luckySpinEnabled: false,
+          luckyNumberEnabled: false
         });
       }
       return res.json(cachedAdsbitvexSettings);
@@ -13355,7 +13365,10 @@ Gmail: ${email}`;
   // Admin PUT endpoint to save settings
   app.put("/api/admin/adsbitvex-config", requireAdminDb, async (req, res) => {
     try {
-      const { sdkEndpoint, appId, rewardScript, initScript, integrationStatus } = req.body;
+      const { 
+        sdkEndpoint, appId, rewardScript, initScript, integrationStatus,
+        masterEnabled, withdrawalEnabled, luckyDrawEnabled, luckySpinEnabled, luckyNumberEnabled
+      } = req.body;
 
       // Validate URL or complete script tag if provided
       let cleanEndpoint = (sdkEndpoint || "").trim();
@@ -13423,6 +13436,11 @@ Gmail: ${email}`;
         generatedHeadScript,
         finalSdkUrl,
         integrationStatus: integrationStatus || {},
+        masterEnabled: masterEnabled ?? false,
+        withdrawalEnabled: withdrawalEnabled ?? false,
+        luckyDrawEnabled: luckyDrawEnabled ?? false,
+        luckySpinEnabled: luckySpinEnabled ?? false,
+        luckyNumberEnabled: luckyNumberEnabled ?? false,
         createdTime: isNew ? new Date().toISOString() : (docSnap.data()?.createdTime || new Date().toISOString()),
         updatedTime: new Date().toISOString()
       };

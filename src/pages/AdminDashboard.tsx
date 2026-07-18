@@ -198,6 +198,13 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [adsbitvexGeneratedHeadScript, setAdsbitvexGeneratedHeadScript] = useState("");
   const [adsbitvexIntegrationStatus, setAdsbitvexIntegrationStatus] = useState<any>({});
   
+  // Feature Toggles
+  const [adsbitvexMasterEnabled, setAdsbitvexMasterEnabled] = useState(false);
+  const [adsbitvexWithdrawalEnabled, setAdsbitvexWithdrawalEnabled] = useState(false);
+  const [adsbitvexLuckyDrawEnabled, setAdsbitvexLuckyDrawEnabled] = useState(false);
+  const [adsbitvexLuckySpinEnabled, setAdsbitvexLuckySpinEnabled] = useState(false);
+  const [adsbitvexLuckyNumberEnabled, setAdsbitvexLuckyNumberEnabled] = useState(false);
+
   const [adsbitvexLoading, setAdsbitvexLoading] = useState(false);
   const [adsbitvexSaving, setAdsbitvexSaving] = useState(false);
   const [adsbitvexSuccess, setAdsbitvexSuccess] = useState("");
@@ -2391,6 +2398,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
         setAdsbitvexInitScript(data.initScript || "");
         setAdsbitvexGeneratedHeadScript(data.generatedHeadScript || "");
         setAdsbitvexIntegrationStatus(data.integrationStatus || {});
+        
+        setAdsbitvexMasterEnabled(data.masterEnabled ?? false);
+        setAdsbitvexWithdrawalEnabled(data.withdrawalEnabled ?? false);
+        setAdsbitvexLuckyDrawEnabled(data.luckyDrawEnabled ?? false);
+        setAdsbitvexLuckySpinEnabled(data.luckySpinEnabled ?? false);
+        setAdsbitvexLuckyNumberEnabled(data.luckyNumberEnabled ?? false);
 
         // Set initial runtime statuses
         const headPresent = !!document.querySelector('script[data-dynamic-adsbitvex="true"]');
@@ -2434,7 +2447,12 @@ Environment: ${isProduction ? "Production" : "Development"}`;
           appId: adsbitvexAppId,
           rewardScript: adsbitvexRewardScript,
           initScript: adsbitvexInitScript,
-          integrationStatus: statusToSend
+          integrationStatus: statusToSend,
+          masterEnabled: adsbitvexMasterEnabled,
+          withdrawalEnabled: adsbitvexWithdrawalEnabled,
+          luckyDrawEnabled: adsbitvexLuckyDrawEnabled,
+          luckySpinEnabled: adsbitvexLuckySpinEnabled,
+          luckyNumberEnabled: adsbitvexLuckyNumberEnabled
         })
       });
       if (res.ok) {
@@ -13138,6 +13156,97 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                 {/* Left Side Column (Controls & Script Forms) */}
                 <div className="lg:col-span-8 space-y-8">
                   
+                  {/* Section 0: ADS CONTROL (Master & Feature Toggles) */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <span>🎛️</span> Ads Control
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Enable or disable AdsBitvex Reward Ads across the platform.
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1">Master Toggle</label>
+                        <button
+                          onClick={() => setAdsbitvexMasterEnabled(!adsbitvexMasterEnabled)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${adsbitvexMasterEnabled ? "bg-emerald-500" : "bg-slate-700"}`}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${adsbitvexMasterEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 pt-2">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-200">Withdrawal Ads</p>
+                          <p className="text-xs text-slate-500">Show reward ad before completing withdrawals</p>
+                        </div>
+                        <button
+                          disabled={!adsbitvexMasterEnabled}
+                          onClick={() => setAdsbitvexWithdrawalEnabled(!adsbitvexWithdrawalEnabled)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${!adsbitvexMasterEnabled ? "opacity-50 cursor-not-allowed bg-slate-700" : adsbitvexWithdrawalEnabled ? "bg-blue-500" : "bg-slate-700"}`}
+                        >
+                          <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${adsbitvexWithdrawalEnabled && adsbitvexMasterEnabled ? "translate-x-5" : "translate-x-1"}`} />
+                        </button>
+                      </div>
+
+                      <div className="flex justify-between items-center border-t border-slate-800/50 pt-4">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-200">Lucky Draw Ads</p>
+                          <p className="text-xs text-slate-500">Show reward ad before enrolling in lucky draws</p>
+                        </div>
+                        <button
+                          disabled={!adsbitvexMasterEnabled}
+                          onClick={() => setAdsbitvexLuckyDrawEnabled(!adsbitvexLuckyDrawEnabled)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${!adsbitvexMasterEnabled ? "opacity-50 cursor-not-allowed bg-slate-700" : adsbitvexLuckyDrawEnabled ? "bg-blue-500" : "bg-slate-700"}`}
+                        >
+                          <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${adsbitvexLuckyDrawEnabled && adsbitvexMasterEnabled ? "translate-x-5" : "translate-x-1"}`} />
+                        </button>
+                      </div>
+
+                      <div className="flex justify-between items-center border-t border-slate-800/50 pt-4">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-200">Lucky Spin Live Event Ads</p>
+                          <p className="text-xs text-slate-500">Show reward ad before joining live events</p>
+                        </div>
+                        <button
+                          disabled={!adsbitvexMasterEnabled}
+                          onClick={() => setAdsbitvexLuckySpinEnabled(!adsbitvexLuckySpinEnabled)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${!adsbitvexMasterEnabled ? "opacity-50 cursor-not-allowed bg-slate-700" : adsbitvexLuckySpinEnabled ? "bg-blue-500" : "bg-slate-700"}`}
+                        >
+                          <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${adsbitvexLuckySpinEnabled && adsbitvexMasterEnabled ? "translate-x-5" : "translate-x-1"}`} />
+                        </button>
+                      </div>
+
+                      <div className="flex justify-between items-center border-t border-slate-800/50 pt-4">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-200">Lucky Number Giveaway Ads</p>
+                          <p className="text-xs text-slate-500">Show reward ad before submitting lucky numbers</p>
+                        </div>
+                        <button
+                          disabled={!adsbitvexMasterEnabled}
+                          onClick={() => setAdsbitvexLuckyNumberEnabled(!adsbitvexLuckyNumberEnabled)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${!adsbitvexMasterEnabled ? "opacity-50 cursor-not-allowed bg-slate-700" : adsbitvexLuckyNumberEnabled ? "bg-blue-500" : "bg-slate-700"}`}
+                        >
+                          <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${adsbitvexLuckyNumberEnabled && adsbitvexMasterEnabled ? "translate-x-5" : "translate-x-1"}`} />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-end pt-4 border-t border-slate-800">
+                      <button
+                        onClick={() => saveAdsbitvexSettings()}
+                        disabled={adsbitvexSaving || adsbitvexLoading}
+                        className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs transition-all shadow-lg shadow-blue-900/20 flex items-center gap-1.5"
+                      >
+                        {adsbitvexSaving ? "Saving..." : "💾 Save Settings"}
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Section 1: SDK CONFIGURATION */}
                   <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
                     <div className="border-b border-slate-800 pb-4">

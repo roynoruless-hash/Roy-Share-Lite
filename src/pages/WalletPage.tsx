@@ -260,14 +260,20 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
     }
 
     // AdsBitvex Reward Ad Integration
-    if (typeof (window as any).showadsbitvex !== "function") {
-      setError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
-      return;
-    }
-
     try {
       setLoading(true);
-      await (window as any).showadsbitvex();
+      const configRes = await fetch("/api/adsbitvex-config");
+      if (configRes.ok) {
+        const configData = await configRes.json();
+        if (configData.masterEnabled && configData.withdrawalEnabled) {
+          if (typeof (window as any).showadsbitvex !== "function") {
+            setError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
+            setLoading(false);
+            return;
+          }
+          await (window as any).showadsbitvex();
+        }
+      }
     } catch (err: any) {
       setLoading(false);
       setError(`Ad failed: ${err?.message || err}`);
