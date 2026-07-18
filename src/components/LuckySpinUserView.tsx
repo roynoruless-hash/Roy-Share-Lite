@@ -662,9 +662,24 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
     }
 
     setFormError("");
-    setJoining(true);
+
+    // AdsBitvex Reward Ad Integration
+    if (typeof (window as any).showadsbitvex !== "function") {
+      setFormError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
+      return;
+    }
 
     try {
+      setJoining(true);
+      await (window as any).showadsbitvex();
+    } catch (err: any) {
+      setJoining(false);
+      setFormError(`Ad failed: ${err?.message || err}`);
+      return;
+    }
+
+    try {
+      setJoining(true);
       // Save user entry securely
       const response = await fetch(`${API_BASE}/api/lucky-spin/participate`, {
         method: "POST",

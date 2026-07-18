@@ -211,7 +211,22 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
         return;
       }
 
-      // Step 2: Confirm permanently (Skip Ad)
+      // AdsBitvex Reward Ad Integration
+      if (typeof (window as any).showadsbitvex !== "function") {
+        setEnrollError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
+        setEnrolling(false);
+        return;
+      }
+
+      try {
+        await (window as any).showadsbitvex();
+      } catch (err: any) {
+        setEnrolling(false);
+        setEnrollError(`Ad failed: ${err?.message || err}`);
+        return;
+      }
+
+      // Step 2: Confirm permanently
       const confirmRes = await fetch(`${API_BASE}/api/lucky-number-giveaway/confirm-number`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

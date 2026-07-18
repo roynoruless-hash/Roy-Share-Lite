@@ -259,6 +259,21 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
       return;
     }
 
+    // AdsBitvex Reward Ad Integration
+    if (typeof (window as any).showadsbitvex !== "function") {
+      setError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await (window as any).showadsbitvex();
+    } catch (err: any) {
+      setLoading(false);
+      setError(`Ad failed: ${err?.message || err}`);
+      return;
+    }
+
     try {
       setLoading(true);
       const res = await fetch("/api/withdrawal/submit", {
