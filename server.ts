@@ -128,6 +128,23 @@ import { google } from "googleapis";
 // ...
 const db = getDb();
 
+let cachedVerificationTag = "";
+
+async function initializeVerificationTag() {
+  try {
+    const docRef = doc(db, "settings", "verification");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      cachedVerificationTag = docSnap.data()?.tag || "";
+      debugLog(`[Verification] Initialized cached tag: "${cachedVerificationTag}"`);
+    } else {
+      debugLog("[Verification] No cached tag found in settings/verification.");
+    }
+  } catch (e: any) {
+    debugLog(`[Verification] Failed to initialize cached tag: ${e.message || e}`);
+  }
+}
+
 import { getFirestore as getAdminFirestore, FieldValue } from "firebase-admin/firestore";
 let adminDb: any;
 
@@ -246,6 +263,9 @@ process.on('uncaughtException', (err) => {
 
 async function startServer() {
   debugLog("startServer: Beginning startup sequence...");
+  
+  // Initialize dynamic website verification tag cache
+  await initializeVerificationTag();
   
   // Run cleanup on startup (non-blocking)
   debugLog("startServer: Launching cleanupDemoTasks (non-blocking)...");
@@ -9778,221 +9798,6 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
     }
   });
 
-  // ==========================================
-  // ADSGRAM INTEGRATION ENDPOINTS
-  // ==========================================
-
-  // Admin endpoint to get Adsgram settings
-  app.get("/api/admin/adsgram-settings", requireAdminDb, async (req, res) => {
-    try {
-      const docRef = doc(db, "settings", "adsgram");
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        res.json({ success: true, settings: snap.data() });
-      } else {
-        res.json({ success: true, settings: null });
-      }
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message });
-    }
-  });
-
-  // Admin endpoint to update Adsgram settings
-  app.put("/api/admin/adsgram-settings", requireAdminDb, async (req, res) => {
-    try {
-      const { reward, interstitial, task, adsgramAppId, adsgramBlockId } = req.body;
-      const docRef = doc(db, "settings", "adsgram");
-      const snap = await getDoc(docRef);
-      const existingData = snap.exists() ? snap.data() : {};
-
-      const saveData: any = {
-        ...existingData,
-        updatedAt: new Date().toISOString()
-      };
-
-      if (reward !== undefined) {
-        saveData.reward = {
-          appId: String(reward.appId || "").trim(),
-          blockId: String(reward.blockId || "").trim(),
-          lastSaved: reward.lastSaved || new Date().toISOString(),
-          lastTested: reward.lastTested || (existingData.reward?.lastTested || null),
-          lastTestResult: reward.lastTestResult || (existingData.reward?.lastTestResult || null)
-        };
-        // Synchronize legacy top-level keys with Reward for total safety and fallback compatibility
-        saveData.adsgramAppId = saveData.reward.appId;
-        saveData.adsgramBlockId = saveData.reward.blockId;
-      }
-
-      if (interstitial !== undefined) {
-        saveData.interstitial = {
-          appId: String(interstitial.appId || "").trim(),
-          blockId: String(interstitial.blockId || "").trim(),
-          lastSaved: interstitial.lastSaved || new Date().toISOString(),
-          lastTested: interstitial.lastTested || (existingData.interstitial?.lastTested || null),
-          lastTestResult: interstitial.lastTestResult || (existingData.interstitial?.lastTestResult || null)
-        };
-      }
-
-      if (task !== undefined) {
-        saveData.task = {
-          appId: String(task.appId || "").trim(),
-          blockId: String(task.blockId || "").trim(),
-          lastSaved: task.lastSaved || new Date().toISOString(),
-          lastTested: task.lastTested || (existingData.task?.lastTested || null),
-          lastTestResult: task.lastTestResult || (existingData.task?.lastTestResult || null)
-        };
-      }
-
-      // Legacy direct saves compatibility
-      if (adsgramAppId !== undefined) {
-        saveData.adsgramAppId = String(adsgramAppId || "").trim();
-      }
-      if (adsgramBlockId !== undefined) {
-        saveData.adsgramBlockId = String(adsgramBlockId || "").trim();
-      }
-
-      await setDoc(docRef, saveData, { merge: true });
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message });
-    }
-  });
-
-  // Public endpoint for Adsgram settings (used by frontend pages)
-  app.get("/api/adsgram-settings", async (req, res) => {
-    try {
-      const docRef = doc(db, "settings", "adsgram");
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        res.json({ success: true, settings: snap.data() });
-      } else {
-        res.json({ success: true, settings: null });
-      }
-    } catch (e: any) {
-      res.status(500).json({ success: false, error: e.message });
-    }
-  });
-
-  // Shared Adsgram callback handler
-  const handleAdsgramReward = async (req: any, res: any) => {
-    const method = req.method;
-    const params = method === "GET" ? req.query : req.body;
-    
-    console.log(`[ADSGRAM CALLBACK] Received ${method} request at ${new Date().toISOString()}`);
-    console.log(`[ADSGRAM CALLBACK] Full Raw Params:`, JSON.stringify(params, null, 2));
-
-    const userid = params.userid || params.user_id;
-
-    if (!userid) {
-      console.error(`[ADSGRAM CALLBACK] FAILURE: Missing userid parameter.`);
-      return res.status(400).send("Missing userid");
-    }
-
-    const rewardLogRef = collection(db, "adsgram_rewards");
-    const logEntry: any = {
-      userId: String(userid),
-      timestamp: new Date().toISOString(),
-      method,
-      ip: req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown",
-      params: { ...params },
-      status: "pending",
-      rewardAmount: 0.15,
-      adEventId: String(params.id || params.event_id || params.track_id || params.transaction_id || params.click_id || params.ad_id || params.uuid || "")
-    };
-
-    try {
-      // Check if user exists
-      const userRef = doc(db, "users", String(userid));
-      const userSnap = await getDoc(userRef);
-
-      if (!userSnap.exists()) {
-        console.error(`[ADSGRAM CALLBACK] FAILURE: User ${userid} not found in database.`);
-        logEntry.status = "failed";
-        logEntry.error = "User not found";
-        await addDoc(rewardLogRef, logEntry);
-        return res.status(404).send("User not found");
-      }
-
-      const userData = userSnap.data() || {};
-
-      // Check duplicate by event ID
-      let isDuplicate = false;
-      if (logEntry.adEventId) {
-        const q = query(rewardLogRef, where("adEventId", "==", logEntry.adEventId));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          isDuplicate = snap.docs.some(doc => doc.data().status === "success");
-        }
-      }
-
-      // Time-based throttle fallback: prevent duplicate requests for the same user in under 5 seconds
-      if (!isDuplicate) {
-        const fiveSecAgo = new Date(Date.now() - 5000).toISOString();
-        const qUser = query(rewardLogRef, where("userId", "==", String(userid)));
-        const snapUser = await getDocs(qUser);
-        if (!snapUser.empty) {
-          isDuplicate = snapUser.docs.some(doc => {
-            const data = doc.data();
-            return data.status === "success" && data.timestamp >= fiveSecAgo;
-          });
-        }
-      }
-
-      if (isDuplicate) {
-        console.warn(`[ADSGRAM CALLBACK] Warning: Duplicate callback detected for user ${userid}`);
-        logEntry.status = "failed";
-        logEntry.error = "Duplicate callback";
-        await addDoc(rewardLogRef, logEntry);
-        return res.status(200).send("Duplicate postback already processed");
-      }
-
-      // Success: Credit user balance
-      const currentBalance = Number(userData.balance || 0);
-      const currentAvailable = Number(userData.availableBalance || userData.balance || 0);
-      const currentTotalEarnings = Number(userData.totalEarnings || 0);
-      const currentRewardBalance = Number(userData.rewardBalance || 0);
-      const rewardAmount = 0.15;
-
-      await updateDoc(userRef, {
-        balance: currentBalance + rewardAmount,
-        availableBalance: currentAvailable + rewardAmount,
-        totalEarnings: currentTotalEarnings + rewardAmount,
-        rewardBalance: currentRewardBalance + rewardAmount,
-        lastActive: new Date().toISOString()
-      });
-
-      // Insert transaction log
-      await addDoc(collection(db, "transactions"), {
-        userId: String(userid),
-        amount: rewardAmount,
-        type: "adsgram_reward",
-        description: "Adsgram Video Ad Reward",
-        status: "completed",
-        createdAt: new Date().toISOString()
-      });
-
-      // Update Adsgram Settings collection with last callback timestamp
-      const adsgramSettingsRef = doc(db, "settings", "adsgram");
-      await setDoc(adsgramSettingsRef, { lastCallbackTime: new Date().toISOString() }, { merge: true }).catch(() => {});
-
-      logEntry.status = "success";
-      await addDoc(rewardLogRef, logEntry);
-
-      console.log(`[ADSGRAM CALLBACK] SUCCESS: Balance credited and callback logged for user ${userid}`);
-      return res.status(200).send("OK");
-    } catch (e: any) {
-      console.error("[ADSGRAM CALLBACK] Fatal Error Stack:", e.stack || e);
-      logEntry.status = "failed";
-      logEntry.error = e.message || String(e);
-      await addDoc(rewardLogRef, logEntry).catch((err) => {
-        console.error("[ADSGRAM CALLBACK] Error logging failure to firestore:", err);
-      });
-      return res.status(400).send(`Error processing reward: ${e.message || e}`);
-    }
-  };
-
-  app.get("/reward", handleAdsgramReward);
-  app.post("/reward", handleAdsgramReward);
 
   // ==========================================
   // ADS.TXT MANAGER
@@ -13413,6 +13218,75 @@ Gmail: ${email}`;
   // Advertiser Routes
   setupAdvertiserRoutes(app, db);
   
+  // ==========================================
+  // Website Domain Verification Tag Endpoints
+  // ==========================================
+
+  // Public Endpoint to fetch active tag
+  app.get("/api/verification-tag", async (req, res) => {
+    try {
+      return res.json({ tag: cachedVerificationTag });
+    } catch (e: any) {
+      console.error("Error fetching public verification tag:", e);
+      return res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin GET Endpoint (Requires requireAdminDb)
+  app.get("/api/admin/verification-tag", requireAdminDb, async (req, res) => {
+    try {
+      return res.json({ tag: cachedVerificationTag });
+    } catch (e: any) {
+      console.error("Error fetching admin verification tag:", e);
+      return res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin PUT Endpoint (Requires requireAdminDb)
+  app.put("/api/admin/verification-tag", requireAdminDb, async (req, res) => {
+    try {
+      const { tag } = req.body;
+      if (tag === undefined) {
+        return res.status(400).json({ error: "Tag parameter is required." });
+      }
+
+      const trimmedTag = (tag || "").trim();
+
+      // Strict security validation
+      if (trimmedTag) {
+        if (!trimmedTag.toLowerCase().startsWith("<meta") || !trimmedTag.endsWith(">")) {
+          return res.status(400).json({ error: "Invalid verification tag: Must start with '<meta' and end with '>'" });
+        }
+        const openCount = (trimmedTag.match(/</g) || []).length;
+        const closeCount = (trimmedTag.match(/>/g) || []).length;
+        if (openCount !== 1 || closeCount !== 1) {
+          return res.status(400).json({ error: "Invalid verification tag: Only one tag (exactly one '<' and '>') is allowed. Rejecting script/HTML tags." });
+        }
+        const lower = trimmedTag.toLowerCase();
+        if (lower.includes("javascript:") || lower.includes("onload=") || lower.includes("onerror=")) {
+          return res.status(400).json({ error: "Invalid verification tag: Contains potentially unsafe script content." });
+        }
+        const metaRegex = /^<meta\s+[^>]+>$/i;
+        if (!metaRegex.test(trimmedTag)) {
+          return res.status(400).json({ error: "Invalid verification tag structure." });
+        }
+      }
+
+      // Save to Firestore settings/verification doc
+      const docRef = doc(db, "settings", "verification");
+      await setDoc(docRef, { tag: trimmedTag, updatedAt: new Date().toISOString() }, { merge: true });
+
+      // Update cached version instantly
+      cachedVerificationTag = trimmedTag;
+      debugLog(`[Verification] Cache updated: "${cachedVerificationTag}"`);
+
+      return res.json({ success: true, tag: cachedVerificationTag });
+    } catch (e: any) {
+      console.error("Error updating verification tag:", e);
+      return res.status(500).json({ error: "Server error: " + e.message });
+    }
+  });
+  
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     debugLog("Setting up Vite development middleware...");
@@ -13430,6 +13304,8 @@ Gmail: ${email}`;
       debugLog(`Serving index dynamically from: ${indexPath}`);
       try {
         let html = fs.readFileSync(indexPath, 'utf8');
+        
+        // 1. Inject EZMob Site Validation Code if missing
         if (!html.includes('EZMob Site Validation Code: EZMTNDAFBDSCOTJPM5F')) {
           debugLog("Comment missing in index.html, dynamically injecting...");
           const comment = '\n    <!-- EZMob Site Validation Code: EZMTNDAFBDSCOTJPM5F -->\n  ';
@@ -13439,6 +13315,15 @@ Gmail: ${email}`;
             html = html + comment;
           }
         }
+
+        // 2. Inject Dynamic Domain Verification Meta Tag if configured and not present in html
+        if (cachedVerificationTag && cachedVerificationTag.trim()) {
+          const cleanTag = cachedVerificationTag.trim();
+          if (html.includes('</head>') && !html.includes(cleanTag)) {
+            html = html.replace('</head>', `\n    ${cleanTag}\n</head>`);
+          }
+        }
+
         res.setHeader('Content-Type', 'text/html');
         res.send(html);
       } catch (err: any) {

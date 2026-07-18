@@ -26,7 +26,7 @@ interface PublicLuckyNumberGiveawayPageProps {
 }
 
 export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNavigate }: PublicLuckyNumberGiveawayPageProps) {
-  const { user, showAd, isInsideTelegram } = useTelegramAuth();
+  const { user, isInsideTelegram } = useTelegramAuth();
   
   const [giveaway, setGiveaway] = useState<any>(null);
   const [entries, setEntries] = useState<any[]>([]);
@@ -211,49 +211,23 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
         return;
       }
 
-      // Step 2: Show Ad using centralized implementation
-      const adType = giveaway.adsType || "Reward";
-      
-      try {
-        await showAd(adType);
-        
-        // Ad successfully completed! Confirm permanently.
-        const confirmRes = await fetch(`${API_BASE}/api/lucky-number-giveaway/confirm-number`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            giveawayId: giveaway.id,
-            telegramId: user.telegramId
-          })
-        });
+      // Step 2: Confirm permanently (Skip Ad)
+      const confirmRes = await fetch(`${API_BASE}/api/lucky-number-giveaway/confirm-number`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          giveawayId: giveaway.id,
+          telegramId: user.telegramId
+        })
+      });
 
-        const confirmData = await confirmRes.json();
-        if (confirmRes.ok && confirmData.success) {
-          setSuccessMsg(`🎉 Number ${selectedNum} Reserved Successfully!`);
-        } else {
-          setEnrollError(confirmData.error || "Failed to confirm participation.");
-        }
-        setEnrolling(false);
-      } catch (adError: any) {
-        // User closed ad early or load failed. Release the reservation.
-        console.warn("[LuckyNumber] Ad failed or closed prematurely. Releasing reservation...", adError);
-        await fetch(`${API_BASE}/api/lucky-number-giveaway/release-number`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            giveawayId: giveaway.id,
-            telegramId: user.telegramId
-          })
-        });
-
-        const errMsg = typeof adError === "object" ? (adError?.message || adError?.description || JSON.stringify(adError)) : String(adError);
-        if (errMsg === "NOT_IN_TELEGRAM") {
-          setEnrollError("Please open this app inside Telegram to participate in the giveaway.");
-        } else {
-          setEnrollError(`Please watch the sponsored ad completely to secure your lucky number! (${errMsg})`);
-        }
-        setEnrolling(false);
+      const confirmData = await confirmRes.json();
+      if (confirmRes.ok && confirmData.success) {
+        setSuccessMsg(`🎉 Number ${selectedNum} Reserved Successfully!`);
+      } else {
+        setEnrollError(confirmData.error || "Failed to confirm participation.");
       }
+      setEnrolling(false);
 
     } catch (err: any) {
       console.error("Enrollment crash:", err);

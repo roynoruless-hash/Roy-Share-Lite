@@ -184,6 +184,11 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [systemSettingsSaving, setSystemSettingsSaving] = useState(false);
   const [systemSettingsSuccess, setSystemSettingsSuccess] = useState("");
   const [systemSettingsError, setSystemSettingsError] = useState("");
+  const [verificationTag, setVerificationTag] = useState("");
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [verificationSaving, setVerificationSaving] = useState(false);
+  const [verificationSuccess, setVerificationSuccess] = useState("");
+  const [verificationError, setVerificationError] = useState("");
   const [taskForm, setTaskForm] = useState<any>(null);
   const [taskLogs, setTaskLogs] = useState<any[]>([]);
   const [taskLogsLoading, setTaskLogsLoading] = useState(false);
@@ -564,99 +569,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   };
 
   const testAdsgramConfiguration = async (type: "reward" | "interstitial" | "task") => {
-    const config = adsgramConfigs[type];
-    
-    // 1. Verify App ID exists
-    if (!config.appId || !config.appId.trim()) {
-      setTestResultMsg(prev => ({
-        ...prev,
-        [type]: { status: "Failed", text: "❌ Failed: App ID is missing." }
-      }));
-      return;
-    }
-
-    // 2. Verify Block ID exists
-    if (!config.blockId || !config.blockId.trim()) {
-      setTestResultMsg(prev => ({
-        ...prev,
-        [type]: { status: "Failed", text: "❌ Failed: Block ID is missing." }
-      }));
-      return;
-    }
-
-    setTestingType(type);
-    
-    try {
-      // 3. Verify SDK is loaded (or attempt to load it)
-      const { loadAdsgramSDK, isAdsgramSDKLoaded } = await import("../lib/adsManager");
-      await loadAdsgramSDK();
-      
-      const loaded = isAdsgramSDKLoaded();
-      if (!loaded) {
-        throw new Error("Adsgram SDK failed to resolve in window scope.");
-      }
-
-      // Try initializing the block
-      const adsgram = (window as any).Adsgram;
-      if (!adsgram || typeof adsgram.init !== "function") {
-        throw new Error("window.Adsgram.init function is not available.");
-      }
-
-      const controller = adsgram.init({ blockId: config.blockId.trim() });
-      if (!controller) {
-        throw new Error("Failed to initialize ad controller. Init returned falsy value.");
-      }
-
-      setTestResultMsg(prev => ({
-        ...prev,
-        [type]: { status: "Success", text: "✅ Success: SDK loaded, App/Block verified, ad controller initialized successfully." }
-      }));
-
-      // Update test status in database
-      const updatedConfig = {
-        ...config,
-        lastTested: new Date().toISOString(),
-        lastTestResult: "Success"
-      };
-
-      await authenticatedFetch("/api/admin/adsgram-settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          [type]: updatedConfig
-        })
-      });
-      fetchAdsgramSettings();
-
-    } catch (e: any) {
-      const errorMsg = e.message || String(e);
-      setTestResultMsg(prev => ({
-        ...prev,
-        [type]: { status: "Failed", text: `❌ Failed: ${errorMsg}` }
-      }));
-
-      // Update test status in database
-      const updatedConfig = {
-        ...config,
-        lastTested: new Date().toISOString(),
-        lastTestResult: `Failed: ${errorMsg}`
-      };
-
-      try {
-        await authenticatedFetch("/api/admin/adsgram-settings", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            [type]: updatedConfig
-          })
-        });
-        fetchAdsgramSettings();
-      } catch (dbErr) {
-        console.error("Failed to save test result in database", dbErr);
-      }
-    } finally {
-      setTestingType(null);
-    }
+    alert("Adsgram has been removed from Roy Share.");
   };
 
   const handleTestCallback = async () => {
@@ -2156,6 +2069,76 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const fetchVerificationSettings = async () => {
+    setVerificationLoading(true);
+    setVerificationError("");
+    try {
+      const res = await authenticatedFetch("/api/admin/verification-tag");
+      if (res.ok) {
+        const data = await res.json();
+        setVerificationTag(data.tag || "");
+      } else {
+        const errData = await res.json();
+        setVerificationError(errData.error || "Failed to fetch verification tag.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setVerificationError(err.message || "Failed to fetch verification tag.");
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const saveVerificationSettings = async () => {
+    const trimmedTag = verificationTag.trim();
+    if (trimmedTag) {
+      if (!trimmedTag.toLowerCase().startsWith("<meta") || !trimmedTag.endsWith(">")) {
+        setVerificationError("Invalid verification tag: Must start with '<meta' and end with '>'.");
+        return;
+      }
+      const openCount = (trimmedTag.match(/</g) || []).length;
+      const closeCount = (trimmedTag.match(/>/g) || []).length;
+      if (openCount !== 1 || closeCount !== 1) {
+        setVerificationError("Invalid verification tag: Only one tag (exactly one '<' and '>') is allowed. Rejecting script/HTML tags.");
+        return;
+      }
+      const lower = trimmedTag.toLowerCase();
+      if (lower.includes("javascript:") || lower.includes("onload=") || lower.includes("onerror=")) {
+        setVerificationError("Invalid verification tag: Contains potentially unsafe script content.");
+        return;
+      }
+      const metaRegex = /^<meta\s+[^>]+>$/i;
+      if (!metaRegex.test(trimmedTag)) {
+        setVerificationError("Invalid verification tag structure.");
+        return;
+      }
+    }
+
+    setVerificationSaving(true);
+    setVerificationSuccess("");
+    setVerificationError("");
+
+    try {
+      const res = await authenticatedFetch("/api/admin/verification-tag", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag: trimmedTag })
+      });
+      if (res.ok) {
+        setVerificationSuccess("Website Verification settings saved successfully! No restart required.");
+        fetchVerificationSettings();
+      } else {
+        const errData = await res.json();
+        setVerificationError(errData.error || "Failed to save verification settings.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setVerificationError(err.message || "Failed to save verification settings.");
+    } finally {
+      setVerificationSaving(false);
+    }
+  };
+
   const hasUnsavedSettings = () => {
     if (!systemSettings || !originalSystemSettings) return false;
     return JSON.stringify(systemSettings) !== JSON.stringify(originalSystemSettings);
@@ -3516,6 +3499,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       fetchSupportSettings();
       fetchImgbbConfig();
       fetchAdsgramSettings();
+      fetchVerificationSettings();
     } else if (activeTab === "🛡 Security Center") {
       fetchSecurityData();
     } else if (activeTab === "📜 Activity Logs") {
@@ -13252,11 +13236,11 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                       "👥 Referral Settings",
                       "📢 Notification Settings",
                       "🌐 Website Settings",
+                      "🌐 Website Verification",
                       "🎫 Support Settings",
                       "🤖 AI Settings",
                       "🔗 URL Shortener",
                       "🖼 Image Hosting (ImgBB)",
-                      "📢 Adsgram Integration",
                       "🔄 Maintenance Mode",
                     ].map((tab) => (
                       <button
@@ -14659,6 +14643,94 @@ Environment: ${isProduction ? "Production" : "Development"}`;
                             }
                             className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white h-24 resize-none focus:outline-none focus:border-indigo-500"
                           ></textarea>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsTab === "🌐 Website Verification" && (
+                      <div className="space-y-6 max-w-2xl">
+                        <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 space-y-6">
+                          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-slate-800 pb-4">
+                            <div>
+                              <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                                🌐 Website Verification Settings
+                              </h4>
+                              <p className="text-xs text-slate-400 mt-1">
+                                Inject any domain verification meta tag (e.g. AdsBitvex, Google, Facebook, etc.) dynamically into your website's &lt;head&gt;.
+                              </p>
+                            </div>
+                          </div>
+
+                          {verificationSuccess && (
+                            <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl text-sm font-medium">
+                              {verificationSuccess}
+                            </div>
+                          )}
+
+                          {verificationError && (
+                            <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm font-medium">
+                              {verificationError}
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-slate-300">
+                              Verification Meta Tag
+                            </label>
+                            <textarea
+                              value={verificationTag}
+                              onChange={(e) => setVerificationTag(e.target.value)}
+                              placeholder={`Example:\n<meta name="adsbitvex-verify" content="XXXXXXXXXXXXXXXX">`}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono text-sm h-32 resize-none focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            ></textarea>
+                            <p className="text-[11px] text-slate-500 italic mt-1">
+                              Only valid &lt;meta ...&gt; tags are permitted. script tags or other HTML elements will be rejected for security. Leave empty to completely remove the tag.
+                            </p>
+                          </div>
+
+                          <div className="flex justify-end pt-2">
+                            <button
+                              onClick={saveVerificationSettings}
+                              disabled={verificationSaving || verificationLoading}
+                              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium rounded-xl transition-all shadow-md shadow-indigo-600/15"
+                            >
+                              {verificationSaving ? "Saving..." : "💾 Save Changes"}
+                            </button>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-6 space-y-4">
+                            <h5 className="text-sm font-bold text-slate-200">
+                              Verification System Status & Live Preview
+                            </h5>
+
+                            <div className="flex items-center gap-2 bg-slate-900 p-4 rounded-xl border border-slate-800">
+                              <span className="text-xs text-slate-400">Status:</span>
+                              {verificationTag.trim() ? (
+                                <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1">
+                                  ✅ Verification Meta Tag Active
+                                </span>
+                              ) : (
+                                <span className="text-xs font-semibold text-rose-400 flex items-center gap-1">
+                                  ❌ No Verification Meta Tag
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-2">
+                              <span className="block text-xs font-medium text-slate-400">
+                                Current Active Verification Tag
+                              </span>
+                              {verificationTag.trim() ? (
+                                <pre className="font-mono text-xs bg-slate-900 p-4 rounded-xl border border-slate-800 text-indigo-400 overflow-x-auto whitespace-pre-wrap break-all select-all">
+                                  {verificationTag.trim()}
+                                </pre>
+                              ) : (
+                                <div className="text-xs text-slate-500 bg-slate-900/40 p-4 rounded-xl border border-slate-800/30 border-dashed italic">
+                                  No verification meta tag currently injected. Paste a tag above and click save to activate it.
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}

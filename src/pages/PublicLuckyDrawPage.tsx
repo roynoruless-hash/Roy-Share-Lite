@@ -6,7 +6,7 @@ import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { parseInKolkata, formatFriendlyKolkata, getGiveawayStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
 
 export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId: string; onBack: () => void }) {
-  const { user, tg, isInsideTelegram, waitForTelegramParams, showAd } = useTelegramAuth();
+  const { user, tg, isInsideTelegram, waitForTelegramParams } = useTelegramAuth();
   const [giveaway, setGiveaway] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
   const [error, setError] = useState("");
@@ -297,44 +297,7 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
       return;
     }
 
-    if (!isInsideTelegram) {
-      setEnrollError("Rewarded Ads and Enrollment are only available inside the Telegram Mini App.");
-      return;
-    }
-
-    // Ensure Telegram.WebApp.ready() is called before Adsgram initialization
-    if (tg) {
-      console.log("[LuckyDraw] Calling Telegram.WebApp.ready() before Adsgram initialization...");
-      try {
-        tg.ready();
-        console.log("[LuckyDraw] Telegram Mini App is fully ready.");
-      } catch (tgErr) {
-        console.error("[LuckyDraw] Error calling Telegram.WebApp.ready():", tgErr);
-      }
-    }
-
-    setEnrolling(true);
-    setEnrollError("");
-    
-    try {
-      const adType = giveaway?.adsgramType || "Reward";
-      
-      // Use the centralized showAd implementation
-      await showAd(adType);
-      
-      // After successful ad reward, proceed to enroll
-      await completeEnrollment();
-      
-    } catch (err: any) {
-      console.error("[LuckyDraw] Adsgram flow failed:", err);
-      const errStr = typeof err === "object" ? (err?.message || err?.description || JSON.stringify(err)) : String(err);
-      if (errStr === "NOT_IN_TELEGRAM") {
-        setEnrollError("Please open this app inside Telegram to participate in the lucky draw.");
-      } else {
-        setEnrollError(`Please watch the full ad to participate. Detail: ${errStr || "Ad closed or failed"}`);
-      }
-      setEnrolling(false);
-    }
+    await completeEnrollment();
   };
 
   if (loading) {

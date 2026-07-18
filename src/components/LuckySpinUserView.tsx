@@ -133,7 +133,7 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
   initialMode,
   clearInitialParams
 }) => {
-  const { user, showAd } = useTelegramAuth();
+  const { user } = useTelegramAuth();
   const [activeTab, setActiveTab] = useState<"events" | "history" | "global-winners">("events");
   const [events, setEvents] = useState<LuckySpinEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<LuckySpinEvent | null>(null);
@@ -665,20 +665,6 @@ export const LuckySpinUserView: React.FC<LuckySpinUserViewProps> = ({
     setJoining(true);
 
     try {
-      // Show AdsGram if enabled by Admin
-      if (selectedEvent.adsType && selectedEvent.adsType !== "Disabled") {
-        try {
-          const typeMap: Record<string, string> = {
-            "Reward Ad": "Reward",
-            "Interstitial Ad": "Interstitial",
-            "Task Ad": "Task"
-          };
-          await showAd(typeMap[selectedEvent.adsType] || "Reward");
-        } catch (adError) {
-          console.warn("Ad completed with error or skipped", adError);
-        }
-      }
-
       // Save user entry securely
       const response = await fetch(`${API_BASE}/api/lucky-spin/participate`, {
         method: "POST",

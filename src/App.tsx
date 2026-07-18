@@ -95,6 +95,56 @@ export default function App() {
       });
   }, []);
 
+  useEffect(() => {
+    fetch(`${API_BASE}/api/verification-tag`)
+      .then(res => res.json())
+      .then(data => {
+        const existingDynamic = document.querySelectorAll('meta[data-dynamic-verify="true"]');
+        existingDynamic.forEach(el => el.remove());
+
+        if (data && data.tag) {
+          const trimmedTag = data.tag.trim();
+          if (trimmedTag) {
+            const parser = new DOMParser();
+            const parsedDoc = parser.parseFromString(trimmedTag, 'text/html');
+            const parsedMeta = parsedDoc.querySelector('meta');
+            if (parsedMeta) {
+              const name = parsedMeta.getAttribute('name');
+              const property = parsedMeta.getAttribute('property');
+              const httpEquiv = parsedMeta.getAttribute('http-equiv');
+
+              let selector = '';
+              if (name) selector = `meta[name="${name}"]`;
+              else if (property) selector = `meta[property="${property}"]`;
+              else if (httpEquiv) selector = `meta[http-equiv="${httpEquiv}"]`;
+
+              let targetMeta: HTMLMetaElement | null = null;
+              if (selector) {
+                targetMeta = document.querySelector(selector) as HTMLMetaElement | null;
+              }
+
+              if (targetMeta) {
+                const newContent = parsedMeta.getAttribute('content');
+                if (newContent && targetMeta.getAttribute('content') !== newContent) {
+                  targetMeta.setAttribute('content', newContent);
+                }
+              } else {
+                const newMeta = document.createElement('meta');
+                newMeta.setAttribute('data-dynamic-verify', 'true');
+                Array.from(parsedMeta.attributes).forEach(attr => {
+                  newMeta.setAttribute(attr.name, attr.value);
+                });
+                document.head.appendChild(newMeta);
+              }
+            }
+          }
+        }
+      })
+      .catch(err => {
+        console.error("Error fetching/injecting verification tag:", err);
+      });
+  }, []);
+
   const renderContent = () => {
     if (loadingConfig) {
       return (

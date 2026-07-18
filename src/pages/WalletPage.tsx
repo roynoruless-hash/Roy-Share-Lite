@@ -27,7 +27,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> = ({ onBack, initialTab = "wallet" }) => {
-  const { user, showAd, isInsideTelegram } = useTelegramAuth();
+  const { user, isInsideTelegram } = useTelegramAuth();
   const [activeTab, setActiveTab] = useState<string>(initialTab);
 
   // Form State
@@ -50,7 +50,6 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
   const [minWithdrawal, setMinWithdrawal] = useState<number>(100);
   const [loadingSettings, setLoadingSettings] = useState<boolean>(true);
   const [withdrawalSettings, setWithdrawalSettings] = useState<any>(null);
-  const [adLoading, setAdLoading] = useState<boolean>(false);
 
   // History State
   const [history, setHistory] = useState<any[]>([]);
@@ -258,38 +257,6 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
     if (receive <= 0) {
       setError("Withdrawal amount is too small after processing fee.");
       return;
-    }
-
-    // Trigger Adsgram flow before submit
-    setAdLoading(true);
-
-    try {
-      // Use the centralized showAd implementation
-      const selectedAdType = withdrawalSettings?.adsTypeBeforeWithdrawal || "Reward";
-      await showAd(selectedAdType);
-    } catch (adError: any) {
-      console.error("[Withdrawal Ad] Ad presentation failed or skipped:", adError);
-      const errStr = adError?.message || String(adError);
-      
-      if (errStr === "NOT_IN_TELEGRAM") {
-        setError("Please open this app inside Telegram to view ads and submit your withdrawal.");
-        setAdLoading(false);
-        return;
-      } else if (errStr === "TIMEOUT") {
-        setError("Verification ad failed to load within 10 seconds. Please check your connection and try again.");
-        setAdLoading(false);
-        return;
-      } else if (errStr === "AD_SKIPPED") {
-        setError("Security verification failed: Please watch the full sponsored ad to verify and submit your withdrawal.");
-        setAdLoading(false);
-        return;
-      } else {
-        setError(`Security verification failed: Please watch the full sponsored ad to verify and submit your withdrawal. (Detail: ${errStr || "ad closed"})`);
-        setAdLoading(false);
-        return;
-      }
-    } finally {
-      setAdLoading(false);
     }
 
     try {
@@ -655,23 +622,9 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                   )}
 
                   {error && (
-                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-4 rounded-xl flex flex-col gap-3">
-                      <div className="flex items-center gap-3">
-                        <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                        <span>{error}</span>
-                      </div>
-                      {(error.includes("Verification ad") || error.includes("Security verification") || error.includes("ad closed")) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setError("");
-                            handleWithdrawSubmit({ preventDefault: () => {} } as any);
-                          }}
-                          className="self-start px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-red-600/15"
-                        >
-                          🔄 Retry Verification Ad
-                        </button>
-                      )}
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-4 rounded-xl flex items-center gap-3">
+                      <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                      <span>{error}</span>
                     </div>
                   )}
 
@@ -841,7 +794,6 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                     type="submit"
                     disabled={
                       loading || 
-                      adLoading || 
                       withdrawalSettings?.enabled === false ||
                       (paymentMethod === "UPI" && withdrawalSettings?.upiEnabled === false) ||
                       (paymentMethod === "BANK" && withdrawalSettings?.bankEnabled === false) ||
@@ -849,12 +801,7 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                     }
                     className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white py-4 rounded-2xl font-bold shadow-xl shadow-blue-500/10 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    {adLoading ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Loading Verification Ad...
-                      </>
-                    ) : loading ? (
+                    {loading ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
                         Processing Securely...
