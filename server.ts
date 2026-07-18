@@ -145,6 +145,23 @@ async function initializeVerificationTag() {
   }
 }
 
+let cachedAdsbitvexSettings: any = null;
+
+async function initializeAdsbitvexSettings() {
+  try {
+    const docRef = doc(db, "settings", "adsbitvex");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      cachedAdsbitvexSettings = docSnap.data() || null;
+      debugLog(`[AdsBitvex] Initialized settings: ${JSON.stringify(cachedAdsbitvexSettings)}`);
+    } else {
+      debugLog("[AdsBitvex] No cached settings found in settings/adsbitvex.");
+    }
+  } catch (e: any) {
+    debugLog(`[AdsBitvex] Failed to initialize cached settings: ${e.message || e}`);
+  }
+}
+
 import { getFirestore as getAdminFirestore, FieldValue } from "firebase-admin/firestore";
 let adminDb: any;
 
@@ -266,6 +283,9 @@ async function startServer() {
   
   // Initialize dynamic website verification tag cache
   await initializeVerificationTag();
+  
+  // Initialize dynamic AdsBitvex settings cache
+  await initializeAdsbitvexSettings();
   
   // Run cleanup on startup (non-blocking)
   debugLog("startServer: Launching cleanupDemoTasks (non-blocking)...");
@@ -13286,6 +13306,139 @@ Gmail: ${email}`;
       return res.status(500).json({ error: "Server error: " + e.message });
     }
   });
+
+  // ==========================================
+  // AdsBitvex Monetization Manager Endpoints
+  // ==========================================
+
+  // Public endpoint to get AdsBitvex configuration for dynamic client-side load/sync
+  app.get("/api/adsbitvex-config", async (req, res) => {
+    try {
+      if (!cachedAdsbitvexSettings) {
+        return res.json({
+          sdkEndpoint: "https://sdk.adsbitvex.com/functions/v1/ad-script?appid=YOUR_APP_ID",
+          appId: "",
+          rewardScript: `window.showadsbitvex()\n.then(()=>{\nconsole.log("Reward earned");\n})\n.catch(e=>{\nconsole.error(e);\n});`,
+          initScript: `window.showadsbitvex_init()\n.then(()=>{\nconsole.log("Init Closed");\n})\n.catch(e=>{\nconsole.error(e);\n});`,
+          generatedHeadScript: "",
+          integrationStatus: {}
+        });
+      }
+      return res.json(cachedAdsbitvexSettings);
+    } catch (e: any) {
+      console.error("Error fetching AdsBitvex config:", e);
+      return res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin GET endpoint to retrieve active settings
+  app.get("/api/admin/adsbitvex-config", requireAdminDb, async (req, res) => {
+    try {
+      if (!cachedAdsbitvexSettings) {
+        // Return default values
+        return res.json({
+          sdkEndpoint: "https://sdk.adsbitvex.com/functions/v1/ad-script?appid=YOUR_APP_ID",
+          appId: "",
+          rewardScript: `window.showadsbitvex()\n.then(()=>{\nconsole.log("Reward earned");\n})\n.catch(e=>{\nconsole.error(e);\n});`,
+          initScript: `window.showadsbitvex_init()\n.then(()=>{\nconsole.log("Init Closed");\n})\n.catch(e=>{\nconsole.error(e);\n});`,
+          generatedHeadScript: "",
+          integrationStatus: {}
+        });
+      }
+      return res.json(cachedAdsbitvexSettings);
+    } catch (e: any) {
+      console.error("Error fetching Admin AdsBitvex config:", e);
+      return res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin PUT endpoint to save settings
+  app.put("/api/admin/adsbitvex-config", requireAdminDb, async (req, res) => {
+    try {
+      const { sdkEndpoint, appId, rewardScript, initScript, integrationStatus } = req.body;
+
+      // Validate URL if provided
+      let cleanEndpoint = (sdkEndpoint || "").trim();
+      if (cleanEndpoint) {
+        if (!cleanEndpoint.startsWith("http://") && !cleanEndpoint.startsWith("https://")) {
+          return res.status(400).json({ error: "Invalid SDK Endpoint: Must be a valid URL starting with http:// or https://" });
+        }
+        // Prevent unsafe HTML/Javascript injection in the URL itself
+        if (cleanEndpoint.includes("<") || cleanEndpoint.includes(">") || cleanEndpoint.includes('"') || cleanEndpoint.includes("'")) {
+          return res.status(400).json({ error: "Invalid SDK Endpoint: Special characters (<, >, \", ') are not allowed." });
+        }
+      }
+
+      // App ID validation
+      const cleanAppId = (appId || "").trim();
+      if (cleanAppId) {
+        // Prevent malicious appid payloads (script injection / special characters)
+        if (!/^[a-zA-Z0-9_-]+$/.test(cleanAppId)) {
+          return res.status(400).json({ error: "Invalid App ID: Must be alphanumeric, dashes, or underscores only." });
+        }
+      }
+
+      // Validate Reward and Init script to prevent malicious HTML/script tag injections
+      const cleanRewardScript = (rewardScript || "").trim();
+      const cleanInitScript = (initScript || "").trim();
+      
+      const hasScriptTag = (str: string) => {
+        const lower = str.toLowerCase();
+        return lower.includes("<script") || lower.includes("</script") || lower.includes("<iframe") || lower.includes("<object");
+      };
+
+      if (hasScriptTag(cleanRewardScript) || hasScriptTag(cleanInitScript)) {
+        return res.status(400).json({ error: "Scripts cannot contain arbitrary HTML tags such as <script> or <iframe>. Please only write raw JavaScript." });
+      }
+
+      // Generate head script
+      let finalSdkUrl = "";
+      let generatedHeadScript = "";
+      if (cleanEndpoint && cleanAppId) {
+        let endpoint = cleanEndpoint;
+        if (endpoint.includes("YOUR_APP_ID")) {
+          endpoint = endpoint.replace(/YOUR_APP_ID/g, cleanAppId);
+        } else if (!endpoint.includes(cleanAppId)) {
+          if (endpoint.includes("appid=")) {
+            endpoint = endpoint.replace(/appid=[^&]*/, `appid=${cleanAppId}`);
+          } else {
+            const sep = endpoint.includes("?") ? "&" : "?";
+            endpoint = `${endpoint}${sep}appid=${cleanAppId}`;
+          }
+        }
+        finalSdkUrl = endpoint;
+        generatedHeadScript = `<script src="${finalSdkUrl}"></script>`;
+      }
+
+      // Get existing settings or create new
+      const docRef = doc(db, "settings", "adsbitvex");
+      const docSnap = await getDoc(docRef);
+      const isNew = !docSnap.exists();
+
+      const updatedData = {
+        sdkEndpoint: cleanEndpoint,
+        appId: cleanAppId,
+        rewardScript: cleanRewardScript,
+        initScript: cleanInitScript,
+        generatedHeadScript,
+        finalSdkUrl,
+        integrationStatus: integrationStatus || {},
+        createdTime: isNew ? new Date().toISOString() : (docSnap.data()?.createdTime || new Date().toISOString()),
+        updatedTime: new Date().toISOString()
+      };
+
+      await setDoc(docRef, updatedData, { merge: true });
+
+      // Instantly update server cache
+      cachedAdsbitvexSettings = updatedData;
+      debugLog("[AdsBitvex] Cached settings updated successfully!");
+
+      return res.json({ success: true, settings: updatedData });
+    } catch (e: any) {
+      console.error("Error updating AdsBitvex config:", e);
+      return res.status(500).json({ error: "Server error: " + e.message });
+    }
+  });
   
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
@@ -13321,6 +13474,14 @@ Gmail: ${email}`;
           const cleanTag = cachedVerificationTag.trim();
           if (html.includes('</head>') && !html.includes(cleanTag)) {
             html = html.replace('</head>', `\n    ${cleanTag}\n</head>`);
+          }
+        }
+
+        // 3. Inject Dynamic AdsBitvex SDK script if configured and not present in html
+        if (cachedAdsbitvexSettings && cachedAdsbitvexSettings.generatedHeadScript) {
+          const cleanScript = cachedAdsbitvexSettings.generatedHeadScript.trim();
+          if (html.includes('</head>') && !html.includes(cleanScript)) {
+            html = html.replace('</head>', `\n    ${cleanScript}\n</head>`);
           }
         }
 

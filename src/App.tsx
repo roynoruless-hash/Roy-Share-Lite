@@ -145,6 +145,43 @@ export default function App() {
       });
   }, []);
 
+  useEffect(() => {
+    fetch(`${API_BASE}/api/adsbitvex-config`)
+      .then(res => res.json())
+      .then(data => {
+        const existingScripts = document.querySelectorAll('script[data-dynamic-adsbitvex="true"]');
+        
+        if (data && data.finalSdkUrl) {
+          const targetSrc = data.finalSdkUrl.trim();
+          let needsInject = true;
+          
+          existingScripts.forEach(el => {
+            const scriptEl = el as HTMLScriptElement;
+            if (scriptEl.src !== targetSrc) {
+              scriptEl.remove();
+            } else {
+              needsInject = false;
+            }
+          });
+
+          if (needsInject && targetSrc) {
+            const newScript = document.createElement('script');
+            newScript.setAttribute('data-dynamic-adsbitvex', 'true');
+            newScript.src = targetSrc;
+            newScript.async = true;
+            document.head.appendChild(newScript);
+            console.log("[AdsBitvex] Successfully injected/updated client SDK script:", targetSrc);
+          }
+        } else {
+          // If no sdk url, remove any existing injected script
+          existingScripts.forEach(el => el.remove());
+        }
+      })
+      .catch(err => {
+        console.error("Error fetching/injecting AdsBitvex SDK:", err);
+      });
+  }, []);
+
   const renderContent = () => {
     if (loadingConfig) {
       return (

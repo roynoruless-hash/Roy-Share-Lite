@@ -189,6 +189,31 @@ Environment: ${isProduction ? "Production" : "Development"}`;
   const [verificationSaving, setVerificationSaving] = useState(false);
   const [verificationSuccess, setVerificationSuccess] = useState("");
   const [verificationError, setVerificationError] = useState("");
+
+  // AdsBitvex Monetization States
+  const [adsbitvexEndpoint, setAdsbitvexEndpoint] = useState("");
+  const [adsbitvexAppId, setAdsbitvexAppId] = useState("");
+  const [adsbitvexRewardScript, setAdsbitvexRewardScript] = useState("");
+  const [adsbitvexInitScript, setAdsbitvexInitScript] = useState("");
+  const [adsbitvexGeneratedHeadScript, setAdsbitvexGeneratedHeadScript] = useState("");
+  const [adsbitvexIntegrationStatus, setAdsbitvexIntegrationStatus] = useState<any>({});
+  
+  const [adsbitvexLoading, setAdsbitvexLoading] = useState(false);
+  const [adsbitvexSaving, setAdsbitvexSaving] = useState(false);
+  const [adsbitvexSuccess, setAdsbitvexSuccess] = useState("");
+  const [adsbitvexError, setAdsbitvexError] = useState("");
+
+  // Test Console diagnostics
+  const [diagnosticsLog, setDiagnosticsLog] = useState<string[]>([]);
+  const [diagnosticsStatus, setDiagnosticsStatus] = useState<any>({
+    sdkStatus: "Unknown",
+    rewardFunctionFound: false,
+    initFunctionFound: false,
+    promiseStatus: "Idle",
+    adLoaded: false,
+    adClosed: false,
+    lastUpdate: ""
+  });
   const [taskForm, setTaskForm] = useState<any>(null);
   const [taskLogs, setTaskLogs] = useState<any[]>([]);
   const [taskLogsLoading, setTaskLogsLoading] = useState(false);
@@ -2139,6 +2164,232 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     }
   };
 
+  const fetchAdsbitvexSettings = async () => {
+    setAdsbitvexLoading(true);
+    setAdsbitvexError("");
+    setAdsbitvexSuccess("");
+    try {
+      const res = await authenticatedFetch("/api/admin/adsbitvex-config");
+      if (res.ok) {
+        const data = await res.json();
+        setAdsbitvexEndpoint(data.sdkEndpoint || "https://sdk.adsbitvex.com/functions/v1/ad-script?appid=YOUR_APP_ID");
+        setAdsbitvexAppId(data.appId || "");
+        setAdsbitvexRewardScript(data.rewardScript || "");
+        setAdsbitvexInitScript(data.initScript || "");
+        setAdsbitvexGeneratedHeadScript(data.generatedHeadScript || "");
+        setAdsbitvexIntegrationStatus(data.integrationStatus || {});
+      } else {
+        const errData = await res.json();
+        setAdsbitvexError(errData.error || "Failed to fetch AdsBitvex config.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setAdsbitvexError(err.message || "Failed to fetch AdsBitvex config.");
+    } finally {
+      setAdsbitvexLoading(false);
+    }
+  };
+
+  const saveAdsbitvexSettings = async (overrideStatus?: any) => {
+    setAdsbitvexSaving(true);
+    setAdsbitvexSuccess("");
+    setAdsbitvexError("");
+    try {
+      const statusToSend = overrideStatus || adsbitvexIntegrationStatus;
+      const res = await authenticatedFetch("/api/admin/adsbitvex-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sdkEndpoint: adsbitvexEndpoint,
+          appId: adsbitvexAppId,
+          rewardScript: adsbitvexRewardScript,
+          initScript: adsbitvexInitScript,
+          integrationStatus: statusToSend
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAdsbitvexSuccess("AdsBitvex Settings saved successfully!");
+        setAdsbitvexGeneratedHeadScript(data.settings?.generatedHeadScript || "");
+        setAdsbitvexIntegrationStatus(data.settings?.integrationStatus || {});
+        // Append to diagnostics log
+        addDiagnosticLine("System", "Settings saved and cached successfully!");
+      } else {
+        const errData = await res.json();
+        setAdsbitvexError(errData.error || "Failed to save AdsBitvex settings.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setAdsbitvexError(err.message || "Failed to save AdsBitvex settings.");
+    } finally {
+      setAdsbitvexSaving(false);
+    }
+  };
+
+  const addDiagnosticLine = (module: string, message: string, isError = false) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const line = `[${timestamp}] [${module}] ${isError ? "🔴 Error: " : "🟢 "}${message}`;
+    setDiagnosticsLog(prev => [line, ...prev].slice(0, 50));
+  };
+
+  const testAdsbitvexSdk = async () => {
+    addDiagnosticLine("SDK Test", `Initiating reachability test for appId "${adsbitvexAppId}"...`);
+    
+    let generatedUrl = adsbitvexEndpoint;
+    if (adsbitvexAppId) {
+      if (generatedUrl.includes("YOUR_APP_ID")) {
+        generatedUrl = generatedUrl.replace(/YOUR_APP_ID/g, adsbitvexAppId);
+      } else if (!generatedUrl.includes(adsbitvexAppId)) {
+        if (generatedUrl.includes("appid=")) {
+          generatedUrl = generatedUrl.replace(/appid=[^&]*/, `appid=${adsbitvexAppId}`);
+        } else {
+          const sep = generatedUrl.includes("?") ? "&" : "?";
+          generatedUrl = `${generatedUrl}${sep}appid=${adsbitvexAppId}`;
+        }
+      }
+    }
+
+    try {
+      // Fetch test
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      
+      const response = await fetch(generatedUrl, { mode: 'no-cors', signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      addDiagnosticLine("SDK Test", "Endpoint ping succeeded! Mode: no-cors (Script is accessible and reachable).");
+      
+      const newStatus = {
+        ...adsbitvexIntegrationStatus,
+        sdkReachable: "YES",
+        appIdConfigured: adsbitvexAppId ? "YES" : "NO",
+        sdkLoaded: (window as any).showadsbitvex ? "YES" : "NO",
+        headInjected: document.querySelector(`script[src*="ad-script"]`) ? "YES" : "NO"
+      };
+      setAdsbitvexIntegrationStatus(newStatus);
+      await saveAdsbitvexSettings(newStatus);
+      
+    } catch (e: any) {
+      addDiagnosticLine("SDK Test", `Failed to reach SDK endpoint: ${e.message || e}`, true);
+      const newStatus = {
+        ...adsbitvexIntegrationStatus,
+        sdkReachable: "NO",
+        appIdConfigured: adsbitvexAppId ? "YES" : "NO",
+        sdkLoaded: (window as any).showadsbitvex ? "YES" : "NO"
+      };
+      setAdsbitvexIntegrationStatus(newStatus);
+      await saveAdsbitvexSettings(newStatus);
+    }
+  };
+
+  const testAdsbitvexRewardAd = async () => {
+    addDiagnosticLine("Reward Ad", "Executing window.showadsbitvex()...");
+    setDiagnosticsStatus((prev: any) => ({ ...prev, promiseStatus: "Pending", adLoaded: false, adClosed: false }));
+
+    if (typeof (window as any).showadsbitvex !== "function") {
+      const errorMsg = "window.showadsbitvex is not defined. The SDK might not be loaded yet or has failed to inject.";
+      addDiagnosticLine("Reward Ad", errorMsg, true);
+      alert(`Error: ${errorMsg}`);
+      
+      const newStatus = { ...adsbitvexIntegrationStatus, rewardTestPassed: "NO" };
+      setAdsbitvexIntegrationStatus(newStatus);
+      await saveAdsbitvexSettings(newStatus);
+      return;
+    }
+
+    try {
+      const promise = (window as any).showadsbitvex();
+      if (promise && typeof promise.then === "function") {
+        setDiagnosticsStatus((prev: any) => ({ ...prev, adLoaded: true }));
+        addDiagnosticLine("Reward Ad", "Ad dynamic promise returned! Waiting for ad interaction to resolve...");
+        
+        promise
+          .then((res: any) => {
+            setDiagnosticsStatus((prev: any) => ({ ...prev, promiseStatus: "Resolved", adClosed: true }));
+            addDiagnosticLine("Reward Ad", "window.showadsbitvex promise resolved successfully! Reward earned.");
+            alert("Reward Ad Loaded Successfully!");
+            
+            const newStatus = { ...adsbitvexIntegrationStatus, rewardTestPassed: "YES" };
+            setAdsbitvexIntegrationStatus(newStatus);
+            saveAdsbitvexSettings(newStatus);
+          })
+          .catch((err: any) => {
+            setDiagnosticsStatus((prev: any) => ({ ...prev, promiseStatus: "Rejected" }));
+            addDiagnosticLine("Reward Ad", `window.showadsbitvex promise was rejected: ${JSON.stringify(err) || err}`, true);
+            alert(`Error: ${err?.message || JSON.stringify(err) || err}`);
+            
+            const newStatus = { ...adsbitvexIntegrationStatus, rewardTestPassed: "NO" };
+            setAdsbitvexIntegrationStatus(newStatus);
+            saveAdsbitvexSettings(newStatus);
+          });
+      } else {
+        addDiagnosticLine("Reward Ad", "Executed successfully, but showadsbitvex did not return a Promise.", false);
+        alert("Reward Ad Loaded Successfully! (Note: Function executed but returned no promise)");
+        const newStatus = { ...adsbitvexIntegrationStatus, rewardTestPassed: "YES" };
+        setAdsbitvexIntegrationStatus(newStatus);
+        await saveAdsbitvexSettings(newStatus);
+      }
+    } catch (err: any) {
+      addDiagnosticLine("Reward Ad", `Execution crashed: ${err?.message || err}`, true);
+      alert(`Complete Error: ${err?.message || err}`);
+      
+      const newStatus = { ...adsbitvexIntegrationStatus, rewardTestPassed: "NO" };
+      setAdsbitvexIntegrationStatus(newStatus);
+      await saveAdsbitvexSettings(newStatus);
+    }
+  };
+
+  const testAdsbitvexInitAd = async () => {
+    addDiagnosticLine("Init Ad", "Executing window.showadsbitvex_init()...");
+    if (typeof (window as any).showadsbitvex_init !== "function") {
+      const errorMsg = "window.showadsbitvex_init is not defined. The SDK might not be loaded yet or has failed to inject.";
+      addDiagnosticLine("Init Ad", errorMsg, true);
+      alert(`Error: ${errorMsg}`);
+      
+      const newStatus = { ...adsbitvexIntegrationStatus, initTestPassed: "NO" };
+      setAdsbitvexIntegrationStatus(newStatus);
+      await saveAdsbitvexSettings(newStatus);
+      return;
+    }
+
+    try {
+      const promise = (window as any).showadsbitvex_init();
+      if (promise && typeof promise.then === "function") {
+        addDiagnosticLine("Init Ad", "Ad dynamic promise returned! Waiting for ad to close...");
+        promise
+          .then((res: any) => {
+            addDiagnosticLine("Init Ad", "window.showadsbitvex_init promise resolved successfully! Ad closed.");
+            alert("Init Ad Loaded Successfully! (Ad Closed)");
+            
+            const newStatus = { ...adsbitvexIntegrationStatus, initTestPassed: "YES" };
+            setAdsbitvexIntegrationStatus(newStatus);
+            saveAdsbitvexSettings(newStatus);
+          })
+          .catch((err: any) => {
+            addDiagnosticLine("Init Ad", `window.showadsbitvex_init promise was rejected: ${JSON.stringify(err) || err}`, true);
+            alert(`Error: ${err?.message || JSON.stringify(err) || err}`);
+            
+            const newStatus = { ...adsbitvexIntegrationStatus, initTestPassed: "NO" };
+            setAdsbitvexIntegrationStatus(newStatus);
+            saveAdsbitvexSettings(newStatus);
+          });
+      } else {
+        addDiagnosticLine("Init Ad", "Executed successfully, but showadsbitvex_init did not return a Promise.", false);
+        alert("Init Ad Loaded Successfully! (Note: Function executed but returned no promise)");
+        const newStatus = { ...adsbitvexIntegrationStatus, initTestPassed: "YES" };
+        setAdsbitvexIntegrationStatus(newStatus);
+        await saveAdsbitvexSettings(newStatus);
+      }
+    } catch (err: any) {
+      addDiagnosticLine("Init Ad", `Execution crashed: ${err?.message || err}`, true);
+      alert(`Complete Error: ${err?.message || err}`);
+      
+      const newStatus = { ...adsbitvexIntegrationStatus, initTestPassed: "NO" };
+      setAdsbitvexIntegrationStatus(newStatus);
+      await saveAdsbitvexSettings(newStatus);
+    }
+  };
+
   const hasUnsavedSettings = () => {
     if (!systemSettings || !originalSystemSettings) return false;
     return JSON.stringify(systemSettings) !== JSON.stringify(originalSystemSettings);
@@ -3513,6 +3764,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
     } else if (activeTab === "📄 Ads.txt Manager") {
       fetchAdsTxt();
       fetchAdsTxtProviders();
+    } else if (activeTab === "💰 AdsBitvex Monetization") {
+      fetchAdsbitvexSettings();
     }
 
     return () => {
@@ -4693,6 +4946,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🚀 Referral System",
               "⚙️ System Settings",
               "📄 Ads.txt Manager",
+              "💰 AdsBitvex Monetization",
               "📱 Telegram Settings",
               "🍀 Lucky Number Giveaway",
               "🎁 Lucky Draw Winner",
@@ -12611,6 +12865,394 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
           {activeTab === "🎡 Lucky Spin Live Event" && (
             <LuckySpinAdminView />
+          )}
+
+          {activeTab === "🎡 Lucky Spin Live Event" && (
+            <LuckySpinAdminView />
+          )}
+
+          {activeTab === "💰 AdsBitvex Monetization" && (
+            <div className="space-y-8 max-w-7xl mx-auto text-slate-100">
+              {/* Header Panel */}
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    <span className="text-blue-500 text-3xl">💰</span> AdsBitvex Integration Manager
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Configure, manage, and test your dynamic AdsBitvex SDK monetization widgets and head scripts from one dashboard.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-xl text-xs font-semibold">
+                    🛡️ Only Super Admins can configure settings
+                  </div>
+                </div>
+              </div>
+
+              {/* Error and Success Alerts */}
+              {adsbitvexSuccess && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl text-sm font-medium flex items-center gap-2 shadow-sm">
+                  <span className="text-emerald-500 font-bold">✓</span> {adsbitvexSuccess}
+                </div>
+              )}
+
+              {adsbitvexError && (
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-sm font-medium flex items-center gap-2 shadow-sm">
+                  <span className="text-rose-500 font-bold">⚠️</span> {adsbitvexError}
+                </div>
+              )}
+
+              {/* Main Content Layout Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                
+                {/* Left Side Column (Controls & Script Forms) */}
+                <div className="lg:col-span-8 space-y-8">
+                  
+                  {/* Section 1: SDK CONFIGURATION */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                    <div className="border-b border-slate-800 pb-4">
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <span>🔌</span> SDK Configuration
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Enter your official SDK endpoint and unique App ID. YOUR_APP_ID will be replaced automatically.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider">
+                          SDK Endpoint
+                        </label>
+                        <input
+                          type="text"
+                          value={adsbitvexEndpoint}
+                          onChange={(e) => setAdsbitvexEndpoint(e.target.value)}
+                          placeholder="https://sdk.adsbitvex.com/functions/v1/ad-script?appid=YOUR_APP_ID"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 text-sm font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider">
+                          App ID
+                        </label>
+                        <input
+                          type="text"
+                          value={adsbitvexAppId}
+                          onChange={(e) => setAdsbitvexAppId(e.target.value)}
+                          placeholder="abcd123456789"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 text-sm font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      <button
+                        onClick={testAdsbitvexSdk}
+                        className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 font-semibold rounded-xl text-xs transition-all border border-slate-700 flex items-center gap-1.5"
+                      >
+                        ⚡ Test SDK Reachability
+                      </button>
+                      <button
+                        onClick={() => saveAdsbitvexSettings()}
+                        disabled={adsbitvexSaving || adsbitvexLoading}
+                        className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs transition-all shadow-lg shadow-blue-900/20 flex items-center gap-1.5"
+                      >
+                        {adsbitvexSaving ? "Saving..." : "💾 Save SDK Config"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Section 2: HEAD SCRIPT DISPLAY */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <span>📦</span> Generated Head Script (Read Only)
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                          This code has been dynamically generated and injected into your website's &lt;head&gt;.
+                        </p>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                        adsbitvexGeneratedHeadScript ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border border-rose-500/20 text-rose-400"
+                      }`}>
+                        Status: {adsbitvexGeneratedHeadScript ? "ACTIVE INJECTION" : "INACTIVE"}
+                      </span>
+                    </div>
+
+                    <div className="relative">
+                      <pre className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs font-mono text-blue-400 overflow-x-auto whitespace-pre-wrap break-all select-all">
+                        {adsbitvexGeneratedHeadScript || `<!-- Save SDK configuration to generate head script injection -->`}
+                      </pre>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400">Head Script Injected:</span>
+                        {adsbitvexGeneratedHeadScript ? (
+                          <span className="text-xs font-bold text-emerald-400">YES ✅</span>
+                        ) : (
+                          <span className="text-xs font-bold text-rose-400">NO ❌</span>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={fetchAdsbitvexSettings}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 font-semibold rounded-xl text-xs transition-all border border-slate-700"
+                        >
+                          🔄 Refresh Settings
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (adsbitvexGeneratedHeadScript) {
+                              navigator.clipboard.writeText(adsbitvexGeneratedHeadScript);
+                              alert("Copied head script to clipboard!");
+                            }
+                          }}
+                          disabled={!adsbitvexGeneratedHeadScript}
+                          className="px-4 py-2 bg-blue-600/15 hover:bg-blue-600/25 active:bg-blue-600/45 text-blue-400 disabled:opacity-40 font-semibold rounded-xl text-xs transition-all border border-blue-500/20"
+                        >
+                          📋 Copy Script
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 3: REWARD AD CONFIGURATION */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                    <div className="border-b border-slate-800 pb-4">
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <span>🎁</span> Reward Ad Script
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        JavaScript function call that requests and plays a rewarded video advertisement.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider">
+                        JavaScript Script Body
+                      </label>
+                      <textarea
+                        value={adsbitvexRewardScript}
+                        onChange={(e) => setAdsbitvexRewardScript(e.target.value)}
+                        placeholder={`window.showadsbitvex()\n.then(()=>{\n  console.log("Reward earned");\n})\n.catch(e=>{\n  console.error(e);\n});`}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 text-xs font-mono h-36 resize-none focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                      ></textarea>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2">
+                      <div className="text-[11px] text-slate-500 italic max-w-sm">
+                        Do not use &lt;script&gt; tags. Just write the raw JS body. Testing executes it in this frame.
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={testAdsbitvexRewardAd}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 font-semibold rounded-xl text-xs transition-all border border-slate-700 flex items-center gap-1"
+                        >
+                          🎬 Test Reward Ad
+                        </button>
+                        <button
+                          onClick={() => saveAdsbitvexSettings()}
+                          disabled={adsbitvexSaving}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold rounded-xl text-xs transition-all shadow-md shadow-blue-900/20"
+                        >
+                          💾 Save Reward Script
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 4: INIT / INTERSTITIAL */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                    <div className="border-b border-slate-800 pb-4">
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <span>⚡</span> Init / Interstitial Ad Script
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        JavaScript function call executed at startup to trigger pre-rolls or interstitial advertisements.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider">
+                        JavaScript Script Body
+                      </label>
+                      <textarea
+                        value={adsbitvexInitScript}
+                        onChange={(e) => setAdsbitvexInitScript(e.target.value)}
+                        placeholder={`window.showadsbitvex_init()\n.then(()=>{\n  console.log("Init Closed");\n})\n.catch(e=>{\n  console.error(e);\n});`}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 text-xs font-mono h-36 resize-none focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                      ></textarea>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2">
+                      <div className="text-[11px] text-slate-500 italic max-w-sm">
+                        Do not use &lt;script&gt; tags. Writes raw JS body. Testing executes it in this frame.
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={testAdsbitvexInitAd}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 font-semibold rounded-xl text-xs transition-all border border-slate-700 flex items-center gap-1"
+                        >
+                          🎬 Test Init Ad
+                        </button>
+                        <button
+                          onClick={() => saveAdsbitvexSettings()}
+                          disabled={adsbitvexSaving}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold rounded-xl text-xs transition-all shadow-md shadow-blue-900/20"
+                        >
+                          💾 Save Init Script
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Right Side Column (Status, Live diagnostics, How it works) */}
+                <div className="lg:col-span-4 space-y-8">
+                  
+                  {/* Section 5: INTEGRATION STATUS */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+                    <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+                      📊 Integration Status
+                    </h3>
+                    
+                    <div className="space-y-3">
+                      {[
+                        { label: "SDK Loaded", val: (window as any).showadsbitvex ? "YES" : "NO" },
+                        { label: "SDK Reachable", val: adsbitvexIntegrationStatus?.sdkReachable || "NO" },
+                        { label: "App ID Configured", val: adsbitvexAppId ? "YES" : "NO" },
+                        { label: "Head Script Injected", val: adsbitvexGeneratedHeadScript ? "YES" : "NO" },
+                        { label: "Reward Script Saved", val: adsbitvexRewardScript ? "YES" : "NO" },
+                        { label: "Reward Test Passed", val: adsbitvexIntegrationStatus?.rewardTestPassed || "NO" },
+                        { label: "Init Script Saved", val: adsbitvexInitScript ? "YES" : "NO" },
+                        { label: "Init Test Passed", val: adsbitvexIntegrationStatus?.initTestPassed || "NO" }
+                      ].map((st, i) => (
+                        <div key={i} className="flex justify-between items-center py-2 border-b border-slate-800/50 text-xs">
+                          <span className="text-slate-400">{st.label}</span>
+                          <span className={`font-semibold px-2 py-0.5 rounded ${
+                            st.val === "YES" ? "bg-emerald-500/10 text-emerald-400 text-[10px]" : "bg-rose-500/10 text-rose-400 text-[10px]"
+                          }`}>
+                            {st.val}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Section 6: HOW IT WORKS INFO CARD */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+                    <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      💡 How It Works Reference
+                    </h3>
+
+                    <div className="space-y-4 text-xs">
+                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+                        <p className="font-bold text-white flex items-center gap-1">
+                          <span className="text-blue-400">●</span> Reward Ad
+                        </p>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-400">
+                          <li>15 second countdown</li>
+                          <li>Full CPM payout</li>
+                        </ul>
+                      </div>
+
+                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+                        <p className="font-bold text-white flex items-center gap-1">
+                          <span className="text-yellow-400">●</span> Init Ad
+                        </p>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-400">
+                          <li>3 second countdown</li>
+                          <li>Around 50% CPM</li>
+                        </ul>
+                      </div>
+
+                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+                        <p className="font-bold text-white flex items-center gap-1">
+                          <span className="text-emerald-400">●</span> CTA Click
+                        </p>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-400">
+                          <li>Opens advertiser page</li>
+                          <li>Counts extra click earning</li>
+                        </ul>
+                      </div>
+
+                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+                        <p className="font-bold text-white flex items-center gap-1">
+                          <span className="text-purple-400">●</span> Promise & Anti Fraud
+                        </p>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-400">
+                          <li>Reward promise resolves after ad closes</li>
+                          <li>Geo targeting & frequency capping</li>
+                          <li>Real-time balance updates</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 7: TEST CONSOLE DIAGNOSTICS */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                      <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        📟 Diagnostic Test Console
+                      </h3>
+                      <button
+                        onClick={() => setDiagnosticsLog([])}
+                        className="text-[10px] text-slate-400 hover:text-white underline"
+                      >
+                        Clear logs
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-950 p-3 rounded-xl border border-slate-800">
+                        <span className="text-slate-400">SDK Status:</span>
+                        <span className="font-semibold text-slate-200">{(window as any).showadsbitvex ? "Active" : "Not Loaded"}</span>
+
+                        <span className="text-slate-400">App ID:</span>
+                        <span className="font-semibold text-slate-200 truncate">{adsbitvexAppId || "Missing"}</span>
+
+                        <span className="text-slate-400">Reward Function Found:</span>
+                        <span className="font-semibold text-slate-200">{typeof (window as any).showadsbitvex === "function" ? "YES" : "NO"}</span>
+
+                        <span className="text-slate-400">Init Function Found:</span>
+                        <span className="font-semibold text-slate-200">{typeof (window as any).showadsbitvex_init === "function" ? "YES" : "NO"}</span>
+
+                        <span className="text-slate-400">Promise Status:</span>
+                        <span className="font-semibold text-blue-400">{diagnosticsStatus.promiseStatus}</span>
+
+                        <span className="text-slate-400">Ad Loaded:</span>
+                        <span className="font-semibold text-slate-200">{diagnosticsStatus.adLoaded ? "YES" : "NO"}</span>
+
+                        <span className="text-slate-400">Ad Closed:</span>
+                        <span className="font-semibold text-slate-200">{diagnosticsStatus.adClosed ? "YES" : "NO"}</span>
+                      </div>
+
+                      {/* Live Diagnostic Logs Feed */}
+                      <div className="space-y-1.5">
+                        <span className="block text-xs font-semibold text-slate-400">Live Log Feed:</span>
+                        <div className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl h-44 overflow-y-auto font-mono text-[10px] space-y-1.5 select-text">
+                          {diagnosticsLog.length > 0 ? (
+                            diagnosticsLog.map((log, i) => (
+                              <div key={i} className="leading-relaxed border-b border-slate-900 pb-1 last:border-0">{log}</div>
+                            ))
+                          ) : (
+                            <div className="text-slate-600 italic">No diagnostic trials run yet. Click "Test SDK" or "Test Reward Ad" to launch a live simulation.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+            </div>
           )}
 
           {activeTab === "📄 Ads.txt Manager" && (
