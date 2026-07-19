@@ -58,7 +58,7 @@ const USER_DATA = {
   ]
 };
 
-const StatCard = ({ title, value, icon: Icon, delay }: any) => (
+const StatCard = ({ title, value, icon: Icon, delay, loading }: any) => (
   <motion.div
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
@@ -78,7 +78,11 @@ const StatCard = ({ title, value, icon: Icon, delay }: any) => (
       </div>
       <div>
         <h3 className="text-slate-400 text-sm font-medium mb-1">{title}</h3>
-        <p className="text-2xl font-bold text-white tracking-tight">{value}</p>
+        {loading ? (
+          <div className="h-8 w-24 bg-white/5 rounded-lg animate-pulse mt-1" />
+        ) : (
+          <p className="text-2xl font-bold text-white tracking-tight">{value}</p>
+        )}
       </div>
     </div>
   </motion.div>
@@ -153,8 +157,12 @@ const DashboardPage = ({
     if (!user) return;
     const fetchStats = async () => {
       try {
-        const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
-        const uploadsSnap = await getDocs(uploadsQuery);
+        const [uploadsSnap, linksSnap, withdrawalsSnap] = await Promise.all([
+          getDocs(query(collection(db, "uploads"), where("userId", "==", String(user.id)))),
+          getDocs(query(collection(db, "links"), where("userId", "==", String(user.id)))),
+          getDocs(query(collection(db, "withdrawals"), where("userId", "==", String(user.id))))
+        ]);
+
         let totalFiles = 0;
         let totalDownloads = 0;
         uploadsSnap.forEach((doc) => {
@@ -162,12 +170,8 @@ const DashboardPage = ({
           totalDownloads += Number(doc.data().downloads || 0);
         });
 
-        const linksQuery = query(collection(db, "links"), where("userId", "==", String(user.id)));
-        const linksSnap = await getDocs(linksQuery);
         const totalLinks = linksSnap.size;
 
-        const withdrawalsQuery = query(collection(db, "withdrawals"), where("userId", "==", String(user.id)));
-        const withdrawalsSnap = await getDocs(withdrawalsQuery);
         let withdrawalsCount = 0;
         let withdrawalsTotal = 0;
         withdrawalsSnap.forEach((doc) => {
@@ -310,10 +314,10 @@ const DashboardPage = ({
 
         {/* QUICK STATS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-          <StatCard title="Total Files" value={user ? dbStats.files : USER_DATA.stats.files} icon={FileText} delay={0.1} />
-          <StatCard title="Total Downloads" value={user ? dbStats.downloads : USER_DATA.stats.downloads} icon={Download} delay={0.2} />
-          <StatCard title="Total Earnings" value={user ? `₹${displayTotalEarnings.toLocaleString()}` : USER_DATA.stats.earnings} icon={DollarSign} delay={0.3} />
-          <StatCard title="Smart Links" value={user ? dbStats.links : USER_DATA.stats.links} icon={LinkIcon} delay={0.4} />
+          <StatCard title="Total Files" value={user ? dbStats.files : USER_DATA.stats.files} icon={FileText} delay={0.1} loading={user ? dbStats.loading : false} />
+          <StatCard title="Total Downloads" value={user ? dbStats.downloads : USER_DATA.stats.downloads} icon={Download} delay={0.2} loading={user ? dbStats.loading : false} />
+          <StatCard title="Total Earnings" value={user ? `₹${displayTotalEarnings.toLocaleString()}` : USER_DATA.stats.earnings} icon={DollarSign} delay={0.3} loading={false} />
+          <StatCard title="Smart Links" value={user ? dbStats.links : USER_DATA.stats.links} icon={LinkIcon} delay={0.4} loading={user ? dbStats.loading : false} />
         </div>
 
         {/* QUICK ACTIONS */}

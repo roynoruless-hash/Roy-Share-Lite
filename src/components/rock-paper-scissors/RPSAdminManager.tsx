@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Save, AlertCircle, Eye, Loader2, Users, TrendingUp, HelpCircle, RefreshCw } from "lucide-react";
+import { Settings, Save, AlertCircle, Eye, Loader2, Users, TrendingUp, HelpCircle, RefreshCw, Search, Filter, History } from "lucide-react";
 import { db } from "../../lib/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, query } from "firebase/firestore";
 
 export default function RPSAdminManager() {
   const [settings, setSettings] = useState<any>({
@@ -26,10 +26,14 @@ export default function RPSAdminManager() {
     adsCompleted: 0
   });
 
+  const [games, setGames] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [gamesLoading, setGamesLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-  const [activeTab, setActiveTab] = useState<"settings" | "stats">("settings");
+  const [activeTab, setActiveTab] = useState<"settings" | "stats" | "history">("settings");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [resultFilter, setResultFilter] = useState("all");
 
   useEffect(() => {
     loadData();
@@ -47,10 +51,33 @@ export default function RPSAdminManager() {
       if (statsSnap.exists()) {
         setStats({ ...stats, ...statsSnap.data() });
       }
+
+      await loadGames();
     } catch (e) {
       console.error(e);
     }
     setLoading(false);
+  };
+
+  const loadGames = async () => {
+    setGamesLoading(true);
+    try {
+      const q = query(collection(db, "rps_history"));
+      const snap = await getDocs(q);
+      const list: any[] = [];
+      snap.forEach(d => {
+        list.push({ id: d.id, ...d.data() });
+      });
+      list.sort((a, b) => {
+        const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+        const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+        return tB - tA;
+      });
+      setGames(list);
+    } catch (e) {
+      console.error("Error loading games:", e);
+    }
+    setGamesLoading(false);
   };
 
   const handleSave = async () => {
@@ -75,6 +102,25 @@ export default function RPSAdminManager() {
     setSaving(false);
   };
 
+  // Derived Summary Statistics for History Tab
+  const totalGames = games.length;
+  const totalWins = games.filter(g => g.result === "Win").length;
+  const totalLosses = games.filter(g => g.result === "Loss").length;
+  const totalDraws = games.filter(g => g.result === "Draw").length;
+  const totalRewardsPaid = games.reduce((sum, g) => sum + (g.reward || 0), 0);
+
+  // Search and Filtering
+  const filteredGames = games.filter(g => {
+    const matchesSearch = 
+      String(g.username || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(g.userId || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(g.telegramId || "").toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesResult = resultFilter === "all" || String(g.result).toLowerCase() === resultFilter.toLowerCase();
+    
+    return matchesSearch && matchesResult;
+  });
+
   if (loading) return <div className="p-8 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-500" /></div>;
 
   return (
@@ -97,13 +143,15 @@ export default function RPSAdminManager() {
               Save Settings
             </button>
           )}
-          <button 
-            onClick={loadData} 
-            className="p-2 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl transition"
-            title="Reload data"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+          {(activeTab === "stats" || activeTab === "history") && (
+            <button 
+              onClick={loadData} 
+              className="p-2 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl transition"
+              title="Reload data"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -121,10 +169,16 @@ export default function RPSAdminManager() {
         >
           📈 Real-time Analytics
         </button>
+        <button 
+          onClick={() => { setActiveTab("history"); loadGames(); }} 
+          className={`py-3 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === "history" ? "border-indigo-500 text-indigo-400" : "border-transparent text-slate-400 hover:text-slate-200"}`}
+        >
+          🎮 Game History
+        </button>
       </div>
 
       <div className="p-6">
-        {activeTab === "settings" ? (
+        {activeTab === "settings" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             
             {/* Core Rules & Controls */}
@@ -215,8 +269,9 @@ export default function RPSAdminManager() {
               </div>
             </div>
           </div>
-        ) : (
-          /* Live Stats & Analytics Views */
+        )}
+
+        {activeTab === "stats" && (
           <div className="space-y-6">
             <h3 className="font-bold text-sm uppercase tracking-wider text-indigo-400 border-b border-slate-800 pb-2">Business Performance</h3>
             
@@ -254,6 +309,135 @@ export default function RPSAdminManager() {
                 Net platform revenue is computed as <code className="bg-slate-900 px-1 py-0.5 rounded text-indigo-300">(EntryFees - Payouts)</code>. Contribution records are verified and logged securely into the Firestore transactions database automatically after every resolution.
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === "history" && (
+          <div className="space-y-6">
+            <h3 className="font-bold text-sm uppercase tracking-wider text-indigo-400 border-b border-slate-800 pb-2">Admin Game History</h3>
+
+            {/* History Stat Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-850 text-center">
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Total Games</p>
+                <p className="text-xl font-black text-white mt-1">{totalGames}</p>
+              </div>
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-850 text-center">
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Wins</p>
+                <p className="text-xl font-black text-emerald-400 mt-1">{totalWins}</p>
+              </div>
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-850 text-center">
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Losses</p>
+                <p className="text-xl font-black text-rose-400 mt-1">{totalLosses}</p>
+              </div>
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-850 text-center">
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Draws</p>
+                <p className="text-xl font-black text-amber-400 mt-1">{totalDraws}</p>
+              </div>
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-850 text-center col-span-2 md:col-span-1">
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Total Payouts</p>
+                <p className="text-xl font-black text-indigo-400 mt-1">₹{totalRewardsPaid}</p>
+              </div>
+            </div>
+
+            {/* Search and Filters */}
+            <div className="flex flex-col sm:flex-row gap-3 items-center">
+              <div className="relative w-full sm:flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Search by Player Name, Username, ID..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-850 rounded-xl pl-10 pr-4 py-2 text-sm text-white outline-none focus:border-indigo-500 transition"
+                />
+              </div>
+              <div className="relative w-full sm:w-48">
+                <Filter className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <select
+                  value={resultFilter}
+                  onChange={e => setResultFilter(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-850 rounded-xl pl-10 pr-4 py-2 text-sm text-white outline-none focus:border-indigo-500 transition appearance-none cursor-pointer"
+                >
+                  <option value="all">All Results</option>
+                  <option value="win">Wins</option>
+                  <option value="loss">Losses</option>
+                  <option value="draw">Draws</option>
+                </select>
+              </div>
+            </div>
+
+            {/* History Table */}
+            {gamesLoading ? (
+              <div className="p-12 text-center">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-500" />
+                <p className="text-xs text-slate-400 mt-2">Loading game history logs...</p>
+              </div>
+            ) : filteredGames.length === 0 ? (
+              <div className="p-12 text-center border border-dashed border-slate-800 rounded-3xl bg-slate-950/20 text-slate-400">
+                <AlertCircle className="w-8 h-8 mx-auto text-slate-500 mb-2" />
+                <p className="text-sm font-bold">No match logs found</p>
+                <p className="text-xs text-slate-500 mt-1">Try resetting filters or checking the search query.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto border border-slate-850 rounded-2xl bg-slate-950/40">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-850 bg-slate-950/60 text-slate-400 font-bold">
+                      <th className="p-4">Player Details</th>
+                      <th className="p-4">Game ID</th>
+                      <th className="p-4">Choices</th>
+                      <th className="p-4">Result</th>
+                      <th className="p-4">Reward Paid</th>
+                      <th className="p-4">Wallet Balance</th>
+                      <th className="p-4">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-850/60">
+                    {filteredGames.map((g: any, idx: number) => {
+                      const dateStr = g.timestamp
+                        ? new Date(g.timestamp.seconds ? g.timestamp.seconds * 1000 : g.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
+                        : "N/A";
+                      
+                      const resultClass = g.result === "Win"
+                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        : g.result === "Loss"
+                        ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                        : "bg-amber-500/10 text-amber-400 border border-amber-500/20";
+
+                      return (
+                        <tr key={g.id || idx} className="hover:bg-slate-900/40 transition">
+                          <td className="p-4">
+                            <div className="font-bold text-slate-200">{g.username || "Unknown"}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">ID: {g.userId || g.telegramId}</div>
+                          </td>
+                          <td className="p-4 font-mono text-[10px] text-slate-400">
+                            {g.gameId || "N/A"}
+                          </td>
+                          <td className="p-4 text-slate-300">
+                            <span className="capitalize">{g.userChoice || "rock"}</span> vs <span className="capitalize">{g.botChoice || "rock"}</span>
+                          </td>
+                          <td className="p-4">
+                            <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${resultClass}`}>
+                              {g.result}
+                            </span>
+                          </td>
+                          <td className="p-4 font-bold text-slate-200">
+                            ₹{g.reward || 0}
+                          </td>
+                          <td className="p-4 text-slate-400">
+                            ₹{g.walletBalanceAfter || 0}
+                          </td>
+                          <td className="p-4 text-slate-500">
+                            {dateStr}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

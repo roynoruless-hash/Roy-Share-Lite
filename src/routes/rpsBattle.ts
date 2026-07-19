@@ -304,11 +304,43 @@ function getWinner(m1: string, m2: string): "player1" | "player2" | "draw" {
   return "player2";
 }
 
+// Helper: Send Telegram Message for RPS
+async function sendTelegramMessageRPS(botToken: string, chatId: string, text: string) {
+  try {
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: String(chatId),
+        text: text,
+        parse_mode: "HTML"
+      })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[RPS BOT] Failed to send message to ${chatId}:`, errText);
+    } else {
+      console.log(`[RPS BOT] Message successfully sent to ${chatId}`);
+    }
+  } catch (err) {
+    console.error(`[RPS BOT] Error sending message to ${chatId}:`, err);
+  }
+}
+
+// Helper: Format Time in IST
+function formatTimeIndian() {
+  return new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+}
+
 // Helper: Resolve match internally
 async function resolveRPSMatchInternal(matchId: string): Promise<{ success: boolean; message?: string }> {
   const db = getDb();
   try {
+    let notifications: any[] = [];
+
     await runTransaction(db, async (t) => {
+      notifications = []; // Reset on each transaction attempt
       const matchRef = doc(db, "rps_matches", matchId);
       const matchSnap = await t.get(matchRef);
       if (!matchSnap.exists()) throw new Error("Match not found");
@@ -342,8 +374,10 @@ async function resolveRPSMatchInternal(matchId: string): Promise<{ success: bool
       if (winnerResult === "draw") {
         if (drawMode === "refund") {
           // Refund both players
-          let u1Ref = null, u2Ref = null;
-          let u1Snap = null, u2Snap = null;
+          let u1Ref = null, u1Snap = null;
+          let u2Ref = null, u2Snap = null;
+          let u1BalanceAfter = 0;
+          let u2BalanceAfter = 0;
 
           if (!match.player1.isAI) {
             u1Ref = doc(db, "users", decryptId(match.player1.encTelegramId));
@@ -355,6 +389,11 @@ async function resolveRPSMatchInternal(matchId: string): Promise<{ success: bool
           }
 
           if (u1Snap?.exists() && u1Ref) {
+            const u1Data = u1Snap.data();
+            const u1BalanceBefore = u1Data.balance || 0;
+            const u1RewardBefore = u1Data.rewardBalance || 0;
+            u1BalanceAfter = u1BalanceBefore + u1RewardBefore + entryFee;
+
             t.update(u1Ref, { balance: increment(entryFee) });
             t.set(doc(collection(db, "transactions")), {
               userId: decryptId(match.player1.encTelegramId),
@@ -364,8 +403,41 @@ async function resolveRPSMatchInternal(matchId: string): Promise<{ success: bool
               timestamp: serverTimestamp(),
               status: "completed"
             });
+
+            const u1Username = u1Data.username || "None";
+            const u1FirstName = u1Data.first_name || u1Data.firstName || "Player";
+            t.set(doc(db, "rps_history", matchId + "_" + decryptId(match.player1.encTelegramId)), {
+              gameId: matchId,
+              userId: decryptId(match.player1.encTelegramId),
+              username: u1Username,
+              telegramId: decryptId(match.player1.encTelegramId),
+              gameName: "Rock Paper Scissors",
+              userChoice: p1Move,
+              botChoice: p2Move,
+              result: "Draw",
+              reward: 0,
+              walletBalanceAfter: u1BalanceAfter,
+              timestamp: serverTimestamp()
+            });
+
+            notifications.push({
+              type: "draw",
+              userId: decryptId(match.player1.encTelegramId),
+              reward: 0,
+              walletBalance: u1BalanceAfter,
+              gameId: matchId,
+              userChoice: p1Move,
+              botChoice: p2Move,
+              username: u1Username,
+              firstName: u1FirstName
+            });
           }
           if (u2Snap?.exists() && u2Ref) {
+            const u2Data = u2Snap.data();
+            const u2BalanceBefore = u2Data.balance || 0;
+            const u2RewardBefore = u2Data.rewardBalance || 0;
+            u2BalanceAfter = u2BalanceBefore + u2RewardBefore + entryFee;
+
             t.update(u2Ref, { balance: increment(entryFee) });
             t.set(doc(collection(db, "transactions")), {
               userId: decryptId(match.player2.encTelegramId),
@@ -374,6 +446,34 @@ async function resolveRPSMatchInternal(matchId: string): Promise<{ success: bool
               description: "RPS Draw Refund",
               timestamp: serverTimestamp(),
               status: "completed"
+            });
+
+            const u2Username = u2Data.username || "None";
+            const u2FirstName = u2Data.first_name || u2Data.firstName || "Player";
+            t.set(doc(db, "rps_history", matchId + "_" + decryptId(match.player2.encTelegramId)), {
+              gameId: matchId,
+              userId: decryptId(match.player2.encTelegramId),
+              username: u2Username,
+              telegramId: decryptId(match.player2.encTelegramId),
+              gameName: "Rock Paper Scissors",
+              userChoice: p2Move,
+              botChoice: p1Move,
+              result: "Draw",
+              reward: 0,
+              walletBalanceAfter: u2BalanceAfter,
+              timestamp: serverTimestamp()
+            });
+
+            notifications.push({
+              type: "draw",
+              userId: decryptId(match.player2.encTelegramId),
+              reward: 0,
+              walletBalance: u2BalanceAfter,
+              gameId: matchId,
+              userChoice: p2Move,
+              botChoice: p1Move,
+              username: u2Username,
+              firstName: u2FirstName
             });
           }
 
@@ -435,6 +535,7 @@ async function resolveRPSMatchInternal(matchId: string): Promise<{ success: bool
 
         let uWinRef = null, uWinSnap = null;
         let winUserId = "";
+        let winBalanceAfter = 0;
 
         if (!winningPlayer.isAI) {
           winUserId = decryptId(winningPlayer.encTelegramId);
@@ -442,7 +543,22 @@ async function resolveRPSMatchInternal(matchId: string): Promise<{ success: bool
           uWinSnap = await t.get(uWinRef);
         }
 
+        let uLoseRef = null, uLoseSnap = null;
+        let loseUserId = "";
+        let loseBalanceAfter = 0;
+
+        if (!losingPlayer.isAI) {
+          loseUserId = decryptId(losingPlayer.encTelegramId);
+          uLoseRef = doc(db, "users", loseUserId);
+          uLoseSnap = await t.get(uLoseRef);
+        }
+
         if (uWinSnap?.exists() && uWinRef) {
+          const winData = uWinSnap.data();
+          const winBalanceBefore = winData.balance || 0;
+          const winRewardBefore = winData.rewardBalance || 0;
+          winBalanceAfter = winBalanceBefore + winRewardBefore + prizePool;
+
           t.update(uWinRef, { balance: increment(prizePool) });
           t.set(doc(collection(db, "transactions")), {
             userId: winUserId,
@@ -460,6 +576,71 @@ async function resolveRPSMatchInternal(matchId: string): Promise<{ success: bool
             payout: prizePool,
             timestamp: serverTimestamp(),
             type: "win_payout"
+          });
+
+          // Save game history for winner
+          const winUsername = winData.username || "None";
+          const winFirstName = winData.first_name || winData.firstName || "Player";
+          t.set(doc(db, "rps_history", matchId + "_" + winUserId), {
+            gameId: matchId,
+            userId: winUserId,
+            username: winUsername,
+            telegramId: winUserId,
+            gameName: "Rock Paper Scissors",
+            userChoice: winnerResult === "player1" ? p1Move : p2Move,
+            botChoice: winnerResult === "player1" ? p2Move : p1Move,
+            result: "Win",
+            reward: prizePool,
+            walletBalanceAfter: winBalanceAfter,
+            timestamp: serverTimestamp()
+          });
+
+          notifications.push({
+            type: "win",
+            userId: winUserId,
+            reward: prizePool,
+            walletBalance: winBalanceAfter,
+            gameId: matchId,
+            userChoice: winnerResult === "player1" ? p1Move : p2Move,
+            botChoice: winnerResult === "player1" ? p2Move : p1Move,
+            username: winUsername,
+            firstName: winFirstName
+          });
+        }
+
+        if (uLoseSnap?.exists() && uLoseRef) {
+          const loseData = uLoseSnap.data();
+          const loseBalanceBefore = loseData.balance || 0;
+          const loseRewardBefore = loseData.rewardBalance || 0;
+          loseBalanceAfter = loseBalanceBefore + loseRewardBefore; // Already deducted when entering match
+
+          // Save game history for loser
+          const loseUsername = loseData.username || "None";
+          const loseFirstName = loseData.first_name || loseData.firstName || "Player";
+          t.set(doc(db, "rps_history", matchId + "_" + loseUserId), {
+            gameId: matchId,
+            userId: loseUserId,
+            username: loseUsername,
+            telegramId: loseUserId,
+            gameName: "Rock Paper Scissors",
+            userChoice: winnerResult === "player1" ? p2Move : p1Move,
+            botChoice: winnerResult === "player1" ? p1Move : p2Move,
+            result: "Loss",
+            reward: 0,
+            walletBalanceAfter: loseBalanceAfter,
+            timestamp: serverTimestamp()
+          });
+
+          notifications.push({
+            type: "loss",
+            userId: loseUserId,
+            reward: 0,
+            walletBalance: loseBalanceAfter,
+            gameId: matchId,
+            userChoice: winnerResult === "player1" ? p2Move : p1Move,
+            botChoice: winnerResult === "player1" ? p1Move : p2Move,
+            username: loseUsername,
+            firstName: loseFirstName
           });
         }
 
@@ -489,6 +670,63 @@ async function resolveRPSMatchInternal(matchId: string): Promise<{ success: bool
         }, { merge: true });
       }
     });
+
+    // Send Telegram Notifications after transaction success
+    try {
+      const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      if (telegramSettingsSnap.exists()) {
+        const telData = telegramSettingsSnap.data();
+        const botToken = telData?.botToken;
+        const adminChatId = telData?.adminChatId || telData?.chatId;
+
+        if (botToken) {
+          const timeStr = formatTimeIndian();
+          for (const notif of notifications) {
+            let userText = "";
+            if (notif.type === "win") {
+              userText = `🎉 <b>You Won!</b>\n\n` +
+                `🎮 <b>Game:</b> Rock Paper Scissors\n` +
+                `💰 <b>Reward:</b> ₹${notif.reward}\n` +
+                `💳 Credited to Roy Share Wallet\n` +
+                `💼 <b>New Wallet Balance:</b> ₹${notif.walletBalance}\n` +
+                `🆔 <b>Game ID:</b> <code>${notif.gameId}</code>\n` +
+                `🕒 <b>Time:</b> ${timeStr}`;
+            } else if (notif.type === "loss") {
+              userText = `😔 <b>You Lost!</b>\n\n` +
+                `🎮 <b>Game:</b> Rock Paper Scissors\n` +
+                `💸 <b>Reward:</b> ₹0\n` +
+                `💼 <b>Wallet Balance:</b> ₹${notif.walletBalance}\n` +
+                `🆔 <b>Game ID:</b> <code>${notif.gameId}</code>\n` +
+                `🕒 <b>Time:</b> ${timeStr}`;
+            } else if (notif.type === "draw") {
+              userText = `🤝 <b>Match Draw!</b>\n\n` +
+                `🎮 No reward this round.\n` +
+                `💼 <b>Wallet Balance:</b> ₹${notif.walletBalance}\n` +
+                `🆔 <b>Game ID:</b> <code>${notif.gameId}</code>\n` +
+                `🕒 <b>Time:</b> ${timeStr}`;
+            }
+
+            if (userText) {
+              await sendTelegramMessageRPS(botToken, notif.userId, userText);
+            }
+
+            if (adminChatId) {
+              const adminText = `🎮 <b>New RPS Match</b>\n\n` +
+                `👤 <b>User:</b> ${notif.firstName || "Player"} (@${notif.username || "None"})\n` +
+                `🆔 <b>Telegram ID:</b> <code>${notif.userId}</code>\n` +
+                `🎯 <b>Result:</b> ${notif.type.toUpperCase()}\n` +
+                `💰 <b>Reward:</b> ₹${notif.reward}\n` +
+                `💼 <b>Wallet After Reward:</b> ₹${notif.walletBalance}\n` +
+                `🕒 <b>Time:</b> ${timeStr}`;
+
+              await sendTelegramMessageRPS(botToken, adminChatId, adminText);
+            }
+          }
+        }
+      }
+    } catch (notifErr) {
+      console.error("[RPS SERVER] Notifications processing failed:", notifErr);
+    }
 
     return { success: true };
   } catch (err: any) {

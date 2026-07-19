@@ -42,21 +42,10 @@ import {
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
-import { SurveyPage } from "./SurveyPage";
-import { WalletPage } from "./WalletPage";
-import DashboardPage from "./DashboardPage";
-import RewardTasksPage from "./RewardTasksPage";
 import { StandardTaskCard } from "../components/StandardTaskCard";
 import { ShortenerTaskCard } from "../components/ShortenerTaskCard";
 
-
-
-
 import { API_BASE } from "../config/api";
-import { MyLinksPage } from "./MyLinksPage";
-import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
-import { MyContentPage } from "./MyContentPage";
-import ReferralCenter from "./ReferralCenter";
 import { navigate } from "../lib/navigation";
 
 const DriveUploadPage = lazy(() => import("./DriveUploadPage"));
@@ -70,19 +59,34 @@ const PublicLuckyDrawPage = lazy(() => import("./PublicLuckyDrawPage"));
 const RPSHome = lazy(() => import("../components/rock-paper-scissors/RPSHome"));
 const RPSMatch = lazy(() => import("../components/rock-paper-scissors/RPSMatch"));
 import RPSErrorBoundary from "../components/rock-paper-scissors/RPSErrorBoundary";
-import { LuckySpinUserView } from "../components/LuckySpinUserView";
+
+// Lazy loaded views
+const SurveyPage = lazy(() => import("./SurveyPage").then(m => ({ default: m.SurveyPage })));
+const WalletPage = lazy(() => import("./WalletPage").then(m => ({ default: m.WalletPage })));
+const DashboardPage = lazy(() => import("./DashboardPage"));
+const RewardTasksPage = lazy(() => import("./RewardTasksPage"));
+const MyLinksPage = lazy(() => import("./MyLinksPage").then(m => ({ default: m.MyLinksPage })));
+const UrlShortenerAnalyticsPage = lazy(() => import("./UrlShortenerAnalyticsPage").then(m => ({ default: m.UrlShortenerAnalyticsPage })));
+const MyContentPage = lazy(() => import("./MyContentPage").then(m => ({ default: m.MyContentPage })));
+const ReferralCenter = lazy(() => import("./ReferralCenter"));
+const LuckySpinUserView = lazy(() => import("../components/LuckySpinUserView").then(m => ({ default: m.LuckySpinUserView })));
 
 interface MembershipVerificationProps {
   user: any;
   onVerified: () => void;
+  tgSettingsProp?: any;
 }
 
-const MembershipVerification: React.FC<MembershipVerificationProps> = ({ user }) => {
+const MembershipVerification: React.FC<MembershipVerificationProps> = ({ user, tgSettingsProp }) => {
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tgSettings, setTgSettings] = useState<any>(null);
+  const [tgSettings, setTgSettings] = useState<any>(tgSettingsProp || null);
 
   useEffect(() => {
+    if (tgSettingsProp) {
+      setTgSettings(tgSettingsProp);
+      return;
+    }
     const fetchSettings = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/telegram-settings`);
@@ -93,7 +97,7 @@ const MembershipVerification: React.FC<MembershipVerificationProps> = ({ user })
       }
     };
     fetchSettings();
-  }, []);
+  }, [tgSettingsProp]);
 
   const handleVerify = async () => {
     setVerifying(true);
@@ -734,6 +738,7 @@ export const MiniAppHome: React.FC = () => {
     return (
       <MembershipVerification 
         user={activeUser} 
+        tgSettingsProp={tgSettings}
         onVerified={() => {
           // Handled by Firebase onSnapshot in TelegramAuthContext
         }} 

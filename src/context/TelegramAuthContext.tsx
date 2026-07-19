@@ -116,8 +116,18 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     }
     isVerifyingRef.current = true;
 
-    // Wait for TG to be ready
-    const tgReady = await waitForTelegramParams(4);
+    // Helper to check if we are in a Telegram environment
+    const isTgEnv = () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const hasTgParams = searchParams.has("tgWebAppData") || searchParams.has("tgWebAppVersion") || searchParams.has("tgWebAppStartParam") || searchParams.has("userId");
+      const hasTgHash = window.location.hash.includes("tgWebAppData");
+      const isAppPath = window.location.pathname.startsWith("/app") || window.location.pathname === "/app";
+      const hasTgObject = !!(window as any).Telegram?.WebApp?.initData;
+      return hasTgParams || hasTgHash || isAppPath || hasTgObject;
+    };
+
+    // Wait for TG to be ready - if not in a Telegram env, skip/timed-out immediately (0.1s) to avoid blocking non-Telegram startup
+    const tgReady = await waitForTelegramParams(isTgEnv() ? 4 : 0.1);
     const currentTg = (window as any).Telegram?.WebApp;
     
     if (currentTg) {

@@ -313,6 +313,9 @@ Type your invite code below and send, or click Skip to continue.`;
         } else if (msg.text === "🎧 Contact Support") {
             console.log("User selected Support");
             await processSupport(botToken, chatId, user);
+        } else if (msg.text === "🎮 Game History") {
+            console.log("User selected Game History");
+            await processRPSGameHistory(botToken, chatId, user);
         } else if (msg.text === "📜 Withdrawal History") {
             console.log("User selected Withdrawal History");
             await processWithdrawalHistory(botToken, chatId, user);
@@ -2611,7 +2614,7 @@ function getMainMenuKeyboard(userId?: string | number) {
             [{ text: "📢 Announcements" }, { text: "⚙️ Settings" }],
             [{ text: "💰 Balance" }, { text: "👥 Refer & Earn" }],
             [{ text: "💸 Withdraw" }, { text: "📜 Withdrawal History" }],
-            [{ text: "🎧 Contact Support" }]
+            [{ text: "🎧 Contact Support" }, { text: "🎮 Game History" }]
         ],
         resize_keyboard: true
     };
@@ -4022,6 +4025,88 @@ function formatTime(dateStr: string): string {
     }
 }
 
+async function processRPSGameHistory(botToken: string, chatId: number, user: any, page: number = 1, messageIdToEdit?: number) {
+    const db = getDb();
+    try {
+        const q = query(collection(db, "rps_history"), where("userId", "==", String(user.id)));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+            const emptyMsg = `🎮 <b>Game History</b>\n\nYou haven't played any Rock Paper Scissors Battles yet. Play a game first!`;
+            if (messageIdToEdit) {
+                await editTelegramMessage(botToken, chatId, messageIdToEdit, emptyMsg, { parse_mode: "HTML" });
+            } else {
+                await sendTelegramMessage(botToken, chatId, emptyMsg, { parse_mode: "HTML" });
+            }
+            return;
+        }
+
+        const allGames: any[] = [];
+        snapshot.forEach(docSnap => {
+            allGames.push(docSnap.data());
+        });
+
+        // Sort by timestamp desc
+        allGames.sort((a, b) => {
+            const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+            const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+            return tB - tA;
+        });
+
+        // Keep only top 20
+        const top20Games = allGames.slice(0, 20);
+
+        const limit = 5;
+        const startIndex = (page - 1) * limit;
+        const pageGames = top20Games.slice(startIndex, startIndex + limit);
+        const hasNextPage = top20Games.length > startIndex + limit;
+
+        let message = `🎮 <b>Rock Paper Scissors History</b>\n`;
+        message += `<i>Showing matches ${startIndex + 1} - ${Math.min(startIndex + limit, top20Games.length)} of ${top20Games.length} (Max 20)</i>\n`;
+        message += `━━━━━━━━━━━━━━━━━━━━\n`;
+
+        for (const g of pageGames) {
+            const resultEmoji = g.result === "Win" ? "🎉" : (g.result === "Loss" ? "😔" : "🤝");
+            let dateStr = "N/A";
+            try {
+                if (g.timestamp) {
+                    const d = g.timestamp.seconds ? new Date(g.timestamp.seconds * 1000) : new Date(g.timestamp);
+                    dateStr = d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+                }
+            } catch (e) {}
+
+            message += `\n${resultEmoji} <b>Result:</b> ${g.result}\n` +
+                       `💰 <b>Reward:</b> ₹${g.reward}\n` +
+                       `🤖 <b>Your Choice:</b> ${g.userChoice} | <b>Opponent:</b> ${g.botChoice}\n` +
+                       `💼 <b>Balance After:</b> ₹${g.walletBalanceAfter || 0}\n` +
+                       `🆔 <b>ID:</b> <code>${g.gameId || "N/A"}</code>\n` +
+                       `🕒 <b>Time:</b> ${dateStr}\n` +
+                       `────────────────────\n`;
+        }
+
+        const inlineKeyboard: any = { inline_keyboard: [] };
+        const row = [];
+        if (page > 1) {
+            row.push({ text: "⬅️ Previous", callback_data: `rps_history_page_${page - 1}` });
+        }
+        if (hasNextPage) {
+            row.push({ text: "Next ➡️", callback_data: `rps_history_page_${page + 1}` });
+        }
+        if (row.length > 0) {
+            inlineKeyboard.inline_keyboard.push(row);
+        }
+
+        if (messageIdToEdit) {
+            await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "HTML", reply_markup: inlineKeyboard });
+        } else {
+            await sendTelegramMessage(botToken, chatId, message, { parse_mode: "HTML", reply_markup: inlineKeyboard });
+        }
+    } catch (err) {
+        console.error("Error in processRPSGameHistory:", err);
+        await sendTelegramMessage(botToken, chatId, "❌ Error retrieving Rock Paper Scissors history.");
+    }
+}
+
 async function processWithdrawalHistory(botToken: string, chatId: number, user: any, page: number = 1, messageIdToEdit?: number) {
     const db = getDb();
     const userDoc = await getDoc(doc(db, "users", String(user.id)));
@@ -5375,6 +5460,16 @@ Telegram:
             } catch (e) {}
             const page = parseInt(data.replace("history_page_", ""), 10);
             await processWithdrawalHistory(botToken, chatId, callbackQuery.from, page, callbackQuery.message.message_id);
+        } else if (data.startsWith("rps_history_page_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const page = parseInt(data.replace("rps_history_page_", ""), 10) || 1;
+            await processRPSGameHistory(botToken, chatId, callbackQuery.from, page, callbackQuery.message.message_id);
         } else if (data === "leaderboard_refresh") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {

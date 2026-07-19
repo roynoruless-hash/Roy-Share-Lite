@@ -15,8 +15,8 @@ import FAQ from "./components/FAQ";
 import SupportCommunity from "./components/SupportCommunity";
 import CTA from "./components/CTA";
 import Footer from "./components/Footer";
-import AdminLogin from "./components/AdminLogin";
-import MultiPageEngine from "./components/MultiPageEngine";
+import { TelegramAuthProvider } from "./context/TelegramAuthContext";
+import { TelegramAuthGuard } from "./components/TelegramAuthGuard";
 
 const AdvertiserPanel = lazy(() => import("./pages/AdvertiserPanel"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
@@ -51,18 +51,18 @@ const FastGlobalDeliveryPage = lazy(() => import("./pages/FastGlobalDeliveryPage
 const ReferralLandingPage = lazy(() => import("./pages/ReferralLandingPage"));
 const AdsbitvexTestPage = lazy(() => import("./pages/AdsbitvexTestPage"));
 
-import MoreMenu from "./components/MoreMenu";
+// Lazy-loaded components for optimal startup performance
+const AdminLogin = lazy(() => import("./components/AdminLogin"));
+const MultiPageEngine = lazy(() => import("./components/MultiPageEngine"));
+const MiniAppHome = lazy(() => import("./pages/MiniAppHome").then(m => ({ default: m.MiniAppHome })));
 
-import { TelegramAuthProvider } from "./context/TelegramAuthContext";
-import { TelegramAuthGuard } from "./components/TelegramAuthGuard";
-import { ProfileSetup } from "./components/ProfileSetup";
-import { MiniAppHome } from "./pages/MiniAppHome";
+import MoreMenu from "./components/MoreMenu";
 
 const ADMIN_AUTH_ENABLED = true;
 
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [loadingConfig] = useState(false);
   const [, setDummyState] = useState(false);
 
   useEffect(() => {
@@ -85,14 +85,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Prefetch system settings in background to warm up connection/cache without blocking render
     fetch(`${API_BASE}/api/system-settings`)
-      .then(res => res.json())
-      .then(() => {
-        setLoadingConfig(false);
-      })
       .catch(err => {
-        console.error(err);
-        setLoadingConfig(false);
+        console.error("Failed to prefetch system settings:", err);
       });
   }, []);
 
