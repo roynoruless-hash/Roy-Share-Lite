@@ -546,12 +546,21 @@ router.post("/submit-move", async (req, res) => {
       const p1Ready = isPlayer1 ? true : !!match.player1.ready;
       const p2Ready = isPlayer2 ? true : !!match.player2.ready;
 
-      t.update(matchRef, {
+      const updateData: any = {
         "player1.ready": p1Ready,
         "player1.choiceSubmitted": p1Submitted,
         "player2.ready": p2Ready,
         "player2.choiceSubmitted": p2Submitted
-      });
+      };
+
+      // If both players have submitted, initiate transition to revealing
+      if (p1Submitted && p2Submitted) {
+        updateData.status = "revealing";
+        updateData.revealingStartedAt = Date.now();
+        showRevealAnimation = true;
+      }
+
+      t.update(matchRef, updateData);
 
       // Increment global ads stats if completed
       if (adCompleted) {
@@ -559,15 +568,6 @@ router.post("/submit-move", async (req, res) => {
         t.set(statsRef, {
           adsCompleted: increment(1)
         }, { merge: true });
-      }
-
-      // If both players have submitted, initiate transition to revealing
-      if (p1Submitted && p2Submitted) {
-        t.update(matchRef, {
-          status: "revealing",
-          revealingStartedAt: Date.now()
-        });
-        showRevealAnimation = true;
       }
     });
 

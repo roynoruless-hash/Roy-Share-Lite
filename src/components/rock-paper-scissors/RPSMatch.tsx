@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Shield, Sparkles, Coins, HelpCircle, Loader2, RefreshCw, Trophy, AlertCircle, ArrowLeft } from "lucide-react";
 import { db } from "../../lib/firebase";
@@ -106,6 +106,9 @@ export default function RPSMatch({ matchId, onBack, userId }: RPSMatchProps) {
   const [localRevealCountdown, setLocalRevealCountdown] = useState(3);
   const [resolvedResult, setResolvedResult] = useState<any>(null);
 
+  // Guard against multiple timers running due to stale closure/component re-render
+  const countdownTriggeredRef = useRef(false);
+
   // 1. Calculate user's public code securely & synchronously at component initialization
   const myCode = useMemo(() => {
     try {
@@ -119,6 +122,19 @@ export default function RPSMatch({ matchId, onBack, userId }: RPSMatchProps) {
   function sha255SyncFallback(id: string): string {
     return sha256(id);
   }
+
+  // Self-healing: if the match is in the revealing state but remains stuck on client side for over 8 seconds, force resolve result calculation
+  useEffect(() => {
+    if (!match || match.status !== "revealing" || match.status === "completed") return;
+    
+    console.log(`[RPS MATCH] Setting backup safety recovery timer for match: ${matchId}`);
+    const backupTimer = setTimeout(() => {
+      console.warn(`[RPS MATCH] Backup timer triggered! Status still revealing after 8s. Forcing result calculation...`);
+      triggerBackendProcessResult();
+    }, 8000);
+
+    return () => clearTimeout(backupTimer);
+  }, [match?.status, matchId]);
 
   useEffect(() => {
     console.log(`[RPS MATCH] Initializing Battle Arena listener for match: ${matchId}, userId: ${userId}, myCode: ${myCode}`);
@@ -134,8 +150,17 @@ export default function RPSMatch({ matchId, onBack, userId }: RPSMatchProps) {
 
           console.log(`[RPS MATCH] Received update: status=${data.status}, p1=${data.player1?.publicCode}, p2=${data.player2?.publicCode}`);
 
+          if (data.status === "active") {
+            // Reset state if back to active (e.g. Draw Rematch)
+            countdownTriggeredRef.current = false;
+            setRevealingLocal(false);
+            setSubmitting(false);
+            setSelectedChoice(null);
+          }
+
           // Auto-resolve transition on client if both have submitted and status is revealing
-          if (data.status === "revealing" && !revealingLocal) {
+          if (data.status === "revealing" && !countdownTriggeredRef.current) {
+            countdownTriggeredRef.current = true;
             triggerLocalRevealCountdown();
           }
 
@@ -292,6 +317,7 @@ export default function RPSMatch({ matchId, onBack, userId }: RPSMatchProps) {
         throw new Error(data.message || "Failed to submit move.");
       }
       console.log("[RPS MATCH] Move successfully accepted by backend.");
+      setSubmitting(false);
     } catch (err: any) {
       console.error("[RPS MATCH] Submit Move Failed:", err);
       alert("Error: " + (err.message || "Failed to submit move. Please try again."));
