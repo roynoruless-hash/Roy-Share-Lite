@@ -129,6 +129,10 @@ export function getGiveawayStatus(giveaway: any): "LIVE" | "ENDED" {
   }
 
   if (!endVal) {
+    if (giveaway.status === "Live" || giveaway.status === "LIVE") {
+      console.log("[getGiveawayStatus] No endDate or endTime but board status is Live => LIVE");
+      return "LIVE";
+    }
     console.log("[getGiveawayStatus] No endDate or endTime found on giveaway => ENDED");
     return "ENDED";
   }
@@ -195,7 +199,8 @@ export function getGiveawayTimeLeft(giveaway: any) {
   const targetDate = parsedEnd;
 
   if (!targetDate) {
-    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
+    const isLiveManual = giveaway?.status === "Live" || giveaway?.status === "LIVE";
+    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: !isLiveManual, isIndefinite: true };
   }
 
   const diff = targetDate.getTime() - now.getTime();

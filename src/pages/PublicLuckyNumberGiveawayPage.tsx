@@ -52,11 +52,15 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
     const unsub = onSnapshot(colRef, (snap) => {
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       
-      // Attempt 1: Look for exact campaign by giveawayId
-      const targetCampaign = giveawayId ? list.find(g => g.id === giveawayId) : null;
+      // Attempt 1: Look for exact campaign by giveawayId, normalizing "campaign_" prefix if present
+      const targetCampaign = giveawayId ? list.find(g => {
+        const id1 = g.id.replace("campaign_", "").trim();
+        const id2 = giveawayId.replace("campaign_", "").trim();
+        return id1 === id2 || g.id === giveawayId;
+      }) : null;
       
       if (targetCampaign) {
-        console.log(`[Diagnostic] Found target campaign by ID: ${giveawayId}`);
+        console.log(`[Diagnostic] Found target campaign by ID: ${giveawayId} (Resolved ID: ${targetCampaign.id})`);
         setGiveaway(targetCampaign);
         setLoading(false);
       } else {
@@ -391,7 +395,7 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
       <main className="p-4 max-w-md mx-auto space-y-6 relative z-10">
 
         {/* Live Countdown Timer */}
-        {isLive && !timeLeft.isExpired && (
+        {isLive && !timeLeft.isExpired && !timeLeft.isIndefinite && (
           <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-3xl flex items-center justify-between shadow-xl">
             <div className="flex items-center gap-2 text-slate-400">
               <Clock className="w-5 h-5 text-emerald-400 animate-pulse" />
@@ -399,6 +403,7 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
             </div>
             
             <div className="flex items-center gap-1 font-mono text-sm font-black text-emerald-400">
+              {timeLeft.days > 0 && <span>{timeLeft.days}d </span>}
               <span>{String(timeLeft.hours).padStart(2, "0")}h</span>
               <span className="text-slate-600 animate-pulse">:</span>
               <span>{String(timeLeft.minutes).padStart(2, "0")}m</span>
