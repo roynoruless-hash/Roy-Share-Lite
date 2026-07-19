@@ -28,9 +28,11 @@ function encryptId(text: string) {
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString("hex") + ":" + encrypted.toString("hex");
 }
-function decryptId(text: string) {
+function decryptId(text: any) {
+  if (!text || typeof text !== "string") return "";
   try {
     const textParts = text.split(":");
+    if (textParts.length < 2) return text;
     const iv = Buffer.from(textParts.shift() as string, "hex");
     const encryptedText = Buffer.from(textParts.join(":"), "hex");
     const decipher = crypto.createDecipheriv("aes-256-cbc", Buffer.from("12345678901234567890123456789012"), iv);
@@ -174,6 +176,9 @@ router.post("/matchmake", async (req, res) => {
             createdAt: serverTimestamp()
           });
 
+          console.log(`[SERVER LOG] Match Created: matchId=${matchId}, player1=${myQueue.publicCode}, player2=${opponent.publicCode}`);
+          console.log(`[SERVER LOG] Chat Started: matchId=${matchId}`);
+
           t.update(myQueueRef, { status: "matched", matchId });
           t.update(doc(db, "sos_queue", opponent.id), { status: "matched", matchId });
         }
@@ -210,6 +215,9 @@ router.post("/matchmake", async (req, res) => {
             player2: { encTelegramId: encryptId(aiId), publicCode: "RS" + Math.floor(Math.random()*90000+10000), decision: null, isAI: true, personality: aiPersonality, submittedAt: null },
             createdAt: serverTimestamp()
           });
+
+          console.log(`[SERVER LOG] Match Created: matchId=${matchId}, player1=${myQueue.publicCode}, player2=RS_AI_OPPONENT`);
+          console.log(`[SERVER LOG] Chat Started: matchId=${matchId}`);
 
           t.update(myQueueRef, { status: "matched", matchId });
         }
@@ -274,7 +282,7 @@ router.post("/cancel-queue", async (req, res) => {
 
 router.post("/submit-decision", async (req, res) => {
   try {
-    const { telegramId, matchId, decision } = req.body;
+    const { telegramId, matchId, decision, adCompleted } = req.body;
     if (!telegramId || !matchId || !decision) return res.status(400).json({ success: false });
     if (decision !== "split" && decision !== "steal") return res.status(400).json({ success: false, message: "Invalid decision" });
 
@@ -306,6 +314,13 @@ router.post("/submit-decision", async (req, res) => {
       if (isPlayer1) decData.player1Decision = decision;
       if (isPlayer2) decData.player2Decision = decision;
 
+      const playerCode = isPlayer1 ? match.player1.publicCode : match.player2.publicCode;
+      
+      if (adCompleted) {
+        console.log(`[SERVER LOG] Reward Ad Completed: matchId=${matchId}, playerCode=${playerCode}`);
+      }
+      console.log(`[SERVER LOG] Player Decision Saved: matchId=${matchId}, playerCode=${playerCode}, decision=${decision}`);
+
       if (match.player2.isAI && !decData.player2Decision) {
         const p = match.player2.personality;
         let aiDecision = "split";
@@ -314,6 +329,7 @@ router.post("/submit-decision", async (req, res) => {
         else if (p === "random") aiDecision = Math.random() > 0.5 ? "split" : "steal";
         else if (p === "smart") aiDecision = Math.random() > 0.3 ? "split" : "steal";
         decData.player2Decision = aiDecision;
+        console.log(`[SERVER LOG] AI Decision Saved: matchId=${matchId}, aiCode=${match.player2.publicCode}, decision=${aiDecision}`);
       }
 
       t.set(decRef, decData, { merge: true });
@@ -327,6 +343,7 @@ router.post("/submit-decision", async (req, res) => {
 
       if (p1Decided && p2Decided) {
         updates.status = "revealing";
+        updates.revealingStartedAt = Date.now();
         resultCalculated = true;
       }
 
@@ -340,26 +357,34 @@ router.post("/submit-decision", async (req, res) => {
     res.status(400).json({ success: false, message: error.message });
   }
 });
+
 router.post("/process-result", async (req, res) => {
   try {
     const { matchId } = req.body;
     const db = getDb();
 
+    console.log(`[SERVER LOG] Resolve Started: matchId=${matchId}`);
+
+    let processed = false;
     await runTransaction(db, async (t) => {
       const matchRef = doc(db, "sos_matches", matchId);
       const matchSnap = await t.get(matchRef);
       if (!matchSnap.exists()) throw new Error("Match not found");
       const match = matchSnap.data();
 
-      if (match.status === "completed" || match.status === "cancelled") return;
+      if (match.status === "completed" || match.status === "cancelled" || match.resultProcessed) {
+        processed = true;
+        return;
+      }
       
       const p1 = match.player1;
       const p2 = match.player2;
 
       const now = Date.now();
       const isTimeout = match.decisionEndTime && now > (match.decisionEndTime + 5000);
+      const isRevealingTimeout = match.revealingStartedAt && now > (match.revealingStartedAt + 5000);
 
-      if (match.status !== "revealing" && !isTimeout) {
+      if (match.status !== "revealing" && !isTimeout && !isRevealingTimeout) {
         throw new Error("Match not ready to process");
       }
 
@@ -367,13 +392,36 @@ router.post("/process-result", async (req, res) => {
       const decSnap = await t.get(decRef);
       const decData = decSnap.exists() ? decSnap.data() : { player1Decision: null, player2Decision: null };
 
-      if (isTimeout && match.status !== "revealing") {
-          if (!decData.player1Decision) decData.player1Decision = "split";
-          if (!decData.player2Decision) decData.player2Decision = "split";
+      // Ensure decisions are never missing or blocked
+      let p1Decision = decData.player1Decision;
+      let p2Decision = decData.player2Decision;
+
+      if (!p1Decision) {
+        p1Decision = "split";
+        console.log(`[SERVER LOG] Player 1 decision missing, defaulted to split for match ${matchId}`);
       }
 
-      p1.decision = decData.player1Decision;
-      p2.decision = decData.player2Decision;
+      if (!p2Decision) {
+        if (p2.isAI) {
+          const p = p2.personality;
+          if (p === "greedy") p2Decision = "steal";
+          else if (p === "honest") p2Decision = "split";
+          else if (p === "random") p2Decision = Math.random() > 0.5 ? "split" : "steal";
+          else if (p === "smart") p2Decision = Math.random() > 0.3 ? "split" : "steal";
+          else p2Decision = "split";
+          console.log(`[SERVER LOG] AI Decision Saved: matchId=${matchId}, aiCode=${p2.publicCode}, decision=${p2Decision}`);
+        } else {
+          p2Decision = "split";
+          console.log(`[SERVER LOG] Player 2 decision missing, defaulted to split for match ${matchId}`);
+        }
+      }
+
+      decData.player1Decision = p1Decision;
+      decData.player2Decision = p2Decision;
+      t.set(decRef, decData, { merge: true });
+
+      p1.decision = p1Decision;
+      p2.decision = p2Decision;
 
       const prizePool = match.prizePool || 20;
       
@@ -389,37 +437,50 @@ router.post("/process-result", async (req, res) => {
         p2Win = prizePool;
       }
 
-      t.update(matchRef, { status: "completed", p1Win, p2Win, player1: p1, player2: p2 });
+      t.update(matchRef, { 
+        status: "completed", 
+        p1Win, 
+        p2Win, 
+        player1: p1, 
+        player2: p2,
+        resultProcessed: true,
+        resolvedAt: now
+      });
+      console.log(`[SERVER LOG] Firestore Updated: matchId=${matchId}, status=completed`);
 
       if (p1Win > 0) {
-        const u1Ref = doc(db, "users", decryptId(p1.encTelegramId || p1.telegramId));
+        const u1Id = decryptId(p1.encTelegramId || p1.telegramId);
+        const u1Ref = doc(db, "users", u1Id);
         const u1Snap = await t.get(u1Ref);
         if (u1Snap.exists()) {
           t.update(u1Ref, { balance: (u1Snap.data().balance || 0) + p1Win });
           t.set(doc(collection(db, "transactions")), {
-            userId: decryptId(p1.encTelegramId || p1.telegramId),
+            userId: u1Id,
             amount: p1Win,
             type: "credit",
             description: "Split or Steal Win",
             timestamp: serverTimestamp(),
             status: "completed"
           });
+          console.log(`[SERVER LOG] Wallet Credited: matchId=${matchId}, userId=${u1Id}, amount=${p1Win}`);
         }
       }
 
       if (p2Win > 0 && !p2.isAI) {
-        const u2Ref = doc(db, "users", decryptId(p2.encTelegramId || p2.telegramId));
+        const u2Id = decryptId(p2.encTelegramId || p2.telegramId);
+        const u2Ref = doc(db, "users", u2Id);
         const u2Snap = await t.get(u2Ref);
         if (u2Snap.exists()) {
           t.update(u2Ref, { balance: (u2Snap.data().balance || 0) + p2Win });
           t.set(doc(collection(db, "transactions")), {
-            userId: decryptId(p2.encTelegramId || p2.telegramId),
+            userId: u2Id,
             amount: p2Win,
             type: "credit",
             description: "Split or Steal Win",
             timestamp: serverTimestamp(),
             status: "completed"
           });
+          console.log(`[SERVER LOG] Wallet Credited: matchId=${matchId}, userId=${u2Id}, amount=${p2Win}`);
         }
       }
       
@@ -428,11 +489,122 @@ router.post("/process-result", async (req, res) => {
       if (!p2.isAI) {
         t.delete(doc(db, "sos_queue", decryptId(p2.encTelegramId || p2.telegramId)));
       }
+      processed = true;
     });
 
-    res.json({ success: true });
+    console.log(`[SERVER LOG] Reveal Completed: matchId=${matchId}`);
+    console.log(`[SERVER LOG] Match Closed: matchId=${matchId}`);
+
+    res.json({ success: true, processed });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Proactive Recovery Endpoint
+router.post("/recover", async (req, res) => {
+  try {
+    const { matchId } = req.body;
+    if (!matchId) return res.status(400).json({ success: false, message: "Missing matchId" });
+
+    const db = getDb();
+    const matchSnap = await getDoc(doc(db, "sos_matches", matchId));
+    if (!matchSnap.exists()) return res.json({ success: false, message: "Match not found" });
+
+    const match = matchSnap.data();
+    if (match.status === "completed" || match.status === "cancelled") {
+      return res.json({ success: true, status: match.status });
+    }
+
+    const now = Date.now();
+    const isRevealing = match.status === "revealing";
+    const revealingElapsed = match.revealingStartedAt ? (now - match.revealingStartedAt) : 0;
+
+    const isTimeout = match.decisionEndTime && now > (match.decisionEndTime + 5000);
+    const isRevealingTimeout = isRevealing && (revealingElapsed > 5000 || !match.revealingStartedAt);
+
+    if (isRevealingTimeout || isTimeout) {
+      console.log(`[SERVER LOG] Recovery triggered for stuck match ${matchId}. Status: ${match.status}. Force completing...`);
+      await fetch(`http://127.0.0.1:3000/api/split-or-steal/process-result`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchId })
+      }).catch(console.error);
+
+      return res.json({ success: true, status: "completed", recovered: true });
+    }
+
+    res.json({ success: true, status: match.status });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Ad Refund / Cancel Endpoint
+router.post("/refund-match", async (req, res) => {
+  try {
+    const { telegramId, matchId } = req.body;
+    if (!telegramId || !matchId) return res.status(400).json({ success: false, message: "Missing params" });
+
+    const db = getDb();
+    let refunded = false;
+
+    await runTransaction(db, async (t) => {
+      const matchRef = doc(db, "sos_matches", matchId);
+      const matchSnap = await t.get(matchRef);
+      if (!matchSnap.exists()) return;
+
+      const match = matchSnap.data();
+      if (match.status === "completed" || match.status === "cancelled") return;
+
+      const isP1 = decryptId(match.player1.encTelegramId || match.player1.telegramId) === String(telegramId);
+      const isP2 = decryptId(match.player2.encTelegramId || match.player2.telegramId) === String(telegramId);
+
+      if (!isP1 && !isP2) return;
+
+      t.update(matchRef, { status: "cancelled", cancelledReason: "Ad Playback Failure / Refund Policy" });
+
+      const entryFee = match.entryFee || 5;
+
+      const refundPlayer = async (p: any) => {
+        if (p.isAI) return;
+        const pId = decryptId(p.encTelegramId || p.telegramId);
+        const uRef = doc(db, "users", pId);
+        const uSnap = await t.get(uRef);
+        if (uSnap.exists()) {
+          t.update(uRef, {
+            balance: (uSnap.data().balance || 0) + entryFee
+          });
+          t.set(doc(collection(db, "transactions")), {
+            userId: pId,
+            amount: entryFee,
+            type: "credit",
+            description: "Split or Steal Refund (Ad Failure)",
+            timestamp: serverTimestamp(),
+            status: "completed"
+          });
+          console.log(`[SERVER LOG] Wallet Credited (Refund): matchId=${matchId}, userId=${pId}, amount=${entryFee}`);
+        }
+      };
+
+      await refundPlayer(match.player1);
+      await refundPlayer(match.player2);
+
+      t.delete(doc(db, "sos_queue", decryptId(match.player1.encTelegramId || match.player1.telegramId)));
+      if (!match.player2.isAI) {
+        t.delete(doc(db, "sos_queue", decryptId(match.player2.encTelegramId || match.player2.telegramId)));
+      }
+
+      refunded = true;
+    });
+
+    if (refunded) {
+      console.log(`[SERVER LOG] Match Closed (Refund): matchId=${matchId}`);
+    }
+
+    res.json({ success: true, refunded });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -695,8 +867,14 @@ router.post("/cron/cleanup", async (req, res) => {
     for (const docSnap of matchSnap.docs) {
       const match = docSnap.data();
       if (match.status !== "completed" && match.status !== "cancelled") {
+        const isRevealing = match.status === "revealing";
+        const revealingStarted = match.revealingStartedAt || 0;
         const decisionEnd = match.decisionEndTime || 0;
-        if (decisionEnd > 0 && now > decisionEnd + 15000) {
+
+        const isRevealingTimeout = isRevealing && (revealingStarted > 0 && now > revealingStarted + 5000);
+        const isDecisionTimeout = decisionEnd > 0 && now > decisionEnd + 15000;
+
+        if (isRevealingTimeout || isDecisionTimeout) {
           // Force process
           await fetch(`http://127.0.0.1:3000/api/split-or-steal/process-result`, {
             method: "POST",

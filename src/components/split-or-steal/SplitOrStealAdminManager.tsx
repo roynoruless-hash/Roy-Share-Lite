@@ -14,7 +14,8 @@ export default function SplitOrStealAdminManager() {
     entryFee: 5,
     prizePool: 20,
     platformSponsoredAmount: 10,
-    refundRules: "both"
+    refundRules: "both",
+    adFailurePolicy: "fallback"
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -99,6 +100,18 @@ export default function SplitOrStealAdminManager() {
             <div>
               <label className="text-xs font-bold text-slate-400">Discussion Timer (Seconds)</label>
               <input type="number" value={settings.discussionTimer} onChange={e => setSettings({...settings, discussionTimer: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 mt-1 outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-400">Ad Failure / Timeout Policy</label>
+              <select 
+                value={settings.adFailurePolicy || "fallback"} 
+                onChange={e => setSettings({...settings, adFailurePolicy: e.target.value})} 
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 mt-1 outline-none focus:border-blue-500 text-white"
+              >
+                <option value="fallback">Bypass & Run Fallback Ad</option>
+                <option value="cancel">Cancel Match & Refund Fee</option>
+                <option value="retry">Require Completion / Retry</option>
+              </select>
             </div>
           </div>
         </div>

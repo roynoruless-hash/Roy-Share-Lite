@@ -28,12 +28,37 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
   const [timeLeft, setTimeLeft] = useState(0);
-  const [adStatus, setAdStatus] = useState<"none" | "loading" | "playing" | "fallback" | "failed">("none");
+  const [adStatus, setAdStatus] = useState<"none" | "loading" | "playing" | "fallback" | "failed" | "error">("none");
   const [adMessage, setAdMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [settings, setSettings] = useState<any>(null);
+  const [pendingDecision, setPendingDecision] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load settings for adFailurePolicy
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "settings", "sos"), (snap) => {
+      if (snap.exists()) {
+        setSettings(snap.data());
+      } else {
+        setSettings({ enabled: true, entryFee: 5, prizePool: 20, adFailurePolicy: "fallback" });
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Proactive recovery on mount
+  useEffect(() => {
+    if (matchId) {
+      fetch(`${API_BASE}/api/split-or-steal/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchId })
+      }).catch(console.error);
+    }
+  }, [matchId]);
 
   // Active match state listener with proper error handling
   useEffect(() => {
@@ -148,6 +173,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
 
   // Robust Advertisement flow with loading, checking config, timeout, fallback, and retry capability
   const showAdAndSubmit = async (decision: string) => {
+    setPendingDecision(decision);
     setAdStatus("loading");
     setAdMessage("Securing video advertising feed...");
 
@@ -157,7 +183,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     const finishAndSubmit = () => {
       if (timeoutId) clearTimeout(timeoutId);
       setAdStatus("none");
-      submitDecision(decision);
+      submitDecision(decision, true);
     };
 
     const runFallbackAd = (reason: string) => {
@@ -169,29 +195,60 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
       }, 3000);
     };
 
+    const handleAdFailurePolicy = (reason: string) => {
+      console.log(`Ad playback failed/timed out: ${reason}`);
+      const policy = settings?.adFailurePolicy || "fallback";
+
+      if (policy === "cancel") {
+        setAdStatus("loading");
+        setAdMessage("Ad failure. Cancelling match and refunding entry fee...");
+        fetch(`${API_BASE}/api/split-or-steal/refund-match`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ telegramId: user?.telegramId, matchId })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setAdStatus("none");
+          } else {
+            runFallbackAd(reason);
+          }
+        })
+        .catch(() => {
+          runFallbackAd(reason);
+        });
+      } else if (policy === "retry") {
+        setAdStatus("error");
+        setAdMessage(`${reason}. The administrator requires ad completion to secure the prize pool.`);
+      } else {
+        runFallbackAd(reason);
+      }
+    };
+
     try {
       const configRes = await fetch("/api/adsbitvex-config").catch(() => null);
       if (!configRes || !configRes.ok) {
-        runFallbackAd("Ad gateway offline");
+        handleAdFailurePolicy("Ad gateway offline");
         return;
       }
 
       const configData = await configRes.json().catch(() => null);
       if (!configData || !configData.masterEnabled) {
-        runFallbackAd("Ad service bypassed by administrator");
+        handleAdFailurePolicy("Ad service bypassed by administrator");
         return;
       }
 
       const showAdFn = (window as any).showadsbitvex;
       if (typeof showAdFn !== "function") {
-        runFallbackAd("Ad blocker detected or SDK not loaded");
+        handleAdFailurePolicy("Ad blocker detected or SDK not loaded");
         return;
       }
 
       timeoutId = setTimeout(() => {
         if (!adTriggered) {
           console.warn("Ad load timed out. Running backup countdown.");
-          runFallbackAd("Ad stream timed out");
+          handleAdFailurePolicy("Ad stream timed out");
         }
       }, 6000);
 
@@ -204,17 +261,17 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
 
     } catch (err: any) {
       console.error("Ad loading/playback failed:", err);
-      runFallbackAd("Ad network failed");
+      handleAdFailurePolicy("Ad network failed");
     }
   };
 
-  const submitDecision = async (decision: string) => {
+  const submitDecision = async (decision: string, adCompleted?: boolean) => {
     setSubmitting(true);
     try {
       await fetch(`${API_BASE}/api/split-or-steal/submit-decision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ telegramId: user?.telegramId, matchId, decision })
+        body: JSON.stringify({ telegramId: user?.telegramId, matchId, decision, adCompleted })
       });
     } catch (e) {
       console.error(e);
@@ -294,13 +351,61 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] text-white p-6">
         <div className="text-center max-w-sm">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-          <h2 className="text-2xl font-black tracking-tight">Securing Handshake</h2>
-          <p className="text-slate-400 mt-2 text-sm">{adMessage}</p>
-          {adStatus === "fallback" && (
-            <div className="mt-4 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl animate-pulse">
-              Ad server bypass mode enabled to protect match.
+          {adStatus === "error" ? (
+            <div className="space-y-6">
+              <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 rounded-full flex items-center justify-center mx-auto mb-4 text-rose-500 text-3xl font-bold">⚠️</div>
+              <h2 className="text-2xl font-black tracking-tight text-rose-500">Handshake Failed</h2>
+              <p className="text-slate-400 text-sm leading-relaxed">{adMessage}</p>
+              <div className="flex flex-col gap-3 pt-2">
+                <button 
+                  onClick={() => {
+                    setAdStatus("none");
+                    showAdAndSubmit(pendingDecision || "split");
+                  }}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition"
+                >
+                  Retry Ad Load
+                </button>
+                <button 
+                  onClick={() => {
+                    setAdStatus("loading");
+                    setAdMessage("Cancelling match and refunding entry fee...");
+                    fetch(`${API_BASE}/api/split-or-steal/refund-match`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ telegramId: user?.telegramId, matchId })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                      if (data.success) {
+                        setAdStatus("none");
+                      } else {
+                        setAdStatus("error");
+                        setAdMessage("Failed to refund. Please try again.");
+                      }
+                    })
+                    .catch(() => {
+                      setAdStatus("error");
+                      setAdMessage("Network error during refund.");
+                    });
+                  }}
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-sm transition"
+                >
+                  Cancel & Refund Match
+                </button>
+              </div>
             </div>
+          ) : (
+            <>
+              <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+              <h2 className="text-2xl font-black tracking-tight">Securing Handshake</h2>
+              <p className="text-slate-400 mt-2 text-sm">{adMessage}</p>
+              {adStatus === "fallback" && (
+                <div className="mt-4 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl animate-pulse">
+                  Ad server bypass mode enabled to protect match.
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -365,6 +470,22 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
           </div>
 
           <button onClick={onBack} className="mt-12 px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition">
+            Back to Dashboard
+          </button>
+        </div>
+      )}
+
+      {/* MATCH CANCELLED */}
+      {match.status === "cancelled" && (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
+          <div className="w-20 h-20 bg-rose-500/10 border border-rose-500/30 rounded-full flex items-center justify-center mb-6 text-rose-500 text-4xl">
+            🚫
+          </div>
+          <h1 className="text-4xl font-black mb-4 text-rose-500">Match Cancelled</h1>
+          <p className="text-slate-400 mb-12 max-w-sm leading-relaxed">
+            {match.cancelledReason || "This match was cancelled due to connectivity or ad playback failure. Your entry fee has been fully refunded to your balance."}
+          </p>
+          <button onClick={onBack} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition">
             Back to Dashboard
           </button>
         </div>
