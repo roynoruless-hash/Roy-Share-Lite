@@ -121,7 +121,11 @@ router.post("/join", async (req, res) => {
 
     res.json({ success: true, newBalance, publicCode: getPublicCode(telegramId) });
   } catch (error: any) {
-    res.status(400).json({ success: false, message: error.message });
+    console.error("[SERVER LOG] Transaction Failed in /join:", error);
+    const friendlyMessages = ["You are already in a queue or match.", "User not found", "Insufficient Balance", "Game is currently disabled."];
+    const isFriendly = friendlyMessages.includes(error.message);
+    const message = isFriendly ? error.message : "Failed to join queue. Please try again.";
+    res.status(400).json({ success: false, message });
   }
 });
 
@@ -229,7 +233,8 @@ router.post("/matchmake", async (req, res) => {
 
     return res.json({ success: true, status: "searching" });
   } catch (error: any) {
-    res.status(400).json({ success: false, message: error.message });
+    console.error("[SERVER LOG] Transaction Failed in /matchmake:", error);
+    res.status(400).json({ success: false, message: "An error occurred during matchmaking. Please try again." });
   }
 });
 
@@ -276,7 +281,8 @@ router.post("/cancel-queue", async (req, res) => {
 
     res.json({ success: true, refunded });
   } catch (error: any) {
-    res.status(400).json({ success: false, message: error.message });
+    console.error("[SERVER LOG] Transaction Failed in /cancel-queue:", error);
+    res.status(400).json({ success: false, message: "Failed to cancel queue. Please try again." });
   }
 });
 
@@ -329,9 +335,6 @@ async function resolveMatchInternal(matchId: string): Promise<{ success: boolean
         return;
       }
 
-      // Transition to RESOLVING immediately inside transaction to block any concurrent execution
-      t.update(matchRef, { status: "RESOLVING" });
-
       const p1 = match.player1;
       const p2 = match.player2;
       const now = Date.now();
@@ -366,7 +369,6 @@ async function resolveMatchInternal(matchId: string): Promise<{ success: boolean
 
       decData.player1Decision = p1Decision;
       decData.player2Decision = p2Decision;
-      t.set(decRef, decData, { merge: true });
 
       p1.decision = p1Decision;
       p2.decision = p2Decision;
@@ -384,6 +386,31 @@ async function resolveMatchInternal(matchId: string): Promise<{ success: boolean
         p2Win = prizePool;
       }
 
+      // Perform user account reads before any write actions
+      let u1Snap = null;
+      let u1Id = null;
+      let u1Ref = null;
+      if (p1Win > 0) {
+        u1Id = decryptId(p1.encTelegramId || p1.telegramId);
+        u1Ref = doc(db, "users", u1Id);
+        u1Snap = await t.get(u1Ref);
+      }
+
+      let u2Snap = null;
+      let u2Id = null;
+      let u2Ref = null;
+      if (p2Win > 0 && !p2.isAI) {
+        u2Id = decryptId(p2.encTelegramId || p2.telegramId);
+        u2Ref = doc(db, "users", u2Id);
+        u2Snap = await t.get(u2Ref);
+      }
+
+      // --- ALL READS ARE COMPLETE, NOW EXECUTE ALL WRITES ---
+
+      // 1. Save Decisions
+      t.set(decRef, decData, { merge: true });
+
+      // 2. Mark Match Completed
       t.update(matchRef, { 
         status: "COMPLETED", 
         p1Win, 
@@ -395,43 +422,34 @@ async function resolveMatchInternal(matchId: string): Promise<{ success: boolean
       });
       console.log(`[SERVER LOG] Firestore Updated: matchId=${matchId}, status=COMPLETED`);
 
-      if (p1Win > 0) {
-        const u1Id = decryptId(p1.encTelegramId || p1.telegramId);
-        const u1Ref = doc(db, "users", u1Id);
-        const u1Snap = await t.get(u1Ref);
-        if (u1Snap.exists()) {
-          t.update(u1Ref, { balance: (u1Snap.data().balance || 0) + p1Win });
-          t.set(doc(collection(db, "transactions")), {
-            userId: u1Id,
-            amount: p1Win,
-            type: "credit",
-            description: "Split or Steal Win",
-            timestamp: serverTimestamp(),
-            status: "completed"
-          });
-          console.log(`[SERVER LOG] Wallet Credited: matchId=${matchId}, userId=${u1Id}, amount=${p1Win}`);
-        }
+      // 3. Wallet Credits
+      if (p1Win > 0 && u1Snap && u1Snap.exists() && u1Ref && u1Id) {
+        t.update(u1Ref, { balance: (u1Snap.data().balance || 0) + p1Win });
+        t.set(doc(collection(db, "transactions")), {
+          userId: u1Id,
+          amount: p1Win,
+          type: "credit",
+          description: "Split or Steal Win",
+          timestamp: serverTimestamp(),
+          status: "completed"
+        });
+        console.log(`[SERVER LOG] Wallet Credited: matchId=${matchId}, userId=${u1Id}, amount=${p1Win}`);
       }
 
-      if (p2Win > 0 && !p2.isAI) {
-        const u2Id = decryptId(p2.encTelegramId || p2.telegramId);
-        const u2Ref = doc(db, "users", u2Id);
-        const u2Snap = await t.get(u2Ref);
-        if (u2Snap.exists()) {
-          t.update(u2Ref, { balance: (u2Snap.data().balance || 0) + p2Win });
-          t.set(doc(collection(db, "transactions")), {
-            userId: u2Id,
-            amount: p2Win,
-            type: "credit",
-            description: "Split or Steal Win",
-            timestamp: serverTimestamp(),
-            status: "completed"
-          });
-          console.log(`[SERVER LOG] Wallet Credited: matchId=${matchId}, userId=${u2Id}, amount=${p2Win}`);
-        }
+      if (p2Win > 0 && u2Snap && u2Snap.exists() && u2Ref && u2Id) {
+        t.update(u2Ref, { balance: (u2Snap.data().balance || 0) + p2Win });
+        t.set(doc(collection(db, "transactions")), {
+          userId: u2Id,
+          amount: p2Win,
+          type: "credit",
+          description: "Split or Steal Win",
+          timestamp: serverTimestamp(),
+          status: "completed"
+        });
+        console.log(`[SERVER LOG] Wallet Credited: matchId=${matchId}, userId=${u2Id}, amount=${p2Win}`);
       }
 
-      // Cleanup queue
+      // 4. Cleanup queue
       t.delete(doc(db, "sos_queue", decryptId(p1.encTelegramId || p1.telegramId)));
       if (!p2.isAI) {
         t.delete(doc(db, "sos_queue", decryptId(p2.encTelegramId || p2.telegramId)));
@@ -445,7 +463,7 @@ async function resolveMatchInternal(matchId: string): Promise<{ success: boolean
     console.log(`[SERVER LOG] Match Completed: matchId=${matchId}`);
     return { success: true, processed };
   } catch (error: any) {
-    console.error(`[SERVER LOG] Error in resolveMatchInternal for ${matchId}:`, error);
+    console.error(`[SERVER LOG] Transaction Failed in resolveMatchInternal for ${matchId}:`, error);
     return { success: false, processed: false, message: error.message };
   }
 }
@@ -538,7 +556,11 @@ router.post("/submit-decision", async (req, res) => {
 
     res.json({ success: true, resultCalculated });
   } catch (error: any) {
-    res.status(400).json({ success: false, message: error.message });
+    console.error("[SERVER LOG] Transaction Failed in /submit-decision:", error);
+    const friendlyMessages = ["Match not found", "Not part of match", "Invalid decision"];
+    const isFriendly = friendlyMessages.includes(error.message);
+    const message = isFriendly ? error.message : "Failed to submit decision. Please try again.";
+    res.status(400).json({ success: false, message });
   }
 });
 
@@ -550,7 +572,7 @@ router.post("/process-result", async (req, res) => {
   if (result.success) {
     res.json({ success: true, processed: result.processed });
   } else {
-    res.status(400).json({ success: false, message: result.message });
+    res.status(400).json({ success: false, message: "Failed to resolve match results. Please try again." });
   }
 });
 
@@ -635,33 +657,60 @@ router.post("/refund-match", async (req, res) => {
 
       if (!isP1 && !isP2) return;
 
-      t.update(matchRef, { status: "cancelled", cancelledReason: "Ad Playback Failure / Refund Policy" });
-
       const entryFee = match.entryFee || 5;
 
-      const refundPlayer = async (p: any) => {
-        if (p.isAI) return;
-        const pId = decryptId(p.encTelegramId || p.telegramId);
-        const uRef = doc(db, "users", pId);
-        const uSnap = await t.get(uRef);
-        if (uSnap.exists()) {
-          t.update(uRef, {
-            balance: (uSnap.data().balance || 0) + entryFee
-          });
-          t.set(doc(collection(db, "transactions")), {
-            userId: pId,
-            amount: entryFee,
-            type: "credit",
-            description: "Split or Steal Refund (Ad Failure)",
-            timestamp: serverTimestamp(),
-            status: "completed"
-          });
-          console.log(`[SERVER LOG] Wallet Credited (Refund): matchId=${matchId}, userId=${pId}, amount=${entryFee}`);
-        }
-      };
+      // Perform all reads first!
+      let u1Snap = null;
+      let u1Id = null;
+      let u1Ref = null;
+      if (!match.player1.isAI) {
+        u1Id = decryptId(match.player1.encTelegramId || match.player1.telegramId);
+        u1Ref = doc(db, "users", u1Id);
+        u1Snap = await t.get(u1Ref);
+      }
 
-      await refundPlayer(match.player1);
-      await refundPlayer(match.player2);
+      let u2Snap = null;
+      let u2Id = null;
+      let u2Ref = null;
+      if (!match.player2.isAI) {
+        u2Id = decryptId(match.player2.encTelegramId || match.player2.telegramId);
+        u2Ref = doc(db, "users", u2Id);
+        u2Snap = await t.get(u2Ref);
+      }
+
+      // --- ALL READS ARE NOW COMPLETE, EXECUTE ALL WRITES ---
+
+      t.update(matchRef, { status: "cancelled", cancelledReason: "Ad Playback Failure / Refund Policy" });
+
+      if (u1Snap && u1Snap.exists() && u1Ref && u1Id) {
+        t.update(u1Ref, {
+          balance: (u1Snap.data().balance || 0) + entryFee
+        });
+        t.set(doc(collection(db, "transactions")), {
+          userId: u1Id,
+          amount: entryFee,
+          type: "credit",
+          description: "Split or Steal Refund (Ad Failure)",
+          timestamp: serverTimestamp(),
+          status: "completed"
+        });
+        console.log(`[SERVER LOG] Wallet Credited (Refund): matchId=${matchId}, userId=${u1Id}, amount=${entryFee}`);
+      }
+
+      if (u2Snap && u2Snap.exists() && u2Ref && u2Id) {
+        t.update(u2Ref, {
+          balance: (u2Snap.data().balance || 0) + entryFee
+        });
+        t.set(doc(collection(db, "transactions")), {
+          userId: u2Id,
+          amount: entryFee,
+          type: "credit",
+          description: "Split or Steal Refund (Ad Failure)",
+          timestamp: serverTimestamp(),
+          status: "completed"
+        });
+        console.log(`[SERVER LOG] Wallet Credited (Refund): matchId=${matchId}, userId=${u2Id}, amount=${entryFee}`);
+      }
 
       t.delete(doc(db, "sos_queue", decryptId(match.player1.encTelegramId || match.player1.telegramId)));
       if (!match.player2.isAI) {
@@ -677,7 +726,8 @@ router.post("/refund-match", async (req, res) => {
 
     res.json({ success: true, refunded });
   } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("[SERVER LOG] Transaction Failed in /refund-match:", error);
+    res.status(500).json({ success: false, message: "An error occurred while refunding the match. Please try again." });
   }
 });
 
@@ -958,7 +1008,8 @@ router.post("/cron/cleanup", async (req, res) => {
 
     res.json({ success: true, cleanedQueues, cleanedMatches });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error("[SERVER LOG] Error in /cron/cleanup:", err);
+    res.status(500).json({ success: false, message: "An error occurred during cleanup processing." });
   }
 });
 
