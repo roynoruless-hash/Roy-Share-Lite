@@ -25,15 +25,23 @@ export default function PublicLuckyDrawPage({ giveawayId, onBack }: { giveawayId
   // 1. Real-time Subscription to Lucky Draw Campaign
   useEffect(() => {
     if (!giveawayId) return;
-    console.log("[LuckyDraw] Subscribing to campaign document:", giveawayId);
+    
+    // Diagnostic logging per requirements
+    console.log(`[Diagnostic] Received startapp parameter / parsed giveawayId: ${giveawayId}`);
+    console.log(`[Diagnostic] Parsed campaign ID: ${giveawayId}`);
+    console.log(`[Diagnostic] Collection being searched: lucky_draws`);
+
     const docRef = doc(db, "lucky_draws", giveawayId);
     const unsub = onSnapshot(docRef, (snap) => {
       setLoading(false);
+      console.log(`[Diagnostic] Database lookup result exists: ${snap.exists()}`);
       if (snap.exists()) {
         const data = snap.data();
+        console.log(`[Diagnostic] Campaign found: ${giveawayId}`);
         console.log("[LuckyDraw] Campaign data updated:", data);
         setGiveaway(data);
       } else {
+        console.log(`[Diagnostic] Campaign not found: ${giveawayId}`);
         console.error("[LuckyDraw] Campaign not found inside Firestore:", giveawayId);
         setError("This Lucky Draw campaign was not found or has been deleted.");
       }

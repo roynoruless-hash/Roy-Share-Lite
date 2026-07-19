@@ -80,6 +80,7 @@ import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
 import TelegramBroadcastCenter from "../components/TelegramBroadcastCenter";
 import LuckyNumberGiveawayAdminManager from "../components/LuckyNumberGiveawayAdminManager";
+import SplitOrStealAdminManager from "../components/split-or-steal/SplitOrStealAdminManager";
 import { LuckySpinAdminView } from "../components/LuckySpinAdminView";
 import { FraudInvestigationCenter } from "../components/FraudInvestigationCenter";
 import buildInfo from '../build-info.json';
@@ -5164,6 +5165,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🍀 Lucky Number Giveaway",
               "🎁 Lucky Draw Winner",
               "🎡 Lucky Spin Live Event",
+              "⚖️ Split or Steal",
             ].map((btn) => (
               <button
                 key={btn}
@@ -13080,8 +13082,8 @@ Environment: ${isProduction ? "Production" : "Development"}`;
             <LuckySpinAdminView />
           )}
 
-          {activeTab === "🎡 Lucky Spin Live Event" && (
-            <LuckySpinAdminView />
+          {activeTab === "⚖️ Split or Steal" && (
+            <SplitOrStealAdminManager />
           )}
 
           {activeTab === "💰 AdsBitvex Monetization" && (

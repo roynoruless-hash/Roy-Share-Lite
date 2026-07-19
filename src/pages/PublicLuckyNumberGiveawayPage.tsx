@@ -42,10 +42,19 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
   useEffect(() => {
     if (!giveawayId) return;
 
+    // Diagnostic logging per requirements
+    console.log(`[Diagnostic] Received startapp parameter / parsed giveawayId: ${giveawayId}`);
+    console.log(`[Diagnostic] Parsed campaign ID: ${giveawayId}`);
+    console.log(`[Diagnostic] Collection being searched: lucky_number_campaigns`);
+
     const docRef = doc(db, "lucky_number_campaigns", giveawayId);
     const unsub = onSnapshot(docRef, (snap) => {
+      console.log(`[Diagnostic] Database lookup result exists: ${snap.exists()}`);
       if (snap.exists()) {
+        console.log(`[Diagnostic] Campaign found: ${giveawayId}`);
         setGiveaway({ id: snap.id, ...snap.data() });
+      } else {
+        console.log(`[Diagnostic] Campaign not found: ${giveawayId}`);
       }
       setLoading(false);
     }, (err) => {

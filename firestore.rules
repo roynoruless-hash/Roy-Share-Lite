@@ -22,6 +22,9 @@ service cloud.firestore {
     match /upi_giveaway_entries/{entryId} {
       allow read, write: if true;
     }
+    match /sos_decisions/{document=**} {
+      allow read, write: if false;
+    }
     match /{document=**} {
       allow read, write: if true;
     }

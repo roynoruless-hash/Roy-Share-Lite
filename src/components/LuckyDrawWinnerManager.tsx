@@ -1938,7 +1938,7 @@ export default function LuckyDrawWinnerManager() {
 
               {/* Direct TMA URL Generator */}
               {(() => {
-                const directLink = `https://t.me/${botUsername}?startapp=lucky_${selectedCampaign.id}`;
+                const directLink = `https://t.me/${botUsername}?startapp=${selectedCampaign.id}`;
                 const legacyLink = `https://t.me/${botUsername}/${miniAppShortName || "app"}?startapp=${selectedCampaign.id}`;
                 const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(directLink)}`;
 

@@ -259,7 +259,7 @@ export default function LuckyNumberGiveawayAdminManager() {
   };
 
   const handleCopyLink = (giveawayId: string) => {
-    const link = `https://t.me/${botUsername}?startapp=lucky_${giveawayId}`;
+    const link = `https://t.me/${botUsername}?startapp=${giveawayId}`;
     navigator.clipboard.writeText(link).then(() => {
       setCopiedId(giveawayId);
       setTimeout(() => setCopiedId(null), 2000);
