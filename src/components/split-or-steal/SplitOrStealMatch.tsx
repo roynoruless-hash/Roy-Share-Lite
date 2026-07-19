@@ -338,6 +338,29 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     }
   }, [match, timeLeft, myData, submitting, statusUpper]);
 
+  // Match Cleanup: automatically clear local cache and active match state when completed or cancelled
+  useEffect(() => {
+    if (statusUpper === "COMPLETED" || statusUpper === "CANCELLED") {
+      console.log("Match has reached final state:", statusUpper, ". Cleaning up local caches...");
+      localStorage.removeItem("sos_active_match_id");
+    }
+  }, [statusUpper]);
+
+  // Client-Side Stuck Recovery: if we are in REVEALING state for more than 5 seconds, proactively trigger recover endpoint
+  useEffect(() => {
+    if (statusUpper === "REVEALING") {
+      const timer = setTimeout(() => {
+        console.log("Stuck in REVEALING state for 5s, triggering proactive server recovery...");
+        fetch(`${API_BASE}/api/split-or-steal/recover`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ matchId })
+        }).catch(console.error);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [statusUpper, matchId]);
+
   const handleBackClick = () => {
     if (statusUpper === "COMPLETED" || statusUpper === "CANCELLED") {
       onBack();

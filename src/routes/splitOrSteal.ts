@@ -553,18 +553,30 @@ router.post("/process-result", async (req, res) => {
 
 // Proactive Recovery Endpoint
 router.post("/recover", async (req, res) => {
-  try {
-    const { matchId } = req.body;
-    if (!matchId) return res.status(400).json({ success: false, message: "Missing matchId" });
+  const { matchId } = req.body;
+  if (!matchId) return res.status(400).json({ success: false, message: "Missing matchId" });
 
+  try {
     const db = getDb();
-    const matchSnap = await getDoc(doc(db, "sos_matches", matchId));
-    if (!matchSnap.exists()) return res.json({ success: false, message: "Match not found" });
+    const matchRef = doc(db, "sos_matches", matchId);
+    const matchSnap = await getDoc(matchRef);
+    if (!matchSnap.exists()) {
+      return res.json({ success: false, status: "CANCELLED", message: "Match not found" });
+    }
 
     const match = matchSnap.data();
     const statusUpper = (match.status || "").toUpperCase();
-    if (statusUpper === "COMPLETED" || statusUpper === "CANCELLED") {
-      return res.json({ success: true, status: match.status });
+
+    // 1. If completed or cancelled, return result immediately
+    if (statusUpper === "COMPLETED" || statusUpper === "CANCELLED" || match.resultProcessed) {
+      return res.json({ success: true, status: statusUpper });
+    }
+
+    // 2. If invalid (missing crucial players data), cancel safely
+    if (!match.player1 || !match.player2) {
+      console.warn(`[SERVER LOG] Stuck Match ${matchId} is structurally invalid. Cancelling safely...`);
+      await updateDoc(matchRef, { status: "CANCELLED", cancelledReason: "Invalid Match Structure" }).catch(console.error);
+      return res.json({ success: true, status: "CANCELLED" });
     }
 
     const now = Date.now();
@@ -574,18 +586,26 @@ router.post("/recover", async (req, res) => {
     const isTimeout = match.decisionEndTime && now > (match.decisionEndTime + 5000);
     const isRevealingTimeout = isRevealing && (revealingElapsed > 5000 || !match.revealingStartedAt);
 
-    if (isRevealingTimeout || isTimeout) {
+    // 3. If broken/stuck in revealing (elapsed > 5s) or timed out, force resolve
+    if (isRevealingTimeout || isTimeout || isRevealing) {
       console.log(`[SERVER LOG] Recovery triggered for stuck match ${matchId}. Status: ${match.status}. Force completing...`);
       const result = await resolveMatchInternal(matchId);
       if (result.success) {
-        return res.json({ success: true, status: "completed", recovered: true });
+        return res.json({ success: true, status: "COMPLETED", recovered: true });
       } else {
-        return res.status(500).json({ success: false, message: result.message });
+        // Fallback recovery if transaction fails: force cancel to avoid infinite loading
+        console.error(`[SERVER LOG] resolveMatchInternal failed during recovery for match ${matchId}: ${result.message}. Force-cancelling match...`);
+        await updateDoc(matchRef, { 
+          status: "CANCELLED", 
+          cancelledReason: "Recovery Failure: " + (result.message || "Unknown error")
+        }).catch(console.error);
+        return res.json({ success: true, status: "CANCELLED", recovered: false, error: result.message });
       }
     }
 
-    res.json({ success: true, status: match.status });
+    res.json({ success: true, status: statusUpper });
   } catch (error: any) {
+    console.error(`[SERVER LOG] Error in /recover for match ${matchId}:`, error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

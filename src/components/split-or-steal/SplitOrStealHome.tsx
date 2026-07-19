@@ -30,16 +30,37 @@ export default function SplitOrStealHome({ onBack, onJoinMatch }: { onBack: () =
       getDoc(doc(db, "sos_matches", savedMatchId)).then((snap) => {
         if (snap.exists()) {
           const data = snap.data();
-          if (data.status !== "completed" && data.status !== "cancelled") {
-            console.log("Found unfinished match in progress, restoring match:", savedMatchId);
+          const status = (data.status || "").toUpperCase();
+          
+          if (status !== "COMPLETED" && status !== "CANCELLED" && status !== "RESOLVED") {
+            // Unfinished/Active match: restore it
+            console.log("Found unfinished active match, restoring:", savedMatchId);
             onJoinMatch(savedMatchId);
           } else {
-            // Keep recent match data if completed so user can view results
-            setRecentMatchId(savedMatchId);
-            setRecentMatch(data);
+            // Already completed or cancelled: clean cache and do not reopening
+            console.log("Match has already finished. Cleaning up stale active match ID:", savedMatchId);
+            localStorage.removeItem("sos_active_match_id");
+            
+            if (status === "COMPLETED") {
+              // Set recent match only so they can view results if they click "View Last Match Results"
+              setRecentMatchId(savedMatchId);
+              setRecentMatch(data);
+            } else {
+              // Cancelled match: remove everything
+              setRecentMatchId(null);
+              setRecentMatch(null);
+            }
           }
+        } else {
+          // Match doesn't exist on server: remove stale ID from local cache
+          console.log("Active match ID not found on server. Cleaning local cache.");
+          localStorage.removeItem("sos_active_match_id");
         }
-      }).catch(console.error);
+      }).catch((err) => {
+        console.error("Error recovering active match:", err);
+        // On error, we shouldn't blindly restore it
+        localStorage.removeItem("sos_active_match_id");
+      });
     }
   }, [onJoinMatch]);
 
@@ -118,7 +139,15 @@ export default function SplitOrStealHome({ onBack, onJoinMatch }: { onBack: () =
     }
   };
 
-  if (!settings || settings.enabled === false) {
+  if (settings === null) {
+    return (
+      <div className="min-h-screen bg-[#020617] text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (settings.enabled === false) {
     return (
       <div className="min-h-screen bg-[#020617] text-white flex flex-col items-center justify-center p-6 text-center">
         <ShieldAlert className="w-16 h-16 text-rose-500 mb-4" />

@@ -1160,7 +1160,7 @@ export const MiniAppHome: React.FC = () => {
 
         {currentView.startsWith("sos-match-") && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-            <SplitOrStealMatch matchId={currentView.replace("sos-match-", "")} onBack={() => setCurrentView("home")} />
+            <SplitOrStealMatch matchId={currentView.replace("sos-match-", "")} onBack={() => setCurrentView("split-or-steal")} />
           </Suspense>
         )}
 
