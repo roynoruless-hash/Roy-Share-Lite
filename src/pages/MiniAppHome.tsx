@@ -38,6 +38,7 @@ import {
   Bell,
   Cloud,
   Youtube,
+  Gamepad2,
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
@@ -66,8 +67,8 @@ const ShortenPage = lazy(() => import("./ShortenPage"));
 const RewardEarningsPage = lazy(() => import("./RewardEarningsPage"));
 const PublicLuckyNumberGiveawayPage = lazy(() => import("./PublicLuckyNumberGiveawayPage"));
 const PublicLuckyDrawPage = lazy(() => import("./PublicLuckyDrawPage"));
-const SplitOrStealHome = lazy(() => import("../components/split-or-steal/SplitOrStealHome"));
-const SplitOrStealMatch = lazy(() => import("../components/split-or-steal/SplitOrStealMatch"));
+const RPSHome = lazy(() => import("../components/rock-paper-scissors/RPSHome"));
+const RPSMatch = lazy(() => import("../components/rock-paper-scissors/RPSMatch"));
 import { LuckySpinUserView } from "../components/LuckySpinUserView";
 
 interface MembershipVerificationProps {
@@ -869,7 +870,7 @@ export const MiniAppHome: React.FC = () => {
     { id: "my-links", label: "My Links", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
     { id: "withdraw", label: "Withdraw", icon: CreditCard, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
     { id: "refer", label: "Refer & Earn", icon: Users, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
-    { id: "split-or-steal", label: "Split or Steal", icon: ShieldAlert, color: "bg-gradient-to-r from-rose-500 to-indigo-600", shadow: "shadow-rose-500/20" },
+    { id: "rps-battle", label: "RPS Battle", icon: Gamepad2, color: "bg-gradient-to-r from-indigo-600 to-orange-500", shadow: "shadow-indigo-500/20" },
     { id: "lucky-spin", label: "Lucky Spin Live", icon: Sparkles, color: "bg-gradient-to-r from-pink-550 to-violet-600", shadow: "shadow-pink-500/20" },
     { id: "earn-rewards", label: "Reward Tasks", icon: ClipboardList, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
     { id: "announcements", label: "Announcements", icon: Bell, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
@@ -1152,15 +1153,15 @@ export const MiniAppHome: React.FC = () => {
 
 
 
-        {currentView === "split-or-steal" && (
+        {currentView === "rps-battle" && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-            <SplitOrStealHome onBack={() => setCurrentView("home")} onJoinMatch={(matchId) => setCurrentView(`sos-match-${matchId}`)} />
+            <RPSHome onBack={() => setCurrentView("home")} onJoinMatch={(matchId) => setCurrentView(`rps-match-${matchId}`)} userId={activeUser?.id} />
           </Suspense>
         )}
 
-        {currentView.startsWith("sos-match-") && (
+        {currentView.startsWith("rps-match-") && (
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-            <SplitOrStealMatch matchId={currentView.replace("sos-match-", "")} onBack={() => setCurrentView("split-or-steal")} />
+            <RPSMatch matchId={currentView.replace("rps-match-", "")} onBack={() => setCurrentView("rps-battle")} userId={activeUser?.id} />
           </Suspense>
         )}
 
