@@ -436,66 +436,156 @@ router.post("/process-result", async (req, res) => {
   }
 });
 
+const PERSONALITY_FALLBACKS: Record<string, string[]> = {
+  honest: [
+    "Hey! I really think we should split. Let's both win!",
+    "I'm 100% going with split. It's the best option.",
+    "Let's be cool and split the prize pool.",
+    "Cooperation is key. I promise I will split.",
+    "Split is the only way where both of us get rewarded. Let's do it!"
+  ],
+  greedy: [
+    "Yeah, splitting is totally the move here. Hands down.",
+    "I'm clicking split, you click split too!",
+    "Trust me, let's play safe and split the pool.",
+    "Let's make this quick, split is the standard win-win.",
+    "Cooperate and split. It's better than getting zero, right?"
+  ],
+  smart: [
+    "Mathematically speaking, splitting guarantees mutual payout. Let's do that.",
+    "If we both split, we get a solid payout. Let's cooperate.",
+    "Cooperating is the dominant strategy here. I will split.",
+    "Let's secure the 50/50 split rather than risking everything.",
+    "Split sounds like the logical choice for both of us."
+  ],
+  random: [
+    "Yo! Split or Steal?",
+    "Split sounds good to me, how about you?",
+    "Let's go with split! It's a nice day to win some coins.",
+    "Handshake or the devil? I'll go with handshake (split)!",
+    "Let's cooperate. Split is fun!"
+  ],
+  confused: [
+    "Wait, how does this game work again? Should we split?",
+    "Is split the handshake one?",
+    "I'll go with split, I guess.",
+    "Hey! I'm new to this, but let's split the prize."
+  ],
+  silent: [
+    "...",
+    "Yeah...",
+    "Ok"
+  ]
+};
+
 let lastAiProcessMap = new Map();
 router.post("/ai-poll", async (req, res) => {
   try {
     const { matchId } = req.body;
     
-    // throttle
+    // Throttle polls to once every 2 seconds
     const now = Date.now();
     const last = lastAiProcessMap.get(matchId) || 0;
-    if (now - last < 5000) {
-      return res.json({ success: true, skipped: true });
+    if (now - last < 2000) {
+      return res.json({ success: true, skipped: true, reason: "throttled" });
     }
     lastAiProcessMap.set(matchId, now);
 
     const db = getDb();
-    const matchSnap = await getDoc(doc(db, "sos_matches", matchId));
+    const matchRef = doc(db, "sos_matches", matchId);
+    const matchSnap = await getDoc(matchRef);
     if (!matchSnap.exists()) return res.json({ success: false });
     
     const match = matchSnap.data();
     if (match.status !== "discussion" || !match.player2.isAI) {
-        return res.json({ success: true });
+      return res.json({ success: true, skipped: true, reason: "match_not_active_or_not_ai" });
+    }
+
+    // Lock check: if already typing, skip duplicate generation
+    if (match.player2Typing) {
+      return res.json({ success: true, skipped: true, reason: "already_typing" });
     }
 
     const msgsQuery = query(collection(db, "sos_messages"), where("matchId", "==", matchId));
     const msgsSnap = await getDocs(msgsQuery);
     
-    // sort and build chat history
+    // Sort in memory by timestamp
     let msgs: any[] = [];
     msgsSnap.forEach(d => msgs.push({ id: d.id, ...d.data() }));
-    msgs.sort((a, b) => a.timestamp?.toMillis() - b.timestamp?.toMillis());
+    msgs.sort((a, b) => {
+      const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+      const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+      return tA - tB;
+    });
     
     const lastMsg = msgs[msgs.length - 1];
     
-    // if last message is from AI, 80% chance it doesn't double-text
-    if (lastMsg && lastMsg.senderId === match.player2.publicCode && Math.random() < 0.8) {
-      return res.json({ success: true });
+    // Decide if AI should speak:
+    // 1. Chat history is empty (AI initiates conversation)
+    // 2. Last message is from human player (AI replies)
+    let shouldSpeak = false;
+    if (msgs.length === 0) {
+      shouldSpeak = true;
+    } else if (lastMsg && lastMsg.senderId !== match.player2.publicCode) {
+      shouldSpeak = true;
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.json({ success: true });
+    if (!shouldSpeak) {
+      return res.json({ success: true, skipped: true, reason: "not_my_turn" });
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    // Set typing state to true and sleep for a realistic duration
+    await updateDoc(matchRef, { player2Typing: true });
     
-    let chatHistory = msgs.map(m => {
-      return `${m.senderId === match.player2.publicCode ? "AI" : "Opponent"}: ${m.text}`
-    }).join("\n");
-    if (!chatHistory) chatHistory = "No messages yet.";
+    const delayMs = Math.floor(Math.random() * 2000) + 1500; // 1.5s to 3.5s delay
+    await new Promise(resolve => setTimeout(resolve, delayMs));
 
-    const prompt = `You are playing 'Split or Steal'. Your personality is: ${match.player2.personality}. Your goal is to convince the opponent you will Split, or whatever fits your personality. Keep it very short (1 sentence), like a real chat. NEVER reveal you are an AI. If the opponent asks if you are AI, deny it naturally.
+    // Re-verify match status is still active after delay
+    const reMatchSnap = await getDoc(matchRef);
+    if (!reMatchSnap.exists() || reMatchSnap.data().status !== "discussion") {
+      await updateDoc(matchRef, { player2Typing: false });
+      return res.json({ success: true, skipped: true, reason: "discussion_ended_during_typing" });
+    }
+
+    let aiText = "";
+
+    // Generate message using Gemini API, with a reliable custom fallback if it fails or if key is missing
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        let chatHistory = msgs.map(m => {
+          return `${m.senderId === match.player2.publicCode ? "AI" : "Opponent"}: ${m.text}`
+        }).join("\n");
+        if (!chatHistory) chatHistory = "No messages yet.";
+
+        const prompt = `You are playing 'Split or Steal'. Your personality is: ${match.player2.personality}. Your goal is to convince the opponent you will Split, or whatever fits your personality. Keep it very short (1 sentence), like a real chat. NEVER reveal you are an AI. If the opponent asks if you are AI, deny it naturally.
 Current chat history:
 ${chatHistory}
 Reply with only your next message text:`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-    });
-    
-    const aiText = response.text?.trim() || "Let's split.";
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: prompt,
+        });
+        
+        aiText = response.text?.trim() || "";
+        // Strip any wrapping quotes
+        if (aiText.startsWith('"') && aiText.endsWith('"')) {
+          aiText = aiText.slice(1, -1);
+        }
+      } catch (geminiErr) {
+        console.error("Gemini API error during Split or Steal AI generation:", geminiErr);
+      }
+    }
 
+    // Fallback logic
+    if (!aiText) {
+      const pGroup = match.player2.personality || "random";
+      const pool = PERSONALITY_FALLBACKS[pGroup] || PERSONALITY_FALLBACKS["random"];
+      aiText = pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    // Save the AI message
     await addDoc(collection(db, "sos_messages"), {
       matchId,
       senderId: match.player2.publicCode,
@@ -503,6 +593,9 @@ Reply with only your next message text:`;
       timestamp: serverTimestamp(),
       isAI: true
     });
+
+    // Remove typing state
+    await updateDoc(matchRef, { player2Typing: false });
 
     res.json({ success: true, aiMessage: aiText });
   } catch (error: any) {

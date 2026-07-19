@@ -28,31 +28,44 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
   const [timeLeft, setTimeLeft] = useState(0);
-  const [adShown, setAdShown] = useState(false);
-  const [adCompleted, setAdCompleted] = useState(false);
+  const [adStatus, setAdStatus] = useState<"none" | "loading" | "playing" | "fallback" | "failed">("none");
+  const [adMessage, setAdMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Active match state listener with proper error handling
   useEffect(() => {
     if (!matchId) return;
     const unsub = onSnapshot(doc(db, "sos_matches", matchId), (snap) => {
       if (snap.exists()) setMatch(snap.data());
+    }, (err) => {
+      console.error("Match listener error:", err);
     });
     return () => unsub();
   }, [matchId]);
 
+  // Messages real-time listener: queries without orderBy to avoid index requirement, sorts in memory
   useEffect(() => {
     if (!matchId) return;
-    const q = query(collection(db, "sos_messages"), where("matchId", "==", matchId), orderBy("timestamp", "asc"));
+    const q = query(collection(db, "sos_messages"), where("matchId", "==", matchId));
     const unsub = onSnapshot(q, (snap) => {
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      msgs.sort((a: any, b: any) => {
+        const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp || 0);
+        const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp || 0);
+        return tA - tB;
+      });
       setMessages(msgs);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    }, (err) => {
+      console.error("Messages listener error:", err);
     });
     return () => unsub();
   }, [matchId]);
 
+  // Discussion countdown timer
   useEffect(() => {
     if (match?.status === "discussion" && match.discussionEndTime) {
       const interval = setInterval(() => {
@@ -66,6 +79,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     }
   }, [match]);
 
+  // AI Opponent polling trigger with interval
   useEffect(() => {
     if (match?.status === "discussion" && match?.player2?.isAI) {
       const interval = setInterval(() => {
@@ -74,7 +88,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ matchId })
         }).catch(console.error);
-      }, 5000);
+      }, 4000);
       return () => clearInterval(interval);
     }
   }, [match]);
@@ -132,14 +146,66 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     }).catch(console.error);
   };
 
+  // Robust Advertisement flow with loading, checking config, timeout, fallback, and retry capability
   const showAdAndSubmit = async (decision: string) => {
-    // Simulated Ad
-    setAdShown(true);
-    setTimeout(() => {
-      setAdCompleted(true);
-      setAdShown(false);
+    setAdStatus("loading");
+    setAdMessage("Securing video advertising feed...");
+
+    let adTriggered = false;
+    let timeoutId: any = null;
+
+    const finishAndSubmit = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      setAdStatus("none");
       submitDecision(decision);
-    }, 3000);
+    };
+
+    const runFallbackAd = (reason: string) => {
+      console.log(`Running simulated fallback ad due to: ${reason}`);
+      setAdStatus("fallback");
+      setAdMessage(`${reason}. Running high-security validation backup...`);
+      setTimeout(() => {
+        finishAndSubmit();
+      }, 3000);
+    };
+
+    try {
+      const configRes = await fetch("/api/adsbitvex-config").catch(() => null);
+      if (!configRes || !configRes.ok) {
+        runFallbackAd("Ad gateway offline");
+        return;
+      }
+
+      const configData = await configRes.json().catch(() => null);
+      if (!configData || !configData.masterEnabled) {
+        runFallbackAd("Ad service bypassed by administrator");
+        return;
+      }
+
+      const showAdFn = (window as any).showadsbitvex;
+      if (typeof showAdFn !== "function") {
+        runFallbackAd("Ad blocker detected or SDK not loaded");
+        return;
+      }
+
+      timeoutId = setTimeout(() => {
+        if (!adTriggered) {
+          console.warn("Ad load timed out. Running backup countdown.");
+          runFallbackAd("Ad stream timed out");
+        }
+      }, 6000);
+
+      setAdStatus("playing");
+      setAdMessage("Ad Playing... Please wait while we verify your secure handshake.");
+      
+      await showAdFn();
+      adTriggered = true;
+      finishAndSubmit();
+
+    } catch (err: any) {
+      console.error("Ad loading/playback failed:", err);
+      runFallbackAd("Ad network failed");
+    }
   };
 
   const submitDecision = async (decision: string) => {
@@ -171,21 +237,21 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     }
   }, [match?.status]);
 
+  // Robust Countdown Processor: both clients trigger result-processing to avoid freezing on a disconnected P1
   useEffect(() => {
     if (revealCountdown !== null && revealCountdown > 0) {
       const timer = setTimeout(() => setRevealCountdown(revealCountdown - 1), 1000);
       return () => clearTimeout(timer);
     } else if (revealCountdown === 0) {
-      if (isP1) {
-        fetch(`${API_BASE}/api/split-or-steal/process-result`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ matchId })
-        }).catch(console.error);
-      }
+      fetch(`${API_BASE}/api/split-or-steal/process-result`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchId })
+      }).catch(console.error);
     }
-  }, [revealCountdown, matchId, isP1]);
+  }, [revealCountdown, matchId]);
 
+  // Backup auto-processor
   useEffect(() => {
     if (mySubmitted && match?.status !== "completed" && match?.status !== "revealing") {
       const interval = setInterval(() => {
@@ -201,6 +267,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     }
   }, [mySubmitted, match]);
 
+  // Backup default auto-submission of Split if the player doesn't choose
   useEffect(() => {
     if ((match?.status === "discussion" && timeLeft === 0) || match?.status === "decision") {
       const interval = setInterval(() => {
@@ -212,21 +279,29 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     }
   }, [match, timeLeft, myData, submitting]);
 
-
-
-
+  const handleBackClick = () => {
+    if (match?.status === "completed" || match?.status === "cancelled") {
+      onBack();
+    } else {
+      setShowExitConfirm(true);
+    }
+  };
 
   if (!match || !myPublicCode) return <div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>;
 
-
-
-  if (adShown) {
+  // Render Advertisement secure screen
+  if (adStatus !== "none") {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black text-white p-6">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <h2 className="text-xl font-bold">Advertisement</h2>
-          <p className="text-slate-400 mt-2">Please wait while we secure your decision...</p>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#020617] text-white p-6">
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+          <h2 className="text-2xl font-black tracking-tight">Securing Handshake</h2>
+          <p className="text-slate-400 mt-2 text-sm">{adMessage}</p>
+          {adStatus === "fallback" && (
+            <div className="mt-4 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-xl animate-pulse">
+              Ad server bypass mode enabled to protect match.
+            </div>
+          )}
         </div>
       </div>
     );
@@ -236,13 +311,19 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
     <div className="min-h-screen bg-[#020617] text-white flex flex-col">
       <header className="p-4 flex items-center justify-between border-b border-slate-800 bg-slate-900/50 backdrop-blur-md shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center">
-            <EyeOff className="w-5 h-5 text-slate-400" />
+          <button 
+            onClick={handleBackClick}
+            className="p-2 hover:bg-slate-800 rounded-xl transition-colors mr-1"
+          >
+            <ArrowLeft className="w-6 h-6 text-slate-400" />
+          </button>
+          <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-lg">
+            {oppData.isAI ? "🤖" : <EyeOff className="w-5 h-5 text-slate-400" />}
           </div>
           <div>
             <h2 className="font-bold">Opponent: {oppData.publicCode}</h2>
             <p className="text-xs text-emerald-400 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> Online
+              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> {oppData.isAI ? "AI Opponent" : "Online"}
             </p>
           </div>
         </div>
@@ -309,6 +390,18 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
                 </div>
               );
             })}
+            
+            {/* AI Typing Indicator */}
+            {match?.player2Typing && (
+              <div className="flex justify-start">
+                <div className="bg-slate-800 text-slate-200 rounded-2xl rounded-bl-sm px-4 py-3 text-sm flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
+                </div>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
 
@@ -356,7 +449,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
               <button 
                 onClick={() => showAdAndSubmit("split")}
                 disabled={submitting}
-                className="p-8 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-3xl transition group"
+                className="p-8 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-3xl transition group animate-in fade-in slide-in-from-bottom duration-300"
               >
                 <div className="text-5xl mb-4 group-hover:scale-110 transition-transform">🤝</div>
                 <div className="font-black text-xl text-blue-400">SPLIT</div>
@@ -366,7 +459,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
               <button 
                 onClick={() => showAdAndSubmit("steal")}
                 disabled={submitting}
-                className="p-8 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-3xl transition group"
+                className="p-8 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-3xl transition group animate-in fade-in slide-in-from-bottom duration-300 delay-75"
               >
                 <div className="text-5xl mb-4 group-hover:scale-110 transition-transform">😈</div>
                 <div className="font-black text-xl text-rose-500">STEAL</div>
@@ -374,6 +467,35 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Back Confirmation Dialog */}
+      {showExitConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 w-full max-w-sm rounded-3xl p-6 border border-slate-800 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold text-center mb-3">Leave Active Match?</h3>
+            <p className="text-sm text-slate-400 text-center mb-6 leading-relaxed">
+              The match will continue in the background. You can reconnect from the dashboard, but make sure to return before the timer ends so you don't miss the decision window!
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={() => setShowExitConfirm(false)}
+                className="py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-sm transition"
+              >
+                Stay & Play
+              </button>
+              <button 
+                onClick={() => {
+                  setShowExitConfirm(false);
+                  onBack();
+                }}
+                className="py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-sm transition"
+              >
+                Leave Match
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

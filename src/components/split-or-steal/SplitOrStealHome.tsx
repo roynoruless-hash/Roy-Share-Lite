@@ -12,6 +12,8 @@ export default function SplitOrStealHome({ onBack, onJoinMatch }: { onBack: () =
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [queueStatus, setQueueStatus] = useState<string | null>(null);
+  const [recentMatchId, setRecentMatchId] = useState<string | null>(null);
+  const [recentMatch, setRecentMatch] = useState<any>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "settings", "sos"), (snap) => {
@@ -20,6 +22,26 @@ export default function SplitOrStealHome({ onBack, onJoinMatch }: { onBack: () =
     });
     return () => unsub();
   }, []);
+
+  // Check localStorage for active match to automatically restore
+  useEffect(() => {
+    const savedMatchId = localStorage.getItem("sos_active_match_id");
+    if (savedMatchId) {
+      getDoc(doc(db, "sos_matches", savedMatchId)).then((snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.status !== "completed" && data.status !== "cancelled") {
+            console.log("Found unfinished match in progress, restoring match:", savedMatchId);
+            onJoinMatch(savedMatchId);
+          } else {
+            // Keep recent match data if completed so user can view results
+            setRecentMatchId(savedMatchId);
+            setRecentMatch(data);
+          }
+        }
+      }).catch(console.error);
+    }
+  }, [onJoinMatch]);
 
   useEffect(() => {
     if (!user?.telegramId) return;
@@ -30,11 +52,14 @@ export default function SplitOrStealHome({ onBack, onJoinMatch }: { onBack: () =
           setQueueStatus("searching");
           pollMatch(); // Trigger matchmaking check
         } else if (data.status === "matched" && data.matchId) {
+          localStorage.setItem("sos_active_match_id", data.matchId);
           onJoinMatch(data.matchId);
         }
       } else {
         setQueueStatus(null);
       }
+    }, (err) => {
+      console.error("Queue listener error:", err);
     });
     return () => unsub();
   }, [user]);
@@ -48,6 +73,7 @@ export default function SplitOrStealHome({ onBack, onJoinMatch }: { onBack: () =
       });
       const data = await res.json();
       if (data.success && data.status === "matched") {
+        localStorage.setItem("sos_active_match_id", data.matchId);
         onJoinMatch(data.matchId);
       } else if (data.success && data.status === "searching") {
         setTimeout(pollMatch, 3000);
@@ -157,9 +183,19 @@ export default function SplitOrStealHome({ onBack, onJoinMatch }: { onBack: () =
             <button onClick={handleCancelQueue} className="px-6 py-2 bg-rose-500/10 text-rose-400 font-bold rounded-xl text-sm w-full">Cancel Search</button>
           </div>
         ) : (
-          <button onClick={() => setShowConfirm(true)} className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-2xl font-black text-white text-lg shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2">
-            <Play className="w-5 h-5" /> Play Now
-          </button>
+          <div className="space-y-3">
+            <button onClick={() => setShowConfirm(true)} className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-2xl font-black text-white text-lg shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2">
+              <Play className="w-5 h-5" /> Play Now
+            </button>
+            {recentMatchId && (
+              <button 
+                onClick={() => onJoinMatch(recentMatchId)} 
+                className="w-full py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-2xl font-bold text-slate-300 text-sm transition flex items-center justify-center gap-2"
+              >
+                <span>📊</span> View Last Match Results
+              </button>
+            )}
+          </div>
         )}
       </main>
 
