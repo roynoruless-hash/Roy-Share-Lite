@@ -35,6 +35,8 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [settings, setSettings] = useState<any>(null);
   const [pendingDecision, setPendingDecision] = useState<string | null>(null);
+  const [localSubmitted, setLocalSubmitted] = useState(false);
+  const [localDecision, setLocalDecision] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Load settings for adFailurePolicy
@@ -64,7 +66,11 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
   useEffect(() => {
     if (!matchId) return;
     const unsub = onSnapshot(doc(db, "sos_matches", matchId), (snap) => {
-      if (snap.exists()) setMatch(snap.data());
+      if (snap.exists()) {
+        const data = snap.data();
+        console.log(`[SplitOrSteal LOG] Firestore Updated. Status: ${data.status}, p1Submitted: ${data.player1Submitted}, p2Submitted: ${data.player2Submitted}`);
+        setMatch(data);
+      }
     }, (err) => {
       console.error("Match listener error:", err);
     });
@@ -173,16 +179,22 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
 
   // Robust Advertisement flow with loading, checking config, timeout, fallback, and retry capability
   const showAdAndSubmit = async (decision: string) => {
+    console.log(`[SplitOrSteal LOG] Decision Selected: ${decision}`);
+    setSubmitting(true);
     setPendingDecision(decision);
     setAdStatus("loading");
     setAdMessage("Securing video advertising feed...");
+    console.log(`[SplitOrSteal LOG] Reward Ad Started`);
 
     let adTriggered = false;
     let timeoutId: any = null;
 
     const finishAndSubmit = () => {
       if (timeoutId) clearTimeout(timeoutId);
+      console.log(`[SplitOrSteal LOG] Reward Ad Completed`);
       setAdStatus("none");
+      setLocalSubmitted(true);
+      setLocalDecision(decision);
       submitDecision(decision, true);
     };
 
@@ -266,13 +278,22 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
   };
 
   const submitDecision = async (decision: string, adCompleted?: boolean) => {
+    console.log(`[SplitOrSteal LOG] submitDecision() called`);
     setSubmitting(true);
     try {
-      await fetch(`${API_BASE}/api/split-or-steal/submit-decision`, {
+      const res = await fetch(`${API_BASE}/api/split-or-steal/submit-decision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ telegramId: user?.telegramId, matchId, decision, adCompleted })
       });
+      const data = await res.json();
+      if (data.success) {
+        console.log(`[SplitOrSteal LOG] Decision Saved`);
+        setLocalSubmitted(true);
+        setLocalDecision(decision);
+      } else {
+        setError(data.message || "Failed to submit decision");
+      }
     } catch (e) {
       console.error(e);
       setError("Failed to submit decision");
@@ -287,6 +308,24 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
   const mySubmitted = isP1 ? match?.player1Submitted : match?.player2Submitted;
 
   const statusUpper = (match?.status || "").toUpperCase();
+
+  useEffect(() => {
+    if (!match) return;
+    const isP1 = match.player1?.publicCode === myPublicCode;
+    const opp = isP1 ? match.player2 : match.player1;
+    const oppSubmitted = isP1 ? match.player2Submitted : match.player1Submitted;
+    
+    if (opp?.isAI && oppSubmitted) {
+      console.log(`[SplitOrSteal LOG] AI Decision Saved`);
+    }
+  }, [match, myPublicCode]);
+
+  useEffect(() => {
+    if (statusUpper === "COMPLETED") {
+      console.log(`[SplitOrSteal LOG] Match Resolved`);
+      console.log(`[SplitOrSteal LOG] Reveal Complete`);
+    }
+  }, [statusUpper]);
 
   const [revealCountdown, setRevealCountdown] = useState<number | null>(null);
 
@@ -567,6 +606,15 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
         </>
       )}
  
+      {/* RESOLVING */}
+      {statusUpper === "RESOLVING" && (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
+          <Loader2 className="w-16 h-16 text-blue-500 animate-spin mx-auto mb-6" />
+          <h2 className="text-3xl font-black mb-2 text-blue-400">Calculating Results...</h2>
+          <p className="text-slate-400 max-w-xs mx-auto">Securing the consensus and updating player ledgers.</p>
+        </div>
+      )}
+
       {/* REVEALING */}
       {statusUpper === "REVEALING" && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
@@ -585,10 +633,14 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
           <h2 className="text-3xl font-black mb-2">Time's Up</h2>
           <p className="text-slate-400 mb-12">Make your final decision.</p>
 
-          {mySubmitted ? (
+          {(mySubmitted || localSubmitted) ? (
             <div className="space-y-4">
               <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
               <p className="font-bold text-slate-300">Waiting for opponent...</p>
+              {(() => {
+                console.log("[SplitOrSteal LOG] Waiting Screen Displayed");
+                return null;
+              })()}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4 w-full max-w-sm">

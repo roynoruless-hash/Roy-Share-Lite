@@ -292,11 +292,11 @@ type AllowedState = typeof ALLOWED_STATES[number];
 const STATE_TRANSITIONS: Record<AllowedState, AllowedState[]> = {
   WAITING: ["MATCHED", "CANCELLED"],
   MATCHED: ["DISCUSSION", "CANCELLED"],
-  DISCUSSION: ["DECISION_PENDING", "PLAYER_SUBMITTED", "READY_TO_RESOLVE", "CANCELLED"],
-  DECISION_PENDING: ["PLAYER_SUBMITTED", "AI_SUBMITTED", "READY_TO_RESOLVE", "CANCELLED"],
-  PLAYER_SUBMITTED: ["READY_TO_RESOLVE", "CANCELLED"],
-  AI_SUBMITTED: ["READY_TO_RESOLVE", "CANCELLED"],
-  READY_TO_RESOLVE: ["RESOLVING", "CANCELLED"],
+  DISCUSSION: ["DECISION_PENDING", "PLAYER_SUBMITTED", "READY_TO_RESOLVE", "REVEALING", "COMPLETED", "CANCELLED"],
+  DECISION_PENDING: ["PLAYER_SUBMITTED", "AI_SUBMITTED", "READY_TO_RESOLVE", "REVEALING", "COMPLETED", "CANCELLED"],
+  PLAYER_SUBMITTED: ["READY_TO_RESOLVE", "REVEALING", "COMPLETED", "CANCELLED"],
+  AI_SUBMITTED: ["READY_TO_RESOLVE", "REVEALING", "COMPLETED", "CANCELLED"],
+  READY_TO_RESOLVE: ["RESOLVING", "REVEALING", "COMPLETED", "CANCELLED"],
   RESOLVING: ["REVEALING", "COMPLETED", "CANCELLED"],
   REVEALING: ["COMPLETED", "CANCELLED"],
   COMPLETED: [],
@@ -439,6 +439,8 @@ async function resolveMatchInternal(matchId: string): Promise<{ success: boolean
       processed = true;
     });
 
+    console.log(`[SERVER LOG] Match Resolved: matchId=${matchId}`);
+    console.log(`[SERVER LOG] Reveal Complete: matchId=${matchId}`);
     console.log(`[SERVER LOG] Reveal Published: matchId=${matchId}`);
     console.log(`[SERVER LOG] Match Completed: matchId=${matchId}`);
     return { success: true, processed };
@@ -528,6 +530,7 @@ router.post("/submit-decision", async (req, res) => {
       // Enforce State Machine Validation
       if (isValidTransition(currentStatus, nextStatus)) {
         t.update(matchRef, updates);
+        console.log(`[SERVER LOG] Firestore Updated: matchId=${matchId}, status=${nextStatus}`);
       } else {
         console.warn(`[SERVER LOG] Blocked invalid state transition from ${currentStatus} to ${nextStatus} for match ${matchId}`);
       }
@@ -587,7 +590,7 @@ router.post("/recover", async (req, res) => {
     const isRevealingTimeout = isRevealing && (revealingElapsed > 5000 || !match.revealingStartedAt);
 
     // 3. If broken/stuck in revealing (elapsed > 5s) or timed out, force resolve
-    if (isRevealingTimeout || isTimeout || isRevealing) {
+    if (isRevealingTimeout || isTimeout) {
       console.log(`[SERVER LOG] Recovery triggered for stuck match ${matchId}. Status: ${match.status}. Force completing...`);
       const result = await resolveMatchInternal(matchId);
       if (result.success) {
