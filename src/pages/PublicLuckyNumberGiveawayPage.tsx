@@ -45,32 +45,57 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
   // Countdown state
   const [timeLeft, setTimeLeft] = useState<any>({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true });
 
-  // 1. Listen to Giveaway in real-time
+  // 1. Listen to Giveaway in real-time with automatic fallback
   useEffect(() => {
-    if (!giveawayId) return;
-
-    console.log(`[Diagnostic] Listening to campaign ID: ${giveawayId}`);
-    const docRef = doc(db, "lucky_number_campaigns", giveawayId);
-    const unsub = onSnapshot(docRef, (snap) => {
-      if (snap.exists()) {
-        setGiveaway({ id: snap.id, ...snap.data() });
+    console.log(`[Diagnostic] Subscribed to lucky_number_campaigns. Requested campaign ID: ${giveawayId}`);
+    const colRef = collection(db, "lucky_number_campaigns");
+    const unsub = onSnapshot(colRef, (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      
+      // Attempt 1: Look for exact campaign by giveawayId
+      const targetCampaign = giveawayId ? list.find(g => g.id === giveawayId) : null;
+      
+      if (targetCampaign) {
+        console.log(`[Diagnostic] Found target campaign by ID: ${giveawayId}`);
+        setGiveaway(targetCampaign);
+        setLoading(false);
       } else {
-        console.warn(`[Diagnostic] Campaign not found: ${giveawayId}`);
+        console.warn(`[Diagnostic] Requested campaign not found by ID: ${giveawayId}. Searching for any live/active campaigns...`);
+        // Fallback: Find all campaigns where status is Live/LIVE
+        const liveCampaigns = list.filter(g => g.status === "Live" || g.status === "LIVE");
+        
+        if (liveCampaigns.length === 1) {
+          console.log(`[Diagnostic] Found exactly 1 active live campaign: ${liveCampaigns[0].id}. Selecting it directly.`);
+          setGiveaway(liveCampaigns[0]);
+          setLoading(false);
+        } else if (liveCampaigns.length > 1) {
+          console.log(`[Diagnostic] Found multiple active live campaigns. Navigating to the active campaigns list view.`);
+          setLoading(false);
+          if (onNavigate) {
+            onNavigate("lucky-number-list");
+          } else if (onBack) {
+            onBack();
+          }
+        } else {
+          console.warn("[Diagnostic] No active live campaigns found in lucky_number_campaigns collection.");
+          setGiveaway(null);
+          setLoading(false);
+        }
       }
-      setLoading(false);
     }, (err) => {
-      console.error("Error listening to giveaway:", err);
+      console.error("Error listening to lucky_number_campaigns:", err);
       setLoading(false);
     });
 
     return unsub;
-  }, [giveawayId]);
+  }, [giveawayId, onNavigate, onBack]);
 
   // 2. Listen to Entries in real-time
   useEffect(() => {
-    if (!giveawayId) return;
+    const activeCampaignId = giveaway?.id;
+    if (!activeCampaignId) return;
 
-    const q = query(collection(db, "lucky_number_entries"), where("campaignId", "==", giveawayId));
+    const q = query(collection(db, "lucky_number_entries"), where("campaignId", "==", activeCampaignId));
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setEntries(list);
@@ -79,7 +104,7 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
     });
 
     return unsub;
-  }, [giveawayId]);
+  }, [giveaway?.id]);
 
   // 3. Setup countdown timer and trigger automatic draw if expired
   useEffect(() => {
