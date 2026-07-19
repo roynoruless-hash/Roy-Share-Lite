@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { getStorage } from "firebase-admin/storage";
 import { db } from "../lib/firebase";
+import { parseInKolkata } from "../lib/dateUtils";
 import { 
   collection, 
   doc, 
@@ -299,20 +300,41 @@ router.post("/reserve-number", async (req: any, res: any) => {
       return res.status(400).json({ success: false, error: `Invalid number. Choose between ${minNum} and ${maxNum}.` });
     }
 
+    const limit = Number(campaign.entryLimitPerUser || 1);
+
     // Run transaction to reserve the number and verify user duplicate check
     const result = await runTransaction(db, async (transaction) => {
-      // 1. Check if user already has an active selection on this campaign
-      const entriesCollRef = collection(db, "lucky_number_entries");
-      const userEntryRef = doc(entriesCollRef, `${giveawayId}_user_${telegramId}`);
-      const userEntrySnap = await transaction.get(userEntryRef);
-      if (userEntrySnap.exists()) {
-        const uEntry = userEntrySnap.data();
-        if (uEntry.status === "Confirmed" || uEntry.status === "Winner" || uEntry.status === "Approved") {
-          throw new Error("You have already selected a number for this giveaway! One number per Telegram account only.");
-        }
+      // 1. Check user stats for entry limits
+      const statsRef = doc(db, "lucky_number_user_stats", `${giveawayId}_${telegramId}`);
+      const statsSnap = await transaction.get(statsRef);
+      
+      let userNumbers: any[] = [];
+      if (statsSnap.exists()) {
+        userNumbers = statsSnap.data().numbers || [];
       }
 
-      // 2. Check if this specific number is already reserved by another user
+      // Filter active (either Confirmed, Winner, or PendingAd within 60s)
+      const nowMs = Date.now();
+      const activeNumbers = userNumbers.filter((n: any) => {
+        if (n.status === "Confirmed" || n.status === "Winner" || n.status === "Approved") return true;
+        if (n.status === "PendingAd") {
+          const resTime = new Date(n.reservedAt).getTime();
+          return nowMs - resTime < 60000;
+        }
+        return false;
+      });
+
+      if (activeNumbers.length >= limit) {
+        throw new Error(`You have already reserved the maximum of ${limit} number(s) for this giveaway!`);
+      }
+
+      const alreadyHasThisNum = activeNumbers.some((n: any) => Number(n.number) === num);
+      if (alreadyHasThisNum) {
+        throw new Error(`You have already chosen the number ${num}!`);
+      }
+
+      // 2. Check if this specific number is already reserved globally
+      const entriesCollRef = collection(db, "lucky_number_entries");
       const numberDocId = `${giveawayId}_num_${num}`;
       const numberEntryRef = doc(entriesCollRef, numberDocId);
       const numberEntrySnap = await transaction.get(numberEntryRef);
@@ -320,23 +342,19 @@ router.post("/reserve-number", async (req: any, res: any) => {
       if (numberEntrySnap.exists()) {
         const entry = numberEntrySnap.data();
         if (entry.telegramId !== String(telegramId)) {
-          if (entry.status === "Confirmed" || entry.status === "Winner" || entry.status === "Approved" || entry.status === "Rejected") {
+          if (entry.status === "Confirmed" || entry.status === "Winner" || entry.status === "Approved") {
             throw new Error("This number has already been selected. Please choose another number.");
           }
           if (entry.status === "PendingAd") {
             const reservedAt = new Date(entry.reservedAt).getTime();
-            if (Date.now() - reservedAt < 60000) {
+            if (nowMs - reservedAt < 60000) {
               throw new Error("This number is temporarily locked by another user watching an ad. Please choose another number.");
             }
           }
         }
       }
 
-      // Number is available. Create/Overwrite both documents inside the transaction!
-      // To ensure "One User = One Number" fast check AND "Unique Number" constraint:
-      // We will write the document with ID = numberDocId to represent the number reservation.
-      // We also write the document with ID = userEntryRef to represent user reservation.
-      
+      // Create reservation data
       const entryData = {
         campaignId: giveawayId,
         telegramId: String(telegramId),
@@ -347,8 +365,40 @@ router.post("/reserve-number", async (req: any, res: any) => {
         status: "PendingAd"
       };
 
+      // Set global number entry
       transaction.set(numberEntryRef, entryData);
-      transaction.set(userEntryRef, entryData);
+
+      // Set user-specific entry for this number
+      const userNumEntryRef = doc(entriesCollRef, `${giveawayId}_user_${telegramId}_${num}`);
+      transaction.set(userNumEntryRef, entryData);
+
+      // Legacy support for single entry view listens
+      if (limit === 1) {
+        const legacyUserEntryRef = doc(entriesCollRef, `${giveawayId}_user_${telegramId}`);
+        transaction.set(legacyUserEntryRef, entryData);
+      }
+
+      // Save/Update user stats
+      const cleanNumbers = userNumbers.filter((n: any) => {
+        // Keep confirmed/winners, or pending that haven't timed out
+        if (n.status === "Confirmed" || n.status === "Winner" || n.status === "Approved") return true;
+        const resTime = new Date(n.reservedAt).getTime();
+        return nowMs - resTime < 60000;
+      });
+
+      cleanNumbers.push({
+        number: num,
+        status: "PendingAd",
+        reservedAt: new Date().toISOString()
+      });
+
+      transaction.set(statsRef, {
+        campaignId: giveawayId,
+        telegramId: String(telegramId),
+        numbers: cleanNumbers,
+        entryCount: cleanNumbers.length,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
 
       return { success: true };
     });
@@ -364,37 +414,60 @@ router.post("/reserve-number", async (req: any, res: any) => {
 // Confirm Number Selection (Permanently confirmed after successful ad completion)
 router.post("/confirm-number", async (req: any, res: any) => {
   try {
-    const { giveawayId, telegramId } = req.body;
+    const { giveawayId, telegramId, selectedNumber } = req.body;
 
     if (!giveawayId || !telegramId) {
       return res.status(400).json({ success: false, error: "Missing required parameters" });
     }
 
-    const entriesCollRef = collection(db, "lucky_number_entries");
-    
-    // We need to find the user's active reservation
-    const userEntryRef = doc(entriesCollRef, `${giveawayId}_user_${telegramId}`);
-    const userEntrySnap = await getDoc(userEntryRef);
-
-    if (!userEntrySnap.exists()) {
+    const statsRef = doc(db, "lucky_number_user_stats", `${giveawayId}_${telegramId}`);
+    const statsSnap = await getDoc(statsRef);
+    if (!statsSnap.exists()) {
       return res.status(400).json({ success: false, error: "No pending reservation found. Please select a number first." });
     }
 
-    const entry = userEntrySnap.data();
-    if (entry.status !== "PendingAd") {
-      return res.status(400).json({ success: false, error: "This reservation is already confirmed or invalid." });
+    const statsData = statsSnap.data();
+    const userNumbers = statsData.numbers || [];
+    
+    // Find the target PendingAd entry
+    const targetIndex = userNumbers.findIndex((n: any) => {
+      if (n.status !== "PendingAd") return false;
+      if (selectedNumber !== undefined && Number(selectedNumber) !== Number(n.number)) return false;
+      return true;
+    });
+
+    if (targetIndex === -1) {
+      return res.status(400).json({ success: false, error: "No pending reservation found. Please select a number first." });
     }
 
-    // Verify it hasn't timed out (60 seconds)
-    const reservedAt = new Date(entry.reservedAt).getTime();
+    const targetEntry = userNumbers[targetIndex];
+    const num = Number(targetEntry.number);
+
+    // Verify timeout (60 seconds)
+    const reservedAt = new Date(targetEntry.reservedAt).getTime();
     if (Date.now() - reservedAt > 60000) {
       // Clear timed out reservation
-      await deleteDoc(userEntryRef);
-      await deleteDoc(doc(entriesCollRef, `${giveawayId}_num_${entry.selectedNumber}`));
+      const updatedNumbers = userNumbers.filter((_: any, idx: number) => idx !== targetIndex);
+      await setDoc(statsRef, { numbers: updatedNumbers, entryCount: updatedNumbers.length }, { merge: true });
+      
+      const entriesCollRef = collection(db, "lucky_number_entries");
+      await deleteDoc(doc(entriesCollRef, `${giveawayId}_num_${num}`));
+      await deleteDoc(doc(entriesCollRef, `${giveawayId}_user_${telegramId}_${num}`));
+      await deleteDoc(doc(entriesCollRef, `${giveawayId}_user_${telegramId}`));
+
       return res.status(400).json({ success: false, error: "Your session timed out. Please choose your number again." });
     }
 
     // Confirm selection permanently
+    userNumbers[targetIndex] = {
+      ...targetEntry,
+      status: "Confirmed",
+      confirmedAt: new Date().toISOString()
+    };
+
+    await setDoc(statsRef, { numbers: userNumbers, entryCount: userNumbers.length }, { merge: true });
+
+    const entriesCollRef = collection(db, "lucky_number_entries");
     const confirmTime = new Date().toISOString();
     const updatePayload = {
       status: "Confirmed",
@@ -402,15 +475,23 @@ router.post("/confirm-number", async (req: any, res: any) => {
     };
 
     const batch = writeBatch(db);
-    batch.update(userEntryRef, updatePayload);
-    batch.update(doc(entriesCollRef, `${giveawayId}_num_${entry.selectedNumber}`), updatePayload);
+    batch.update(doc(entriesCollRef, `${giveawayId}_num_${num}`), updatePayload);
+    batch.update(doc(entriesCollRef, `${giveawayId}_user_${telegramId}_${num}`), updatePayload);
+    
+    // Also update legacy if it exists or is applicable
+    const legacyUserEntryRef = doc(entriesCollRef, `${giveawayId}_user_${telegramId}`);
+    const legacyUserEntrySnap = await getDoc(legacyUserEntryRef);
+    if (legacyUserEntrySnap.exists() && legacyUserEntrySnap.data().selectedNumber === num) {
+      batch.update(legacyUserEntryRef, updatePayload);
+    }
+
     await batch.commit();
 
     // Write Audit Log
     await writeAuditLog(giveawayId, "Lucky Number Giveaway", "Number Reserved Permanently", {
       telegramId,
-      selectedNumber: entry.selectedNumber,
-      username: entry.username
+      selectedNumber: num,
+      username: statsData.username || ""
     });
 
     return res.json({ success: true, message: "Number reserved permanently! Participation confirmed." });
@@ -424,25 +505,50 @@ router.post("/confirm-number", async (req: any, res: any) => {
 // Release Number (If ad is closed or failed)
 router.post("/release-number", async (req: any, res: any) => {
   try {
-    const { giveawayId, telegramId } = req.body;
+    const { giveawayId, telegramId, selectedNumber } = req.body;
 
     if (!giveawayId || !telegramId) {
       return res.status(400).json({ success: false, error: "Missing required parameters" });
     }
 
-    const entriesCollRef = collection(db, "lucky_number_entries");
-    const userEntryRef = doc(entriesCollRef, `${giveawayId}_user_${telegramId}`);
-    const userEntrySnap = await getDoc(userEntryRef);
+    const statsRef = doc(db, "lucky_number_user_stats", `${giveawayId}_${telegramId}`);
+    const statsSnap = await getDoc(statsRef);
+    if (!statsSnap.exists()) {
+      return res.json({ success: true });
+    }
 
-    if (userEntrySnap.exists()) {
-      const entry = userEntrySnap.data();
-      if (entry.status === "PendingAd") {
-        const batch = writeBatch(db);
-        batch.delete(userEntryRef);
-        batch.delete(doc(entriesCollRef, `${giveawayId}_num_${entry.selectedNumber}`));
-        await batch.commit();
-        console.log(`[LuckyNumber] Released reservation for user ${telegramId} on number ${entry.selectedNumber}`);
+    const statsData = statsSnap.data();
+    const userNumbers = statsData.numbers || [];
+
+    // Find target PendingAd entry
+    const targetIndex = userNumbers.findIndex((n: any) => {
+      if (n.status !== "PendingAd") return false;
+      if (selectedNumber !== undefined && Number(selectedNumber) !== Number(n.number)) return false;
+      return true;
+    });
+
+    if (targetIndex !== -1) {
+      const targetEntry = userNumbers[targetIndex];
+      const num = Number(targetEntry.number);
+
+      // Remove from numbers array
+      const updatedNumbers = userNumbers.filter((_: any, idx: number) => idx !== targetIndex);
+      await setDoc(statsRef, { numbers: updatedNumbers, entryCount: updatedNumbers.length }, { merge: true });
+
+      const entriesCollRef = collection(db, "lucky_number_entries");
+      const batch = writeBatch(db);
+      batch.delete(doc(entriesCollRef, `${giveawayId}_num_${num}`));
+      batch.delete(doc(entriesCollRef, `${giveawayId}_user_${telegramId}_${num}`));
+      
+      // Legacy cleanup if matching
+      const legacyUserEntryRef = doc(entriesCollRef, `${giveawayId}_user_${telegramId}`);
+      const legacySnap = await getDoc(legacyUserEntryRef);
+      if (legacySnap.exists() && legacySnap.data().selectedNumber === num) {
+        batch.delete(legacyUserEntryRef);
       }
+
+      await batch.commit();
+      console.log(`[LuckyNumber] Released reservation for user ${telegramId} on number ${num}`);
     }
 
     return res.json({ success: true });
@@ -468,7 +574,12 @@ router.post("/save-giveaway", async (req: any, res: any) => {
       adsType, 
       numberVisibility, 
       status,
-      autoPostChannel
+      autoPostChannel,
+      entryLimitPerUser,
+      startTime,
+      endTime,
+      autoResult,
+      rewardAdsEnabled
     } = req.body;
     
     if (!title || !bannerUrl || !prizeAmount || !totalWinners || !numberRange) {
@@ -508,6 +619,11 @@ router.post("/save-giveaway", async (req: any, res: any) => {
       status: status || "Draft",
       createdAt: new Date().toISOString(),
       winnersDrawn: false,
+      entryLimitPerUser: Number(entryLimitPerUser || 1),
+      startTime: startTime || null,
+      endTime: endTime || null,
+      autoResult: autoResult === true || autoResult === "true",
+      rewardAdsEnabled: rewardAdsEnabled !== false && rewardAdsEnabled !== "false"
     };
 
     if (!isNew) {
@@ -994,6 +1110,215 @@ router.post("/redraw-winner", async (req: any, res: any) => {
   } catch (err: any) {
     console.error("Redraw winner error:", err);
     return res.status(500).json({ success: false, error: err.message || "Failed to redraw winner" });
+  }
+});
+
+// Auto draw trigger (locks entries, draws and automatically approves winners if autoResult is ON)
+router.post("/auto-draw-trigger", async (req: any, res: any) => {
+  try {
+    const { giveawayId } = req.body;
+    if (!giveawayId) {
+      return res.status(400).json({ success: false, error: "Missing giveawayId" });
+    }
+
+    const campaignDocRef = doc(db, "lucky_number_campaigns", giveawayId);
+    const campaignSnap = await getDoc(campaignDocRef);
+    if (!campaignSnap.exists()) {
+      return res.status(404).json({ success: false, error: "Campaign not found" });
+    }
+
+    const campaign = campaignSnap.data();
+    if (campaign.status !== "Live") {
+      return res.json({ success: true, message: "Campaign is already locked/completed." });
+    }
+
+    // Parse the end date-time to verify countdown has finished
+    const endVal = campaign.endTime ? `${campaign.endDate}T${campaign.endTime}` : campaign.endDate;
+    if (!endVal) {
+      return res.status(400).json({ success: false, error: "No end time set on this campaign." });
+    }
+
+    const parsedEnd = parseInKolkata(endVal);
+    if (Date.now() < parsedEnd.getTime()) {
+      return res.status(400).json({ success: false, error: "Countdown has not reached zero yet." });
+    }
+
+    // Determine status update: if autoResult is enabled, mark "Drawing Winners", else mark "Ended"
+    const autoResult = campaign.autoResult === true;
+    const nextStatus = autoResult ? "Drawing Winners" : "Ended";
+    await updateDoc(campaignDocRef, { status: nextStatus });
+
+    if (!autoResult) {
+      // Just lock the entries and let the admin draw manually
+      await writeAuditLog(giveawayId, campaign.title, "Campaign Ended", { status: "Ended", reason: "Countdown reached zero, manual draw required" });
+      return res.json({ success: true, message: "Giveaway ended. Awaiting manual winner selection." });
+    }
+
+    // Auto Result is ON: Auto pick and credit the winners!
+    const totalWinners = Number(campaign.totalWinners || 1);
+    let prizeAllocations = campaign.prizeAllocations;
+    if (!prizeAllocations || prizeAllocations.length !== totalWinners) {
+      prizeAllocations = splitPrizeBudget(Number(campaign.prizeAmount), totalWinners);
+    }
+
+    // Fetch confirmed entries (only filter those that are _num_ to avoid duplicates)
+    const qEntries = query(
+      collection(db, "lucky_number_entries"),
+      where("campaignId", "==", giveawayId),
+      where("status", "==", "Confirmed")
+    );
+    const entriesSnap = await getDocs(qEntries);
+    const confirmedEntries = entriesSnap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .filter(e => e.id.includes("_num_"));
+
+    if (confirmedEntries.length === 0) {
+      // No one participated, transition directly to Completed
+      await updateDoc(campaignDocRef, {
+        status: "Completed",
+        winnersDrawn: true,
+        drawnWinners: []
+      });
+      await writeAuditLog(giveawayId, campaign.title, "Auto Draw Complete (No Entries)", {});
+      return res.json({ success: true, message: "No entries were found. Campaign ended with no winners." });
+    }
+
+    // Shuffle entries randomly to select winners
+    const shuffled = [...confirmedEntries].sort(() => Math.random() - 0.5);
+    const winnersCount = Math.min(totalWinners, shuffled.length);
+
+    const drawnWinnersList: any[] = [];
+
+    // Select each winner, credit wallet, and log activity
+    for (let i = 0; i < winnersCount; i++) {
+      const winnerEntry = shuffled[i];
+      const allocatedPrize = prizeAllocations[i] || Math.floor(campaign.prizeAmount / totalWinners);
+
+      // Create the Winner Object
+      const winnerObj = {
+        winnerIndex: i,
+        telegramId: winnerEntry.telegramId,
+        selectedNumber: Number(winnerEntry.selectedNumber),
+        name: winnerEntry.firstName || "Anonymous User",
+        username: winnerEntry.username || "",
+        status: "Approved", // Auto approved
+        allocatedPrize,
+        drawConfirmedAt: new Date().toISOString(),
+        paidAt: new Date().toISOString()
+      };
+      drawnWinnersList.push(winnerObj);
+
+      // Crediting wallet using standard user transaction logic
+      try {
+        await runTransaction(db, async (transaction) => {
+          const userRef = doc(db, "users", String(winnerEntry.telegramId));
+          const userSnap = await transaction.get(userRef);
+          if (!userSnap.exists()) {
+            console.error(`[AutoDraw] User profile not found for Telegram ID ${winnerEntry.telegramId}`);
+            return;
+          }
+
+          const userData = userSnap.data();
+          const currentBalance = Number(userData.balance || 0);
+          const newBalance = currentBalance + allocatedPrize;
+
+          const fileEarnings = Number(userData.fileEarnings || 0);
+          const linkEarnings = Number(userData.linkEarnings || 0);
+          const referralEarnings = Number(userData.referralEarnings || 0);
+          const bonusBalance = Number(userData.bonusBalance || 0);
+          const rewardBalance = Number(userData.rewardBalance || 0);
+          const withdrawnAmount = Number(userData.withdrawnAmount || userData.totalWithdrawn || 0);
+          const pendingWithdrawals = Number(userData.pendingWithdrawals || 0);
+
+          const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + newBalance - withdrawnAmount - pendingWithdrawals;
+
+          transaction.update(userRef, {
+            balance: newBalance,
+            availableBalance: availableBalance
+          });
+
+          // Log transaction
+          const logRef = doc(collection(db, "activityLogs"));
+          transaction.set(logRef, {
+            adminId: "system",
+            targetUserId: String(winnerEntry.telegramId),
+            action: "add_balance",
+            amount: allocatedPrize,
+            reason: `Prize payout for Lucky Number Giveaway: ${campaign.title} (Winner #${i + 1})`,
+            createdAt: new Date()
+          });
+        });
+
+        // Update Entry Documents in Firestore (using standard writeBatch)
+        const entryBatch = writeBatch(db);
+        entryBatch.update(doc(db, "lucky_number_entries", `${giveawayId}_user_${winnerEntry.telegramId}_${winnerEntry.selectedNumber}`), {
+          status: "Winner",
+          paymentStatus: "Paid",
+          rewardAmount: allocatedPrize,
+          paidAt: new Date().toISOString()
+        });
+        entryBatch.update(doc(db, "lucky_number_entries", `${giveawayId}_num_${winnerEntry.selectedNumber}`), {
+          status: "Winner",
+          paymentStatus: "Paid",
+          rewardAmount: allocatedPrize,
+          paidAt: new Date().toISOString()
+        });
+        
+        // Update legacy entry document if it exists
+        const legacyUserEntryRef = doc(db, "lucky_number_entries", `${giveawayId}_user_${winnerEntry.telegramId}`);
+        const legacyUserEntrySnap = await getDoc(legacyUserEntryRef);
+        if (legacyUserEntrySnap.exists() && legacyUserEntrySnap.data().selectedNumber === winnerEntry.selectedNumber) {
+          entryBatch.update(legacyUserEntryRef, {
+            status: "Winner",
+            paymentStatus: "Paid",
+            rewardAmount: allocatedPrize,
+            paidAt: new Date().toISOString()
+          });
+        }
+
+        await entryBatch.commit();
+
+        // Send Telegram notification message
+        const botMsg = `🏆 <b>CONGRATULATIONS! You Won!</b> 🏆\n\n` +
+          `You are the lucky winner of our Lucky Number Giveaway campaign: <b>${campaign.title}</b>!\n\n` +
+          `💰 Winning Amount: <b>₹${allocatedPrize}</b>\n` +
+          `🍀 Your Lucky Number: <b>${winnerEntry.selectedNumber}</b>\n\n` +
+          `<b>₹${allocatedPrize}</b> has been credited instantly to your Roy Share Wallet. You can withdraw it or check your balance anytime inside the app! 🎉`;
+        
+        await sendTgMessage(String(winnerEntry.telegramId), botMsg);
+
+      } catch (err: any) {
+        console.error(`Failed to credit wallet for winner ${winnerEntry.telegramId} in auto-draw:`, err);
+      }
+    }
+
+    // Complete the campaign
+    await updateDoc(campaignDocRef, {
+      drawnWinners: drawnWinnersList,
+      winnersDrawn: true,
+      status: "Completed",
+      winnerId: drawnWinnersList[0]?.telegramId || null,
+      winnerNumber: drawnWinnersList[0]?.selectedNumber || null,
+      winnerName: drawnWinnersList[0]?.name || null,
+      winnerUsername: drawnWinnersList[0]?.username || null,
+      winnerStatus: "Approved"
+    });
+
+    // Write Audit Log
+    await writeAuditLog(giveawayId, campaign.title, "Auto Draw Campaign Completed", {
+      winnersCount,
+      drawnWinners: drawnWinnersList.map(w => ({ telegramId: w.telegramId, num: w.selectedNumber, prize: w.allocatedPrize }))
+    });
+
+    return res.json({
+      success: true,
+      message: "Giveaway auto-draw completed successfully!",
+      winners: drawnWinnersList
+    });
+
+  } catch (err: any) {
+    console.error("Auto draw trigger error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to trigger auto draw" });
   }
 });
 

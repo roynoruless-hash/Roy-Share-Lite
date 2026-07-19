@@ -30,7 +30,7 @@ import {
   UserCheck
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { formatFriendlyKolkata } from "../lib/dateUtils";
+import { formatFriendlyKolkata, formatInKolkata } from "../lib/dateUtils";
 
 export default function LuckyNumberGiveawayAdminManager() {
   const [giveaways, setGiveaways] = useState<any[]>([]);
@@ -54,6 +54,13 @@ export default function LuckyNumberGiveawayAdminManager() {
   const [formNumberVisibility, setFormNumberVisibility] = useState<"Hide Remaining Numbers" | "Show Remaining Numbers" | "Show Hot Numbers">("Show Remaining Numbers");
   const [formStatus, setFormStatus] = useState<"Draft" | "Live" | "Paused" | "Ended" | "Drawing Winners" | "Completed">("Draft");
   const [autoPostChannel, setAutoPostChannel] = useState(false);
+  
+  // New States
+  const [formEntryLimitPerUser, setFormEntryLimitPerUser] = useState(1);
+  const [formStartTime, setFormStartTime] = useState("");
+  const [formEndTime, setFormEndTime] = useState("");
+  const [formAutoResult, setFormAutoResult] = useState(false);
+  const [formRewardAdsEnabled, setFormRewardAdsEnabled] = useState(true);
 
   // Active Detail View State
   const [activeGiveawayId, setActiveGiveawayId] = useState<string | null>(null);
@@ -189,7 +196,12 @@ export default function LuckyNumberGiveawayAdminManager() {
           adsType: formAdsType,
           numberVisibility: formNumberVisibility,
           status: formStatus,
-          autoPostChannel
+          autoPostChannel,
+          entryLimitPerUser: Number(formEntryLimitPerUser || 1),
+          startTime: formStartTime || null,
+          endTime: formEndTime || null,
+          autoResult: formAutoResult,
+          rewardAdsEnabled: formRewardAdsEnabled
         })
       });
 
@@ -223,6 +235,11 @@ export default function LuckyNumberGiveawayAdminManager() {
     setFormNumberVisibility("Show Remaining Numbers");
     setFormStatus("Draft");
     setAutoPostChannel(false);
+    setFormEntryLimitPerUser(1);
+    setFormStartTime("");
+    setFormEndTime("");
+    setFormAutoResult(false);
+    setFormRewardAdsEnabled(true);
     setEditingId(null);
     setShowForm(false);
   };
@@ -243,6 +260,13 @@ export default function LuckyNumberGiveawayAdminManager() {
     setFormNumberVisibility(giveaway.numberVisibility || "Show Remaining Numbers");
     setFormStatus(giveaway.status || "Draft");
     setAutoPostChannel(false);
+    
+    setFormEntryLimitPerUser(giveaway.entryLimitPerUser || 1);
+    setFormStartTime(giveaway.startTime ? formatInKolkata(giveaway.startTime) : "");
+    setFormEndTime(giveaway.endTime ? formatInKolkata(giveaway.endTime) : "");
+    setFormAutoResult(giveaway.autoResult === true);
+    setFormRewardAdsEnabled(giveaway.rewardAdsEnabled !== false);
+    
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -776,6 +800,79 @@ export default function LuckyNumberGiveawayAdminManager() {
                     <option value="Paused">Paused</option>
                     <option value="Ended">Ended</option>
                   </select>
+                </div>
+
+                {/* Advanced Giveaway Settings */}
+                <div className="col-span-2 border-t border-slate-800/60 my-4 pt-4 space-y-4">
+                  <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-1.5">
+                    ⚙️ Advanced Entry & Timing Rules
+                  </h3>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-slate-400 font-bold text-xs">Entry Limit Per User</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={formEntryLimitPerUser}
+                        onChange={(e) => setFormEntryLimitPerUser(Math.max(1, Number(e.target.value)))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none"
+                        placeholder="Default 1"
+                      />
+                    </div>
+                    
+                    <div className="space-y-1 flex flex-col justify-center">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={formRewardAdsEnabled}
+                          onChange={(e) => setFormRewardAdsEnabled(e.target.checked)}
+                          className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-0"
+                        />
+                        <span>Enable Reward Ad on Entry</span>
+                      </label>
+                      <p className="text-[10px] text-slate-500 mt-1 leading-normal">
+                        Require users to successfully complete a video ad before confirmation.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-slate-400 font-bold text-xs">Start Time (IST)</label>
+                      <input
+                        type="datetime-local"
+                        value={formStartTime}
+                        onChange={(e) => setFormStartTime(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none"
+                      />
+                    </div>
+                    
+                    <div className="space-y-1">
+                      <label className="text-slate-400 font-bold text-xs">End Time (IST)</label>
+                      <input
+                        type="datetime-local"
+                        value={formEndTime}
+                        onChange={(e) => setFormEndTime(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={formAutoResult}
+                        onChange={(e) => setFormAutoResult(e.target.checked)}
+                        className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-0"
+                      />
+                      <span>⚡ Automatically draw and approve winners when countdown hits 0</span>
+                    </label>
+                    <p className="text-[10px] text-slate-500 leading-normal ml-5">
+                      If enabled, when the end time passes, the server will pick random verified winners, credit their wallets, and notify them via the Telegram bot automatically.
+                    </p>
+                  </div>
                 </div>
               </div>
 

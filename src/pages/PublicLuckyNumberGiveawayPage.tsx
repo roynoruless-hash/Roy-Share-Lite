@@ -15,9 +15,13 @@ import {
   Flame,
   Sparkles,
   Wallet,
-  ChevronRight
+  ChevronRight,
+  Users,
+  Layers
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { formatFriendlyKolkata, getGiveawayTimeLeft } from "../lib/dateUtils";
+import confetti from "canvas-confetti";
 
 interface PublicLuckyNumberGiveawayPageProps {
   giveawayId: string;
@@ -38,23 +42,20 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
   const [enrollError, setEnrollError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
+  // Countdown state
+  const [timeLeft, setTimeLeft] = useState<any>({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true });
+
   // 1. Listen to Giveaway in real-time
   useEffect(() => {
     if (!giveawayId) return;
 
-    // Diagnostic logging per requirements
-    console.log(`[Diagnostic] Received startapp parameter / parsed giveawayId: ${giveawayId}`);
-    console.log(`[Diagnostic] Parsed campaign ID: ${giveawayId}`);
-    console.log(`[Diagnostic] Collection being searched: lucky_number_campaigns`);
-
+    console.log(`[Diagnostic] Listening to campaign ID: ${giveawayId}`);
     const docRef = doc(db, "lucky_number_campaigns", giveawayId);
     const unsub = onSnapshot(docRef, (snap) => {
-      console.log(`[Diagnostic] Database lookup result exists: ${snap.exists()}`);
       if (snap.exists()) {
-        console.log(`[Diagnostic] Campaign found: ${giveawayId}`);
         setGiveaway({ id: snap.id, ...snap.data() });
       } else {
-        console.log(`[Diagnostic] Campaign not found: ${giveawayId}`);
+        console.warn(`[Diagnostic] Campaign not found: ${giveawayId}`);
       }
       setLoading(false);
     }, (err) => {
@@ -71,7 +72,7 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
 
     const q = query(collection(db, "lucky_number_entries"), where("campaignId", "==", giveawayId));
     const unsub = onSnapshot(q, (snap) => {
-      const list = snap.docs.map(d => d.data());
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setEntries(list);
     }, (err) => {
       console.error("Error listening to entries:", err);
@@ -79,6 +80,51 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
 
     return unsub;
   }, [giveawayId]);
+
+  // 3. Setup countdown timer and trigger automatic draw if expired
+  useEffect(() => {
+    if (!giveaway) return;
+    
+    const updateTimer = () => {
+      const calculated = getGiveawayTimeLeft(giveaway);
+      setTimeLeft(calculated);
+      
+      // Auto trigger draw if expired and is live
+      if (calculated.isExpired && giveaway.status === "Live" && giveaway.autoResult) {
+        console.log(`[AutoDraw] Campaign end reached, triggering auto-draw for giveaway: ${giveaway.id}`);
+        fetch(`${API_BASE}/api/lucky-number-giveaway/auto-draw-trigger`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ giveawayId: giveaway.id })
+        })
+        .then(res => res.json())
+        .then(data => {
+          console.log("[AutoDraw] Result:", data);
+        })
+        .catch(err => {
+          console.error("[AutoDraw] Auto-draw trigger error:", err);
+        });
+      }
+    };
+    
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [giveaway]);
+
+  // 4. Trigger celebration animation if user has won
+  const myEntries = entries.filter(e => e.telegramId === String(user?.telegramId) && e.status !== "PendingAd" && e.id.includes("_num_"));
+  const hasWon = myEntries.some(e => e.status === "Winner" || e.status === "Approved");
+
+  useEffect(() => {
+    if (hasWon) {
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { y: 0.6 }
+      });
+    }
+  }, [hasWon]);
 
   if (loading) {
     return (
@@ -109,13 +155,15 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
     );
   }
 
-  const isLive = giveaway.status === "Live";
-  const myEntry = entries.find(e => e.telegramId === String(user?.telegramId) && e.status !== "PendingAd");
-
-  // Determine bounds of the Board
+  const isLive = giveaway.status === "Live" && !timeLeft.isExpired;
+  
+  // Calculate bounds of the Board
   const minNum = Number(giveaway.minNumber || 1);
   const maxNum = Number(giveaway.maxNumber || 100);
   const totalNumbersCount = maxNum - minNum + 1;
+
+  const entryLimit = Number(giveaway.entryLimitPerUser || 1);
+  const hasReachedLimit = myEntries.length >= entryLimit;
 
   // Determine hot ranges (with fewest selected numbers)
   const getHotNumbersSet = () => {
@@ -160,7 +208,8 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
 
   // Helper to check if a specific number is reserved
   const getOccupyingEntry = (num: number) => {
-    const entry = entries.find(e => Number(e.selectedNumber) === num);
+    // Only search number doc ids to be safe
+    const entry = entries.find(e => Number(e.selectedNumber) === num && e.id.includes(`_num_${num}`));
     if (!entry) return null;
 
     if (entry.status === "Confirmed" || entry.status === "Winner" || entry.status === "Approved" || entry.status === "Rejected") {
@@ -170,7 +219,7 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
     if (entry.status === "PendingAd") {
       const reservedAt = new Date(entry.reservedAt).getTime();
       if (Date.now() - reservedAt < 60000) {
-        return entry; // Lock active
+        return entry; // Active lock
       }
     }
 
@@ -183,7 +232,7 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
     renderNumbersList.push(i);
   }
 
-  // Handle Participate Submission
+  // Handle Participate Submission with integrated Ad Flow & secure confirmations
   const handleParticipate = async () => {
     if (!user) {
       setEnrollError("Please login inside Telegram to enter giveaways.");
@@ -220,46 +269,79 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
         return;
       }
 
-      // AdsBitvex Reward Ad Integration
-      try {
-        const configRes = await fetch("/api/adsbitvex-config");
-        if (configRes.ok) {
-          const configData = await configRes.json();
-          if (configData.masterEnabled && configData.luckyNumberEnabled) {
-            if (typeof (window as any).showadsbitvex !== "function") {
-              setEnrollError("❌ window.showadsbitvex() is undefined. SDK is not loaded.");
-              setEnrolling(false);
-              return;
-            }
-            await (window as any).showadsbitvex();
+      // Step 2: AdsBitvex Reward Ad Integration
+      if (giveaway.rewardAdsEnabled !== false) {
+        try {
+          if (typeof (window as any).showadsbitvex !== "function") {
+            throw new Error("window.showadsbitvex is not loaded.");
           }
+          await (window as any).showadsbitvex();
+        } catch (err: any) {
+          console.error("Ad failed, releasing reservation:", err);
+          // Auto release reservation on fail
+          await fetch(`${API_BASE}/api/lucky-number-giveaway/release-number`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              giveawayId: giveaway.id,
+              telegramId: user.telegramId,
+              selectedNumber: selectedNum
+            })
+          });
+          setEnrollError(`Sponsor Ad failed to load: ${err?.message || "Closed or blocked"}. Please try again.`);
+          setEnrolling(false);
+          return;
         }
-      } catch (err: any) {
-        setEnrolling(false);
-        setEnrollError(`Ad failed: ${err?.message || err}`);
-        return;
       }
 
-      // Step 2: Confirm permanently
+      // Step 3: Confirm permanently
       const confirmRes = await fetch(`${API_BASE}/api/lucky-number-giveaway/confirm-number`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           giveawayId: giveaway.id,
-          telegramId: user.telegramId
+          telegramId: user.telegramId,
+          selectedNumber: selectedNum
         })
       });
 
       const confirmData = await confirmRes.json();
       if (confirmRes.ok && confirmData.success) {
-        setSuccessMsg(`🎉 Number ${selectedNum} Reserved Successfully!`);
+        confetti({
+          particleCount: 120,
+          spread: 70,
+          origin: { y: 0.7 }
+        });
+        setSuccessMsg(`✅ Entry Submitted Successfully!\n🎟 Your Lucky Number: ${selectedNum}`);
+        setSelectedNum(null);
       } else {
+        // Auto release number on backend error
+        await fetch(`${API_BASE}/api/lucky-number-giveaway/release-number`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            giveawayId: giveaway.id,
+            telegramId: user.telegramId,
+            selectedNumber: selectedNum
+          })
+        });
         setEnrollError(confirmData.error || "Failed to confirm participation.");
       }
       setEnrolling(false);
 
     } catch (err: any) {
       console.error("Enrollment crash:", err);
+      if (selectedNum !== null) {
+        await fetch(`${API_BASE}/api/lucky-number-giveaway/release-number`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            giveawayId: giveaway.id,
+            telegramId: user.telegramId,
+            selectedNumber: selectedNum
+          })
+        });
+      }
       setEnrollError(err.message || "Failed to participate. Please try again.");
       setEnrolling(false);
     }
@@ -283,8 +365,26 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
 
       <main className="p-4 max-w-md mx-auto space-y-6 relative z-10">
 
+        {/* Live Countdown Timer */}
+        {isLive && !timeLeft.isExpired && (
+          <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-3xl flex items-center justify-between shadow-xl">
+            <div className="flex items-center gap-2 text-slate-400">
+              <Clock className="w-5 h-5 text-emerald-400 animate-pulse" />
+              <span className="text-xs font-bold uppercase">⏳ Result In</span>
+            </div>
+            
+            <div className="flex items-center gap-1 font-mono text-sm font-black text-emerald-400">
+              <span>{String(timeLeft.hours).padStart(2, "0")}h</span>
+              <span className="text-slate-600 animate-pulse">:</span>
+              <span>{String(timeLeft.minutes).padStart(2, "0")}m</span>
+              <span className="text-slate-600 animate-pulse">:</span>
+              <span className="text-emerald-300">{String(timeLeft.seconds).padStart(2, "0")}s</span>
+            </div>
+          </div>
+        )}
+
         {/* Winner Showcase Panel */}
-        {myEntry && myEntry.status === "Winner" && (
+        {hasWon && (
           <motion.div 
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -296,11 +396,16 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
             <div className="space-y-1">
               <h2 className="text-xl font-black text-amber-300">🎉 Congratulations!</h2>
               <p className="text-sm text-slate-300">
-                You won! Your lucky number <span className="font-bold text-white">{myEntry.selectedNumber}</span> was picked!
+                You won! One of your lucky numbers was picked!
               </p>
             </div>
-            <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-900 font-bold text-emerald-400 text-lg">
-              ₹{giveaway.prizeAmount} Credited
+            <div className="space-y-2">
+              {myEntries.filter(e => e.status === "Winner").map((winE, idx) => (
+                <div key={idx} className="p-4 bg-slate-950/80 rounded-2xl border border-slate-900 flex justify-between items-center">
+                  <span className="text-slate-400 text-xs">Number: <b className="text-white">{winE.selectedNumber}</b></span>
+                  <span className="font-black text-emerald-400 text-base">₹{winE.rewardAmount || giveaway.prizeAmount} Credited</span>
+                </div>
+              ))}
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
               The prize amount has been credited directly to your Roy Share Wallet. You can check your updated balance and withdraw it instantly!
@@ -356,8 +461,8 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
           </div>
         </div>
 
-        {/* USER ENROLLED CARD */}
-        {myEntry && myEntry.status !== "Winner" && (
+        {/* USER ENROLLED CARD / CURRENT ENTRIES */}
+        {myEntries.length > 0 && (
           <motion.div 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -365,46 +470,71 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
           >
             <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-2xl text-emerald-400">
               <CheckCircle className="w-6 h-6 shrink-0" />
-              <div>
-                <span className="text-xs font-black block">🎉 CONGRATULATIONS!</span>
-                <span className="text-[10px] text-emerald-500/80">Participation confirmed</span>
+              <div className="flex-1">
+                <span className="text-xs font-black block">🎉 MY ENTRIES ({myEntries.length}/{entryLimit})</span>
+                <span className="text-[10px] text-emerald-500/80">Participation verified</span>
               </div>
             </div>
 
-            <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-900 text-center space-y-1">
-              <span className="text-[9px] text-slate-500 font-bold uppercase block">Your Selected Lucky Number</span>
-              <span className="text-3xl font-black text-white tracking-widest">{myEntry.selectedNumber}</span>
+            <div className="grid grid-cols-2 gap-2.5">
+              {myEntries.map((entry, idx) => (
+                <div key={idx} className="bg-slate-950/60 p-3 rounded-2xl border border-slate-900 text-center space-y-1">
+                  <span className="text-[9px] text-slate-500 font-bold uppercase block">Lucky Number</span>
+                  <span className="text-xl font-black text-white tracking-widest">{entry.selectedNumber}</span>
+                  <span className={`text-[9px] block font-bold ${entry.status === 'Winner' ? 'text-amber-400' : 'text-slate-500'}`}>
+                    {entry.status === 'Winner' ? '🏆 Winner' : 'Confirmed'}
+                  </span>
+                </div>
+              ))}
             </div>
 
             <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-              You are successfully enrolled. Sit back and wait for results! We will notify you instantly via our bot when the draw is completed! 🍀
+              {hasReachedLimit 
+                ? "You have reached your maximum entry limit for this giveaway! Sit back and wait for the results."
+                : `You can select up to ${entryLimit - myEntries.length} more lucky number(s) to increase your winning chances!`
+              }
             </p>
           </motion.div>
         )}
 
+        {/* LIVE STATUS PANEL */}
+        <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-5 space-y-3.5 shadow-2xl">
+          <h3 className="text-sm font-black text-white flex items-center gap-2">
+            <Users className="w-4 h-4 text-emerald-400" />
+            Live Giveaway Status
+          </h3>
+          
+          <div className="grid grid-cols-3 gap-2.5 text-center">
+            <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-900">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">Participants</span>
+              <span className="text-base font-black text-white">
+                {Array.from(new Set(entries.map(e => e.telegramId))).length}
+              </span>
+            </div>
+            <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-900">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">Entries Filled</span>
+              <span className="text-base font-black text-white">
+                {entries.filter(e => e.status === "Confirmed" || e.status === "Winner").length}
+              </span>
+            </div>
+            <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-900">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">Available Slots</span>
+              <span className="text-base font-black text-emerald-400">
+                {Math.max(0, totalNumbersCount - entries.filter(e => e.status === "Confirmed" || e.status === "Winner").length)}
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* INTERACTIVE NUMBER SELECTION BOARD */}
-        {!myEntry && isLive && (
+        {!hasReachedLimit && isLive && (
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <h3 className="font-black text-sm flex items-center gap-1.5 text-white">
                 <Sparkles className="w-4 h-4 text-amber-400" />
                 Select Your Lucky Number
               </h3>
-              <span className="text-[10px] text-slate-500 font-bold uppercase">1 number per user</span>
-            </div>
-
-            {/* Stat Counters on the board */}
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800 text-center">
-                <span className="text-slate-500 text-[10px] block font-bold">Total Numbers</span>
-                <span className="text-sm font-black text-slate-200">{totalNumbersCount}</span>
-              </div>
-              <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800 text-center">
-                <span className="text-slate-500 text-[10px] block font-bold">Remaining Available</span>
-                <span className="text-sm font-black text-emerald-400">
-                  {totalNumbersCount - entries.filter(e => e.status === "Confirmed" || e.status === "Winner").length}
-                </span>
-              </div>
+              <span className="text-[10px] text-slate-500 font-bold uppercase">Limit: {entryLimit} Per User</span>
             </div>
 
             {/* Error & Success Banner */}
@@ -509,7 +639,9 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
                 {enrolling ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
-                  <span>Watch Sponsor Ad & Confirm 🍀</span>
+                  <span>
+                    {giveaway.rewardAdsEnabled !== false ? "Watch Sponsor Ad & Submit Entry 🍀" : "Submit Entry 🍀"}
+                  </span>
                 )}
               </button>
             </div>
@@ -517,13 +649,61 @@ export default function PublicLuckyNumberGiveawayPage({ giveawayId, onBack, onNa
         )}
 
         {/* CLOSED DRAW CARD */}
-        {!isLive && !myEntry && (
-          <div className="bg-slate-900/60 border border-slate-800 p-8 rounded-3xl text-center text-slate-400 text-sm space-y-4">
+        {(!isLive || hasReachedLimit) && (
+          <div className="bg-slate-900/60 border border-slate-800 p-8 rounded-3xl text-center text-slate-400 text-sm space-y-4 shadow-xl">
             <AlertCircle className="w-12 h-12 text-slate-600 mx-auto" />
-            <h3 className="font-bold text-white">Closed Board</h3>
+            <h3 className="font-bold text-white">
+              {hasReachedLimit ? "Entry Limit Reached" : "Board Ended/Closed"}
+            </h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              This giveaway is closed. Keep your notifications active for direct bot alerts when we launch our next Lucky Number Board!
+              {hasReachedLimit 
+                ? `You have reached the maximum allowed limit of ${entryLimit} entry/entries on this board. Good luck!`
+                : "This lucky board is no longer accepting submissions. Keep notifications active for new board launches!"
+              }
             </p>
+          </div>
+        )}
+
+        {/* Recent Winners Section */}
+        {giveaway.drawnWinners && giveaway.drawnWinners.length > 0 && (
+          <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-2xl">
+            <h3 className="text-sm font-black text-amber-400 flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-amber-400" />
+              🏆 Recent Winners
+            </h3>
+            
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+              {giveaway.drawnWinners.slice(0, 10).map((winner: any, idx: number) => {
+                const winnerCode = `RS${String(winner.telegramId || "").slice(-4).padStart(4, "0")}`;
+                return (
+                  <div 
+                    key={idx}
+                    className="p-3.5 bg-slate-950/60 rounded-2xl border border-slate-900/80 flex items-center justify-between gap-3"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-white">{winnerCode}</span>
+                        <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold uppercase">
+                          Winner
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-mono">
+                        {winner.drawConfirmedAt ? formatFriendlyKolkata(winner.drawConfirmedAt) : formatFriendlyKolkata(winner.paidAt)}
+                      </p>
+                    </div>
+                    
+                    <div className="text-right space-y-0.5">
+                      <span className="text-xs font-black text-amber-400 block">
+                        ₹{winner.allocatedPrize}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block">
+                        Number: <span className="text-white font-bold">{winner.selectedNumber}</span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
