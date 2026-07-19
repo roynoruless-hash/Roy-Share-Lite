@@ -280,113 +280,61 @@ router.post("/cancel-queue", async (req, res) => {
   }
 });
 
-router.post("/submit-decision", async (req, res) => {
+// STRICT SERVER-SIDE STATE MACHINE DEFINITIONS
+const ALLOWED_STATES = [
+  "WAITING", "MATCHED", "DISCUSSION", "DECISION_PENDING",
+  "PLAYER_SUBMITTED", "AI_SUBMITTED", "READY_TO_RESOLVE",
+  "RESOLVING", "REVEALING", "COMPLETED", "CANCELLED"
+] as const;
+
+type AllowedState = typeof ALLOWED_STATES[number];
+
+const STATE_TRANSITIONS: Record<AllowedState, AllowedState[]> = {
+  WAITING: ["MATCHED", "CANCELLED"],
+  MATCHED: ["DISCUSSION", "CANCELLED"],
+  DISCUSSION: ["DECISION_PENDING", "PLAYER_SUBMITTED", "READY_TO_RESOLVE", "CANCELLED"],
+  DECISION_PENDING: ["PLAYER_SUBMITTED", "AI_SUBMITTED", "READY_TO_RESOLVE", "CANCELLED"],
+  PLAYER_SUBMITTED: ["READY_TO_RESOLVE", "CANCELLED"],
+  AI_SUBMITTED: ["READY_TO_RESOLVE", "CANCELLED"],
+  READY_TO_RESOLVE: ["RESOLVING", "CANCELLED"],
+  RESOLVING: ["REVEALING", "COMPLETED", "CANCELLED"],
+  REVEALING: ["COMPLETED", "CANCELLED"],
+  COMPLETED: [],
+  CANCELLED: []
+};
+
+function isValidTransition(from: string, to: string): boolean {
+  const f = from.toUpperCase() as AllowedState;
+  const t = to.toUpperCase() as AllowedState;
+  if (!ALLOWED_STATES.includes(f) || !ALLOWED_STATES.includes(t)) return false;
+  return STATE_TRANSITIONS[f].includes(t);
+}
+
+// ROBUST UNIFIED RESOLVER Helper to ensure exactly-once execution and eliminate loopback fetches
+async function resolveMatchInternal(matchId: string): Promise<{ success: boolean; processed: boolean; message?: string }> {
+  const db = getDb();
+  console.log(`[SERVER LOG] Resolve Started: matchId=${matchId}`);
+
+  let processed = false;
   try {
-    const { telegramId, matchId, decision, adCompleted } = req.body;
-    if (!telegramId || !matchId || !decision) return res.status(400).json({ success: false });
-    if (decision !== "split" && decision !== "steal") return res.status(400).json({ success: false, message: "Invalid decision" });
-
-    const db = getDb();
-    let resultCalculated = false;
-
-    await runTransaction(db, async (t) => {
-      const matchRef = doc(db, "sos_matches", matchId);
-      const matchSnap = await t.get(matchRef);
-      if (!matchSnap.exists()) throw new Error("Match not found");
-
-      const match = matchSnap.data();
-      const isPlayer1 = decryptId(match.player1.encTelegramId || match.player1.telegramId) === String(telegramId);
-      const isPlayer2 = decryptId(match.player2.encTelegramId || match.player2.telegramId) === String(telegramId);
-
-      if (!isPlayer1 && !isPlayer2) throw new Error("Not part of match");
-
-      if (match.status === "completed" || match.status === "cancelled" || match.status === "revealing") {
-        return; // already processed
-      }
-
-      const decRef = doc(db, "sos_decisions", matchId);
-      const decSnap = await t.get(decRef);
-      const decData = decSnap.exists() ? decSnap.data() : { player1Decision: null, player2Decision: null };
-
-      if (isPlayer1 && decData.player1Decision) return;
-      if (isPlayer2 && decData.player2Decision) return;
-
-      if (isPlayer1) decData.player1Decision = decision;
-      if (isPlayer2) decData.player2Decision = decision;
-
-      const playerCode = isPlayer1 ? match.player1.publicCode : match.player2.publicCode;
-      
-      if (adCompleted) {
-        console.log(`[SERVER LOG] Reward Ad Completed: matchId=${matchId}, playerCode=${playerCode}`);
-      }
-      console.log(`[SERVER LOG] Player Decision Saved: matchId=${matchId}, playerCode=${playerCode}, decision=${decision}`);
-
-      if (match.player2.isAI && !decData.player2Decision) {
-        const p = match.player2.personality;
-        let aiDecision = "split";
-        if (p === "greedy") aiDecision = "steal";
-        else if (p === "honest") aiDecision = "split";
-        else if (p === "random") aiDecision = Math.random() > 0.5 ? "split" : "steal";
-        else if (p === "smart") aiDecision = Math.random() > 0.3 ? "split" : "steal";
-        decData.player2Decision = aiDecision;
-        console.log(`[SERVER LOG] AI Decision Saved: matchId=${matchId}, aiCode=${match.player2.publicCode}, decision=${aiDecision}`);
-      }
-
-      t.set(decRef, decData, { merge: true });
-
-      const updates: any = {};
-      if (isPlayer1) updates.player1Submitted = true;
-      if (isPlayer2 || match.player2.isAI) updates.player2Submitted = true;
-
-      const p1Decided = decData.player1Decision != null;
-      const p2Decided = decData.player2Decision != null;
-
-      if (p1Decided && p2Decided) {
-        updates.status = "revealing";
-        updates.revealingStartedAt = Date.now();
-        resultCalculated = true;
-      }
-
-      if (Object.keys(updates).length > 0) {
-        t.update(matchRef, updates);
-      }
-    });
-
-    res.json({ success: true, resultCalculated });
-  } catch (error: any) {
-    res.status(400).json({ success: false, message: error.message });
-  }
-});
-
-router.post("/process-result", async (req, res) => {
-  try {
-    const { matchId } = req.body;
-    const db = getDb();
-
-    console.log(`[SERVER LOG] Resolve Started: matchId=${matchId}`);
-
-    let processed = false;
     await runTransaction(db, async (t) => {
       const matchRef = doc(db, "sos_matches", matchId);
       const matchSnap = await t.get(matchRef);
       if (!matchSnap.exists()) throw new Error("Match not found");
       const match = matchSnap.data();
 
-      if (match.status === "completed" || match.status === "cancelled" || match.resultProcessed) {
+      const currentStatus = (match.status || "").toUpperCase();
+      if (currentStatus === "COMPLETED" || currentStatus === "CANCELLED" || match.resultProcessed) {
         processed = true;
         return;
       }
-      
+
+      // Transition to RESOLVING immediately inside transaction to block any concurrent execution
+      t.update(matchRef, { status: "RESOLVING" });
+
       const p1 = match.player1;
       const p2 = match.player2;
-
       const now = Date.now();
-      const isTimeout = match.decisionEndTime && now > (match.decisionEndTime + 5000);
-      const isRevealingTimeout = match.revealingStartedAt && now > (match.revealingStartedAt + 5000);
-
-      if (match.status !== "revealing" && !isTimeout && !isRevealingTimeout) {
-        throw new Error("Match not ready to process");
-      }
 
       const decRef = doc(db, "sos_decisions", matchId);
       const decSnap = await t.get(decRef);
@@ -409,7 +357,7 @@ router.post("/process-result", async (req, res) => {
           else if (p === "random") p2Decision = Math.random() > 0.5 ? "split" : "steal";
           else if (p === "smart") p2Decision = Math.random() > 0.3 ? "split" : "steal";
           else p2Decision = "split";
-          console.log(`[SERVER LOG] AI Decision Saved: matchId=${matchId}, aiCode=${p2.publicCode}, decision=${p2Decision}`);
+          console.log(`[SERVER LOG] AI Decision Saved (Fallback): matchId=${matchId}, aiCode=${p2.publicCode}, decision=${p2Decision}`);
         } else {
           p2Decision = "split";
           console.log(`[SERVER LOG] Player 2 decision missing, defaulted to split for match ${matchId}`);
@@ -424,7 +372,6 @@ router.post("/process-result", async (req, res) => {
       p2.decision = p2Decision;
 
       const prizePool = match.prizePool || 20;
-      
       let p1Win = 0;
       let p2Win = 0;
 
@@ -438,7 +385,7 @@ router.post("/process-result", async (req, res) => {
       }
 
       t.update(matchRef, { 
-        status: "completed", 
+        status: "COMPLETED", 
         p1Win, 
         p2Win, 
         player1: p1, 
@@ -446,7 +393,7 @@ router.post("/process-result", async (req, res) => {
         resultProcessed: true,
         resolvedAt: now
       });
-      console.log(`[SERVER LOG] Firestore Updated: matchId=${matchId}, status=completed`);
+      console.log(`[SERVER LOG] Firestore Updated: matchId=${matchId}, status=COMPLETED`);
 
       if (p1Win > 0) {
         const u1Id = decryptId(p1.encTelegramId || p1.telegramId);
@@ -483,7 +430,7 @@ router.post("/process-result", async (req, res) => {
           console.log(`[SERVER LOG] Wallet Credited: matchId=${matchId}, userId=${u2Id}, amount=${p2Win}`);
         }
       }
-      
+
       // Cleanup queue
       t.delete(doc(db, "sos_queue", decryptId(p1.encTelegramId || p1.telegramId)));
       if (!p2.isAI) {
@@ -492,12 +439,115 @@ router.post("/process-result", async (req, res) => {
       processed = true;
     });
 
-    console.log(`[SERVER LOG] Reveal Completed: matchId=${matchId}`);
-    console.log(`[SERVER LOG] Match Closed: matchId=${matchId}`);
+    console.log(`[SERVER LOG] Reveal Published: matchId=${matchId}`);
+    console.log(`[SERVER LOG] Match Completed: matchId=${matchId}`);
+    return { success: true, processed };
+  } catch (error: any) {
+    console.error(`[SERVER LOG] Error in resolveMatchInternal for ${matchId}:`, error);
+    return { success: false, processed: false, message: error.message };
+  }
+}
 
-    res.json({ success: true, processed });
+router.post("/submit-decision", async (req, res) => {
+  try {
+    const { telegramId, matchId, decision, adCompleted } = req.body;
+    if (!telegramId || !matchId || !decision) return res.status(400).json({ success: false });
+    if (decision !== "split" && decision !== "steal") return res.status(400).json({ success: false, message: "Invalid decision" });
+
+    const db = getDb();
+    let resultCalculated = false;
+
+    await runTransaction(db, async (t) => {
+      const matchRef = doc(db, "sos_matches", matchId);
+      const matchSnap = await t.get(matchRef);
+      if (!matchSnap.exists()) throw new Error("Match not found");
+
+      const match = matchSnap.data();
+      const isPlayer1 = decryptId(match.player1.encTelegramId || match.player1.telegramId) === String(telegramId);
+      const isPlayer2 = decryptId(match.player2.encTelegramId || match.player2.telegramId) === String(telegramId);
+
+      if (!isPlayer1 && !isPlayer2) throw new Error("Not part of match");
+
+      const currentStatus = (match.status || "").toUpperCase();
+      if (currentStatus === "COMPLETED" || currentStatus === "CANCELLED" || currentStatus === "REVEALING" || currentStatus === "RESOLVING") {
+        return; // already processed
+      }
+
+      const decRef = doc(db, "sos_decisions", matchId);
+      const decSnap = await t.get(decRef);
+      const decData = decSnap.exists() ? decSnap.data() : { player1Decision: null, player2Decision: null };
+
+      if (isPlayer1 && decData.player1Decision) return;
+      if (isPlayer2 && decData.player2Decision) return;
+
+      if (isPlayer1) decData.player1Decision = decision;
+      if (isPlayer2) decData.player2Decision = decision;
+
+      const playerCode = isPlayer1 ? match.player1.publicCode : match.player2.publicCode;
+      
+      if (adCompleted) {
+        console.log(`[SERVER LOG] Reward Ad Completed: matchId=${matchId}, playerCode=${playerCode}`);
+      }
+      console.log(`[SERVER LOG] Player Decision Saved: matchId=${matchId}, playerCode=${playerCode}, decision=${decision}`);
+
+      if (match.player2.isAI && !decData.player2Decision) {
+        const p = match.player2.personality;
+        let aiDecision = "split";
+        if (p === "greedy") aiDecision = "steal";
+        else if (p === "honest") aiDecision = "split";
+        else if (p === "random") aiDecision = Math.random() > 0.5 ? "split" : "steal";
+        else if (p === "smart") aiDecision = Math.random() > 0.3 ? "split" : "steal";
+        decData.player2Decision = aiDecision;
+        console.log(`[SERVER LOG] AI Decision Saved: matchId=${matchId}, aiCode=${match.player2.publicCode}, decision=${aiDecision}`);
+      }
+
+      t.set(decRef, decData, { merge: true });
+
+      const p1Submitted = isPlayer1 ? true : !!match.player1Submitted;
+      const p2Submitted = (isPlayer2 || match.player2.isAI) ? true : !!match.player2Submitted;
+
+      const p1Decided = decData.player1Decision != null;
+      const p2Decided = decData.player2Decision != null;
+
+      let nextStatus: AllowedState = "PLAYER_SUBMITTED";
+      if (p1Decided && p2Decided) {
+        nextStatus = "REVEALING";
+        resultCalculated = true;
+      }
+
+      const updates: any = {
+        status: nextStatus,
+        player1Submitted: p1Submitted,
+        player2Submitted: p2Submitted
+      };
+
+      if (nextStatus === "REVEALING") {
+        updates.revealingStartedAt = Date.now();
+      }
+
+      // Enforce State Machine Validation
+      if (isValidTransition(currentStatus, nextStatus)) {
+        t.update(matchRef, updates);
+      } else {
+        console.warn(`[SERVER LOG] Blocked invalid state transition from ${currentStatus} to ${nextStatus} for match ${matchId}`);
+      }
+    });
+
+    res.json({ success: true, resultCalculated });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+router.post("/process-result", async (req, res) => {
+  const { matchId } = req.body;
+  if (!matchId) return res.status(400).json({ success: false, message: "Missing matchId" });
+
+  const result = await resolveMatchInternal(matchId);
+  if (result.success) {
+    res.json({ success: true, processed: result.processed });
+  } else {
+    res.status(400).json({ success: false, message: result.message });
   }
 });
 
@@ -512,12 +562,13 @@ router.post("/recover", async (req, res) => {
     if (!matchSnap.exists()) return res.json({ success: false, message: "Match not found" });
 
     const match = matchSnap.data();
-    if (match.status === "completed" || match.status === "cancelled") {
+    const statusUpper = (match.status || "").toUpperCase();
+    if (statusUpper === "COMPLETED" || statusUpper === "CANCELLED") {
       return res.json({ success: true, status: match.status });
     }
 
     const now = Date.now();
-    const isRevealing = match.status === "revealing";
+    const isRevealing = statusUpper === "REVEALING";
     const revealingElapsed = match.revealingStartedAt ? (now - match.revealingStartedAt) : 0;
 
     const isTimeout = match.decisionEndTime && now > (match.decisionEndTime + 5000);
@@ -525,13 +576,12 @@ router.post("/recover", async (req, res) => {
 
     if (isRevealingTimeout || isTimeout) {
       console.log(`[SERVER LOG] Recovery triggered for stuck match ${matchId}. Status: ${match.status}. Force completing...`);
-      await fetch(`http://127.0.0.1:3000/api/split-or-steal/process-result`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchId })
-      }).catch(console.error);
-
-      return res.json({ success: true, status: "completed", recovered: true });
+      const result = await resolveMatchInternal(matchId);
+      if (result.success) {
+        return res.json({ success: true, status: "completed", recovered: true });
+      } else {
+        return res.status(500).json({ success: false, message: result.message });
+      }
     }
 
     res.json({ success: true, status: match.status });
@@ -866,8 +916,9 @@ router.post("/cron/cleanup", async (req, res) => {
     const matchSnap = await getDocs(collection(db, "sos_matches"));
     for (const docSnap of matchSnap.docs) {
       const match = docSnap.data();
-      if (match.status !== "completed" && match.status !== "cancelled") {
-        const isRevealing = match.status === "revealing";
+      const statusUpper = (match.status || "").toUpperCase();
+      if (statusUpper !== "COMPLETED" && statusUpper !== "CANCELLED") {
+        const isRevealing = statusUpper === "REVEALING";
         const revealingStarted = match.revealingStartedAt || 0;
         const decisionEnd = match.decisionEndTime || 0;
 
@@ -875,12 +926,8 @@ router.post("/cron/cleanup", async (req, res) => {
         const isDecisionTimeout = decisionEnd > 0 && now > decisionEnd + 15000;
 
         if (isRevealingTimeout || isDecisionTimeout) {
-          // Force process
-          await fetch(`http://127.0.0.1:3000/api/split-or-steal/process-result`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ matchId: docSnap.id })
-          }).catch(() => {});
+          // Force process directly using the database handler
+          await resolveMatchInternal(docSnap.id).catch(console.error);
           cleanedMatches++;
         }
       }

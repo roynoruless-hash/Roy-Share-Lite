@@ -23,7 +23,7 @@ service cloud.firestore {
       allow read, write: if true;
     }
     match /sos_decisions/{document=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
     match /{document=**} {
       allow read, write: if true;

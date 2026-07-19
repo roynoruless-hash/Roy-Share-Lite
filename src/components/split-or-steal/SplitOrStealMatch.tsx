@@ -286,13 +286,15 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
   const oppData = isP1 ? match?.player2 : match?.player1;
   const mySubmitted = isP1 ? match?.player1Submitted : match?.player2Submitted;
 
+  const statusUpper = (match?.status || "").toUpperCase();
+
   const [revealCountdown, setRevealCountdown] = useState<number | null>(null);
 
   useEffect(() => {
-    if (match?.status === "revealing" && revealCountdown === null) {
+    if (statusUpper === "REVEALING" && revealCountdown === null) {
       setRevealCountdown(3);
     }
-  }, [match?.status]);
+  }, [statusUpper]);
 
   // Robust Countdown Processor: both clients trigger result-processing to avoid freezing on a disconnected P1
   useEffect(() => {
@@ -310,7 +312,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
 
   // Backup auto-processor
   useEffect(() => {
-    if (mySubmitted && match?.status !== "completed" && match?.status !== "revealing") {
+    if (mySubmitted && statusUpper !== "COMPLETED" && statusUpper !== "REVEALING") {
       const interval = setInterval(() => {
         if (match.decisionEndTime && Date.now() > match.decisionEndTime + 5000) {
            fetch(`${API_BASE}/api/split-or-steal/process-result`, {
@@ -322,11 +324,11 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
       }, 3000);
       return () => clearInterval(interval);
     }
-  }, [mySubmitted, match]);
+  }, [mySubmitted, match, statusUpper]);
 
   // Backup default auto-submission of Split if the player doesn't choose
   useEffect(() => {
-    if ((match?.status === "discussion" && timeLeft === 0) || match?.status === "decision") {
+    if ((statusUpper === "DISCUSSION" && timeLeft === 0) || statusUpper === "DECISION" || statusUpper === "DECISION_PENDING" || statusUpper === "PLAYER_SUBMITTED" || statusUpper === "AI_SUBMITTED") {
       const interval = setInterval(() => {
         if (match.decisionEndTime && Date.now() > match.decisionEndTime && !mySubmitted && !submitting) {
           submitDecision("split");
@@ -334,10 +336,10 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
       }, 1000);
       return () => clearInterval(interval);
     }
-  }, [match, timeLeft, myData, submitting]);
+  }, [match, timeLeft, myData, submitting, statusUpper]);
 
   const handleBackClick = () => {
-    if (match?.status === "completed" || match?.status === "cancelled") {
+    if (statusUpper === "COMPLETED" || statusUpper === "CANCELLED") {
       onBack();
     } else {
       setShowExitConfirm(true);
@@ -441,7 +443,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
       </header>
 
       {/* MATCH COMPLETED */}
-      {match.status === "completed" && (
+      {statusUpper === "COMPLETED" && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
           <h1 className="text-4xl font-black mb-8">Results</h1>
           
@@ -456,7 +458,7 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
                 +₹{isP1 ? match.p1Win : match.p2Win}
               </div>
             </div>
-
+ 
             <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800">
               <div className="text-sm text-slate-400 mb-2">Opponent</div>
               <div className={`text-3xl mb-2 ${oppData.decision === 'split' ? 'text-blue-400' : 'text-rose-500'}`}>
@@ -468,15 +470,15 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
               </div>
             </div>
           </div>
-
+ 
           <button onClick={onBack} className="mt-12 px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition">
             Back to Dashboard
           </button>
         </div>
       )}
-
+ 
       {/* MATCH CANCELLED */}
-      {match.status === "cancelled" && (
+      {statusUpper === "CANCELLED" && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
           <div className="w-20 h-20 bg-rose-500/10 border border-rose-500/30 rounded-full flex items-center justify-center mb-6 text-rose-500 text-4xl">
             🚫
@@ -490,9 +492,9 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
           </button>
         </div>
       )}
-
+ 
       {/* DISCUSSION */}
-      {match.status === "discussion" && timeLeft > 0 && (
+      {statusUpper === "DISCUSSION" && timeLeft > 0 && (
         <>
           <div className="p-2 bg-rose-500/10 text-rose-400 text-xs text-center border-b border-rose-500/20 font-medium">
             <AlertTriangle className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
@@ -522,10 +524,10 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
                 </div>
               </div>
             )}
-
+ 
             <div ref={messagesEndRef} />
           </div>
-
+ 
           <form onSubmit={handleSendMessage} className="p-4 bg-slate-900 border-t border-slate-800 flex gap-2 shrink-0">
             <input 
               type="text" 
@@ -541,9 +543,9 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
           </form>
         </>
       )}
-
+ 
       {/* REVEALING */}
-      {match.status === "revealing" && (
+      {statusUpper === "REVEALING" && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
           <h2 className="text-3xl font-black mb-8 text-amber-400">Revealing...</h2>
           {revealCountdown !== null && revealCountdown > 0 ? (
@@ -553,9 +555,9 @@ export default function SplitOrStealMatch({ matchId, onBack }: { matchId: string
           )}
         </div>
       )}
-
+ 
       {/* DECISION */}
-      {(match.status === "decision" || (match.status === "discussion" && timeLeft === 0)) && (
+      {(statusUpper === "DECISION" || statusUpper === "DECISION_PENDING" || statusUpper === "PLAYER_SUBMITTED" || statusUpper === "AI_SUBMITTED" || (statusUpper === "DISCUSSION" && timeLeft === 0)) && (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <h2 className="text-3xl font-black mb-2">Time's Up</h2>
           <p className="text-slate-400 mb-12">Make your final decision.</p>
