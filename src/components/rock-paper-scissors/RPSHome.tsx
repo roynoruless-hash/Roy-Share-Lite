@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Shield, Coins, Play, X, UserCheck, Loader2, ArrowLeft, Gamepad2, Compass, AlertCircle, RefreshCw } from "lucide-react";
 import { db } from "../../lib/firebase";
@@ -29,19 +29,29 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
   const [publicCode, setPublicCode] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Client-side matchmaking timeout tracker
+  const [searchTimer, setSearchTimer] = useState(0);
+  const [timeoutError, setTimeoutError] = useState(false);
+
   // Periodical matchmaking polling ref
   const [matchmakeIntervalId, setMatchmakeIntervalId] = useState<any>(null);
+  const timerIntervalRef = useRef<any>(null);
 
   useEffect(() => {
+    console.log(`[RPS HOME] Initializing with userId: ${userId}`);
+
     // 1. Fetch game settings
     const loadSettings = async () => {
       try {
+        console.log(`[RPS HOME] Fetching settings from Firestore...`);
         const snap = await getDoc(doc(db, "settings", "rps"));
         if (snap.exists()) {
-          setSettings(snap.data());
+          const sData = snap.data();
+          console.log(`[RPS HOME] Loaded settings: enabled=${sData.enabled}, fee=${sData.entryFee}, pool=${sData.prizePool}`);
+          setSettings(sData);
         }
       } catch (err) {
-        console.error("Failed to load settings:", err);
+        console.error("[RPS HOME] Failed to load settings:", err);
       }
       setLoading(false);
     };
@@ -51,67 +61,110 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
     // 2. Listen to user profile for balances
     const unsubUser = onSnapshot(doc(db, "users", String(userId)), (docSnap) => {
       if (docSnap.exists()) {
-        setUserProfile(docSnap.data());
+        const uData = docSnap.data();
+        console.log(`[RPS USER STATE] Balance updated: main=₹${uData.balance}, reward=₹${uData.rewardBalance}`);
+        setUserProfile(uData);
       }
     });
 
-    // 3. Listen to current queue state (if any)
+    // 3. Listen to current queue state
     const unsubQueue = onSnapshot(doc(db, "rps_queue", String(userId)), (docSnap) => {
       if (docSnap.exists()) {
         const qData = docSnap.data();
+        console.log(`[RPS QUEUE STATE] Queue document change: status=${qData.status}, matchId=${qData.matchId}`);
+        
         if (qData.status === "matched" && qData.matchId) {
-          // Join the matched match
+          console.log(`[RPS QUEUE STATE] MATCH FORMED! Navigating user to Arena Match: ${qData.matchId}`);
           stopMatchmaking();
           onJoinMatch(qData.matchId);
         } else if (qData.status === "searching") {
+          console.log(`[RPS QUEUE STATE] User queue state is active. Status: searching.`);
           setSearching(true);
           setPublicCode(qData.publicCode);
         }
       } else {
+        console.log(`[RPS QUEUE STATE] No queue document exists for ${userId}. Setting searching to false.`);
         setSearching(false);
       }
+    }, (error) => {
+      console.error("[RPS QUEUE STATE] Listen failed:", error);
     });
 
     return () => {
       unsubUser();
       unsubQueue();
       stopMatchmaking();
+      stopSearchTimer();
     };
   }, [userId]);
+
+  // Matchmaking process timers
+  const startSearchTimer = () => {
+    stopSearchTimer();
+    setSearchTimer(0);
+    setTimeoutError(false);
+
+    timerIntervalRef.current = setInterval(() => {
+      setSearchTimer((prev) => {
+        const nextTime = prev + 1;
+        // If searching takes longer than 30 seconds, trigger matchmaking client-side timeout
+        if (nextTime >= 30) {
+          console.warn(`[RPS MATCHMAKING] Queue timed out after 30 seconds of no match.`);
+          handleCancelQueue(true); // cancel queue on server and show timeout UI
+        }
+        return nextTime;
+      });
+    }, 1000);
+  };
+
+  const stopSearchTimer = () => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+  };
 
   const startMatchmaking = () => {
     if (matchmakeIntervalId) return;
 
-    // Immediately trigger matchmaking
+    console.log(`[RPS MATCHMAKING] Starting poll interval...`);
+    // Immediately trigger matchmaking first
     triggerMatchmakeAPI();
 
     const interval = setInterval(() => {
       triggerMatchmakeAPI();
     }, 2000);
     setMatchmakeIntervalId(interval);
+    startSearchTimer();
   };
 
   const stopMatchmaking = () => {
     if (matchmakeIntervalId) {
+      console.log(`[RPS MATCHMAKING] Stopping poll interval.`);
       clearInterval(matchmakeIntervalId);
       setMatchmakeIntervalId(null);
     }
+    stopSearchTimer();
   };
 
   const triggerMatchmakeAPI = async () => {
     try {
+      console.log(`[RPS MATCHMAKING] Polling /matchmake for user ${userId}...`);
       const res = await fetch(`${API_BASE}/api/rps-battle/matchmake`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ telegramId: userId })
       });
       const data = await res.json();
+      console.log(`[RPS MATCHMAKING] Matchmake Response: status=${data.status}, success=${data.success}`);
+      
       if (data.success && data.status === "matched" && data.matchId) {
+        console.log(`[RPS MATCHMAKING] Poller detected matched state. Joining: ${data.matchId}`);
         stopMatchmaking();
         onJoinMatch(data.matchId);
       }
     } catch (err) {
-      console.error("Matchmaking error:", err);
+      console.error("[RPS MATCHMAKING] Polling request error:", err);
     }
   };
 
@@ -123,9 +176,12 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
   const handleConfirmPlay = async () => {
     setJoining(true);
     setErrorMsg("");
+    setTimeoutError(false);
 
     const totalBalance = (userProfile.balance || 0) + (userProfile.rewardBalance || 0);
     const entryFee = settings.entryFee || 5;
+
+    console.log(`[RPS PLAY] User requested entry. Total Balance: ₹${totalBalance}, Entry Fee: ₹${entryFee}`);
 
     if (totalBalance < entryFee) {
       setErrorMsg("Insufficient Balance. Please add funds to your wallet.");
@@ -134,6 +190,7 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
     }
 
     try {
+      console.log(`[RPS PLAY] Posting /join for user: ${userId}`);
       const res = await fetch(`${API_BASE}/api/rps-battle/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -145,18 +202,21 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
         throw new Error(data.message || "Failed to join matchmaking.");
       }
 
+      console.log(`[RPS PLAY] Joined queue successfully! publicCode=${data.publicCode}`);
       setPublicCode(data.publicCode || "");
       setShowConfirm(false);
       setSearching(true);
       startMatchmaking();
     } catch (err: any) {
+      console.error("[RPS PLAY] Error joining queue:", err);
       setErrorMsg(err.message || "An unexpected error occurred.");
     } finally {
       setJoining(false);
     }
   };
 
-  const handleCancelQueue = async () => {
+  const handleCancelQueue = async (isTimeout = false) => {
+    console.log(`[RPS QUEUE] Cancelling queue. IsTimeoutFallback=${isTimeout}`);
     stopMatchmaking();
     try {
       await fetch(`${API_BASE}/api/rps-battle/cancel-queue`, {
@@ -164,10 +224,17 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ telegramId: userId })
       });
+      console.log(`[RPS QUEUE] Backend queue document cancelled and ticket refunded.`);
     } catch (err) {
-      console.error("Cancel queue failed:", err);
+      console.error("[RPS QUEUE] Cancel queue request failed:", err);
     }
-    setSearching(false);
+
+    if (isTimeout) {
+      setTimeoutError(true);
+    } else {
+      setSearching(false);
+      setTimeoutError(false);
+    }
   };
 
   if (loading) {
@@ -209,7 +276,7 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
       {/* Dynamic Header */}
       <header className="p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={searching ? handleCancelQueue : onBack} className="p-2 hover:bg-slate-800 rounded-xl transition">
+          <button onClick={searching ? () => handleCancelQueue(false) : onBack} className="p-2 hover:bg-slate-800 rounded-xl transition">
             <ArrowLeft className="w-6 h-6 text-slate-400" />
           </button>
           <h2 className="text-lg font-black tracking-tight flex items-center gap-2">
@@ -260,13 +327,25 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
                 </ul>
               </div>
 
-              <div className="space-y-4 pt-4 w-full">
+              {/* Explicit Timeout Error Display */}
+              {timeoutError && (
+                <div className="p-4 bg-amber-500/10 border border-amber-500/25 rounded-2xl text-left space-y-2">
+                  <div className="flex items-center gap-2 text-amber-400 font-black text-xs uppercase tracking-wide">
+                    <AlertCircle className="w-4 h-4" /> Matchmaking Timeout
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    No opponents are currently active in the arena. Your entry fee of ₹{settings.entryFee} has been fully refunded to your wallet balance.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-4 pt-2 w-full">
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={handlePlayClick}
                   className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-2xl text-sm flex items-center justify-center gap-2.5 transition-colors shadow-xl shadow-indigo-600/15"
                 >
-                  <Play className="w-4 h-4 fill-white" /> Enter Arena
+                  <Play className="w-4 h-4 fill-white" /> {timeoutError ? "Retry Matchmaking" : "Enter Arena"}
                 </motion.button>
               </div>
             </motion.div>
@@ -283,9 +362,9 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
                 <div className="w-24 h-24 mx-auto rounded-full border-4 border-indigo-500/20 border-t-indigo-500 animate-spin flex items-center justify-center shadow-xl">
                   <Compass className="w-10 h-10 text-indigo-400 animate-pulse" />
                 </div>
-                <div className="space-y-1">
-                  <h3 className="text-2xl font-black">Finding Opponent...</h3>
-                  <p className="text-slate-400 text-xs">Matching with active human players first</p>
+                <div className="space-y-1.5">
+                  <h3 className="text-2xl font-black text-white">Finding Opponent...</h3>
+                  <p className="text-slate-400 text-xs">Matching with active players ({searchTimer}s elapsed)</p>
                 </div>
               </div>
 
@@ -309,7 +388,7 @@ export default function RPSHome({ onBack, onJoinMatch, userId }: RPSHomeProps) {
               <div className="pt-4 w-full">
                 <motion.button
                   whileTap={{ scale: 0.97 }}
-                  onClick={handleCancelQueue}
+                  onClick={() => handleCancelQueue(false)}
                   className="w-full py-3 bg-slate-900 hover:bg-slate-850 text-slate-400 hover:text-white font-bold rounded-xl border border-slate-800 text-xs transition"
                 >
                   Cancel Matchmaking

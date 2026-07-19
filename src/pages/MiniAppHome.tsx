@@ -69,6 +69,7 @@ const PublicLuckyNumberGiveawayPage = lazy(() => import("./PublicLuckyNumberGive
 const PublicLuckyDrawPage = lazy(() => import("./PublicLuckyDrawPage"));
 const RPSHome = lazy(() => import("../components/rock-paper-scissors/RPSHome"));
 const RPSMatch = lazy(() => import("../components/rock-paper-scissors/RPSMatch"));
+import RPSErrorBoundary from "../components/rock-paper-scissors/RPSErrorBoundary";
 import { LuckySpinUserView } from "../components/LuckySpinUserView";
 
 interface MembershipVerificationProps {
@@ -1154,15 +1155,19 @@ export const MiniAppHome: React.FC = () => {
 
 
         {currentView === "rps-battle" && (
-          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-            <RPSHome onBack={() => setCurrentView("home")} onJoinMatch={(matchId) => setCurrentView(`rps-match-${matchId}`)} userId={activeUser?.id} />
-          </Suspense>
+          <RPSErrorBoundary onReset={() => setCurrentView("home")}>
+            <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+              <RPSHome onBack={() => setCurrentView("home")} onJoinMatch={(matchId) => setCurrentView(`rps-match-${matchId}`)} userId={activeUser?.id} />
+            </Suspense>
+          </RPSErrorBoundary>
         )}
 
         {currentView.startsWith("rps-match-") && (
-          <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-            <RPSMatch matchId={currentView.replace("rps-match-", "")} onBack={() => setCurrentView("rps-battle")} userId={activeUser?.id} />
-          </Suspense>
+          <RPSErrorBoundary onReset={() => setCurrentView("rps-battle")}>
+            <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+              <RPSMatch matchId={currentView.replace("rps-match-", "")} onBack={() => setCurrentView("rps-battle")} userId={activeUser?.id} />
+            </Suspense>
+          </RPSErrorBoundary>
         )}
 
         {currentView.startsWith("lucky-") && (
