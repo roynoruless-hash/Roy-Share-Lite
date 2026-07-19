@@ -39,10 +39,13 @@ import {
   Cloud,
   Youtube,
   Gamepad2,
+  Coins,
+  Clock,
+  Trophy,
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, updateDoc, onSnapshot } from "firebase/firestore";
-import { getGiveawayStatus } from "../lib/dateUtils";
+import { getGiveawayStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
 import { StandardTaskCard } from "../components/StandardTaskCard";
 import { ShortenerTaskCard } from "../components/ShortenerTaskCard";
 
@@ -907,9 +910,11 @@ export const MiniAppHome: React.FC = () => {
   const handleAction = (id: string) => {
     console.log("[MiniAppHome] handleAction called with id:", id, "currentView before change:", currentView);
     if (id === "lucky-number") {
-      const active = giveaways.find(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE");
-      if (active) {
-        setCurrentView(`upi-${active.id}`);
+      const liveGiveaways = giveaways.filter(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE");
+      if (liveGiveaways.length === 1) {
+        setCurrentView(`upi-${liveGiveaways[0].id}`);
+      } else if (liveGiveaways.length > 1) {
+        setCurrentView("lucky-number-list");
       } else {
         setCurrentView("lucky-number-no-active");
       }
@@ -1287,9 +1292,11 @@ export const MiniAppHome: React.FC = () => {
                       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
                       setGiveaways(list);
                       
-                      const active = list.find(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE");
-                      if (active) {
-                        setCurrentView(`upi-${active.id}`);
+                      const liveGiveaways = list.filter(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE");
+                      if (liveGiveaways.length === 1) {
+                        setCurrentView(`upi-${liveGiveaways[0].id}`);
+                      } else if (liveGiveaways.length > 1) {
+                        setCurrentView("lucky-number-list");
                       }
                     } catch (e) {
                       console.error("Error refreshing campaigns:", e);
@@ -1306,6 +1313,110 @@ export const MiniAppHome: React.FC = () => {
                     "Refresh 🔄"
                   )}
                 </button>
+              </div>
+            </main>
+          </motion.div>
+        )}
+
+        {currentView === "lucky-number-list" && (
+          <motion.div
+            key="lucky-number-list-view"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="min-h-screen bg-[#020617] text-white flex flex-col pb-12"
+          >
+            <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+              <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer">
+                <ArrowLeft className="w-6 h-6 text-slate-400" />
+              </button>
+              <h2 className="text-xl font-bold text-white">Active Giveaways</h2>
+            </header>
+
+            <main className="flex-1 p-6 space-y-6 overflow-y-auto">
+              <div className="space-y-1">
+                <p className="text-xs font-black uppercase tracking-widest text-emerald-500 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Multiple Live Boards
+                </p>
+                <h3 className="text-lg font-black text-slate-100">Select a Giveaway Board to Join</h3>
+              </div>
+
+              <div className="space-y-4">
+                {giveaways
+                  .filter(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE")
+                  .map((g) => {
+                    const timeLeftObj = getGiveawayTimeLeft(g);
+                    return (
+                      <motion.div
+                        key={g.id}
+                        whileHover={{ scale: 1.01 }}
+                        className="bg-slate-900/80 border border-slate-800/80 rounded-2xl overflow-hidden shadow-xl"
+                      >
+                        {g.bannerUrl && (
+                          <div className="h-32 w-full overflow-hidden relative">
+                            <img
+                              src={g.bannerUrl}
+                              alt={g.title}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent" />
+                          </div>
+                        )}
+                        <div className="p-5 space-y-4">
+                          <div className="space-y-1">
+                            <h4 className="text-lg font-black text-white">{g.title}</h4>
+                            {g.description && (
+                              <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                                {g.description}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800/60">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+                                <Coins className="w-4 h-4 text-emerald-400" />
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase">Prize Pool</p>
+                                <p className="text-xs font-black text-emerald-400">₹{g.prizeAmount}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
+                                <Trophy className="w-4 h-4 text-amber-400" />
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase">Winners</p>
+                                <p className="text-xs font-black text-amber-400">{g.totalWinners} Slots</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {!timeLeftObj.isExpired && (
+                            <div className="flex items-center gap-1.5 text-xs text-rose-400 font-bold bg-rose-500/5 border border-rose-500/10 px-3 py-2 rounded-xl">
+                              <Clock className="w-4 h-4 animate-pulse" />
+                              <span>
+                                Ends in: {timeLeftObj.days > 0 ? `${timeLeftObj.days}d ` : ""}
+                                {String(timeLeftObj.hours).padStart(2, "0")}h:
+                                {String(timeLeftObj.minutes).padStart(2, "0")}m:
+                                {String(timeLeftObj.seconds).padStart(2, "0")}s
+                              </span>
+                            </div>
+                          )}
+
+                          <button
+                            onClick={() => setCurrentView(`upi-${g.id}`)}
+                            className="w-full py-3.5 bg-gradient-to-r from-red-500 to-amber-500 hover:from-red-600 hover:to-amber-600 font-black rounded-xl text-xs transition cursor-pointer text-center tracking-wider uppercase text-white shadow-lg shadow-red-950/20"
+                          >
+                            Enter Board 🎯
+                          </button>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
               </div>
             </main>
           </motion.div>

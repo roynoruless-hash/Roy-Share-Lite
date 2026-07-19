@@ -124,13 +124,17 @@ export function getGiveawayStatus(giveaway: any): "LIVE" | "ENDED" {
   }
 
   let endVal = giveaway.endDate;
+  if (!endVal && giveaway.endTime) {
+    endVal = giveaway.endTime;
+  }
+
   if (!endVal) {
-    console.log("[getGiveawayStatus] No endDate found on giveaway => ENDED");
+    console.log("[getGiveawayStatus] No endDate or endTime found on giveaway => ENDED");
     return "ENDED";
   }
 
-  // Handle case where we have separate endDate and endTime strings
-  if (typeof endVal === "string" && giveaway.endTime && endVal.indexOf("T") === -1) {
+  // Handle case where we have separate endDate and endTime strings without a T
+  if (typeof endVal === "string" && giveaway.endDate && giveaway.endTime && endVal.indexOf("T") === -1) {
     endVal = `${endVal}T${giveaway.endTime}`;
   }
 
@@ -176,8 +180,11 @@ export function getGiveawayTimingStatus(giveaway: any): {
 
 export function getGiveawayTimeLeft(giveaway: any) {
   let endVal = giveaway?.endDate;
+  if (!endVal && giveaway?.endTime) {
+    endVal = giveaway.endTime;
+  }
   
-  if (endVal && typeof endVal === "string" && giveaway.endTime) {
+  if (endVal && typeof endVal === "string" && giveaway?.endDate && giveaway?.endTime) {
     if (endVal.indexOf("T") === -1) {
       endVal = `${endVal}T${giveaway.endTime}`;
     }
