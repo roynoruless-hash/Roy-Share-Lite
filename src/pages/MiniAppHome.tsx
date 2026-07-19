@@ -41,7 +41,8 @@ import {
   Gamepad2,
 } from "lucide-react";
 import { db } from "../lib/firebase";
-import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
+import { collection, getDocs, query, where, doc, updateDoc, onSnapshot } from "firebase/firestore";
+import { getGiveawayStatus } from "../lib/dateUtils";
 import { StandardTaskCard } from "../components/StandardTaskCard";
 import { ShortenerTaskCard } from "../components/ShortenerTaskCard";
 
@@ -438,6 +439,21 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
 export const MiniAppHome: React.FC = () => {
   const { user, loading, error, startParam } = useTelegramAuth();
   const [tgSettings, setTgSettings] = useState<any>(null);
+  const [giveaways, setGiveaways] = useState<any[]>([]);
+  const [loadingGiveaways, setLoadingGiveaways] = useState<boolean>(true);
+
+  useEffect(() => {
+    const q = collection(db, "lucky_number_campaigns");
+    const unsub = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      setGiveaways(list);
+      setLoadingGiveaways(false);
+    }, (err) => {
+      console.error("Error listening to lucky_number_campaigns:", err);
+      setLoadingGiveaways(false);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -868,7 +884,14 @@ export const MiniAppHome: React.FC = () => {
   const cleanBotUser = tgSettings?.botUsername ? tgSettings.botUsername.replace(/^@/, '') : "Roysharearn_bot";
   const referralLink = `https://t.me/${cleanBotUser}?start=ref_${activeUser.id}`;
 
-  const actionButtons = [
+  const earningButtons = [
+    { id: "lucky-number", label: "Lucky Number Giveaway", icon: Gift, color: "bg-gradient-to-r from-red-500 to-amber-500", shadow: "shadow-red-500/20" },
+    { id: "rps-battle", label: "RPS Battle", icon: Gamepad2, color: "bg-gradient-to-r from-indigo-600 to-orange-500", shadow: "shadow-indigo-500/20" },
+    { id: "lucky-spin", label: "Lucky Spin Live", icon: Sparkles, color: "bg-gradient-to-r from-pink-550 to-violet-600", shadow: "shadow-pink-500/20" },
+    { id: "earn-rewards", label: "Reward Tasks", icon: ClipboardList, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
+  ];
+
+  const navigationButtons = [
     { id: "self-earning", label: "Self Earning", icon: Star, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
     { id: "upload-file", label: "Upload File", icon: Upload, color: "bg-emerald-600", shadow: "shadow-emerald-500/20" },
     { id: "url-shortener", label: "URL Shortener", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
@@ -876,9 +899,6 @@ export const MiniAppHome: React.FC = () => {
     { id: "my-links", label: "My Links", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
     { id: "withdraw", label: "Withdraw", icon: CreditCard, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
     { id: "refer", label: "Refer & Earn", icon: Users, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
-    { id: "rps-battle", label: "RPS Battle", icon: Gamepad2, color: "bg-gradient-to-r from-indigo-600 to-orange-500", shadow: "shadow-indigo-500/20" },
-    { id: "lucky-spin", label: "Lucky Spin Live", icon: Sparkles, color: "bg-gradient-to-r from-pink-550 to-violet-600", shadow: "shadow-pink-500/20" },
-    { id: "earn-rewards", label: "Reward Tasks", icon: ClipboardList, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
     { id: "announcements", label: "Announcements", icon: Bell, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
     { id: "settings", label: "Settings", icon: Settings, color: "bg-slate-500", shadow: "shadow-slate-500/20" },
     { id: "support", label: "Contact Support", icon: MessageSquare, color: "bg-teal-500", shadow: "shadow-teal-500/20" },
@@ -886,6 +906,15 @@ export const MiniAppHome: React.FC = () => {
 
   const handleAction = (id: string) => {
     console.log("[MiniAppHome] handleAction called with id:", id, "currentView before change:", currentView);
+    if (id === "lucky-number") {
+      const active = giveaways.find(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE");
+      if (active) {
+        setCurrentView(`upi-${active.id}`);
+      } else {
+        setCurrentView("lucky-number-no-active");
+      }
+      return;
+    }
     if (id === "upload-file") {
       setCurrentView("upload-file");
       return;
@@ -1011,6 +1040,43 @@ export const MiniAppHome: React.FC = () => {
               </motion.div>
             </div>
 
+            {/* Self Earning Section */}
+            <section className="px-6 pt-4">
+              <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 px-1">Self Earning</h4>
+              <motion.div 
+                variants={containerVariants}
+                initial="hidden"
+                animate="show"
+                className="grid grid-cols-2 gap-3"
+              >
+                {earningButtons.map((btn, idx) => {
+                  const isActiveGiveaway = btn.id === "lucky-number" && giveaways.some(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE");
+                  const badgeText = btn.id === "lucky-number" ? (isActiveGiveaway ? "LIVE" : "NEW") : null;
+                  
+                  return (
+                    <motion.button
+                      key={btn.id}
+                      variants={itemVariants}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => handleAction(btn.id)}
+                      className="flex flex-col items-center justify-center p-5 rounded-2xl bg-slate-900/40 border border-slate-800/50 hover:border-slate-700 hover:bg-slate-900/60 transition-all group relative cursor-pointer"
+                    >
+                      {badgeText && (
+                        <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-red-500/10 border border-red-500/20 text-red-500 flex items-center gap-1 z-10">
+                          <span className="w-1 h-1 rounded-full bg-red-500 animate-pulse" />
+                          {badgeText}
+                        </span>
+                      )}
+                      <div className={`w-11 h-11 ${btn.color} ${btn.shadow} rounded-xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform`}>
+                        <btn.icon className="w-5 h-5 text-white" />
+                      </div>
+                      <span className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors text-center">{btn.label}</span>
+                    </motion.button>
+                  );
+                })}
+              </motion.div>
+            </section>
+
             {/* Menu Buttons Grid */}
             <section className="px-6 pt-4">
               <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 px-1">Navigation Menu</h4>
@@ -1020,18 +1086,18 @@ export const MiniAppHome: React.FC = () => {
                 animate="show"
                 className="grid grid-cols-2 gap-3"
               >
-                {actionButtons.map((btn, idx) => (
+                {navigationButtons.map((btn, idx) => (
                   <motion.button
                     key={btn.id}
                     variants={itemVariants}
                     whileTap={{ scale: 0.97 }}
                     onClick={() => handleAction(btn.id)}
-                    className="flex flex-col items-center justify-center p-5 rounded-2xl bg-slate-900/40 border border-slate-800/50 hover:border-slate-700 hover:bg-slate-900/60 transition-all group"
+                    className="flex flex-col items-center justify-center p-5 rounded-2xl bg-slate-900/40 border border-slate-800/50 hover:border-slate-700 hover:bg-slate-900/60 transition-all group cursor-pointer"
                   >
                     <div className={`w-11 h-11 ${btn.color} ${btn.shadow} rounded-xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform`}>
                       <btn.icon className="w-5 h-5 text-white" />
                     </div>
-                    <span className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors">{btn.label}</span>
+                    <span className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors text-center">{btn.label}</span>
                   </motion.button>
                 ))}
               </motion.div>
@@ -1184,6 +1250,65 @@ export const MiniAppHome: React.FC = () => {
           <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
             <PublicLuckyNumberGiveawayPage giveawayId={currentView.replace("upi-", "")} onBack={() => setCurrentView("home")} onNavigate={(view) => setCurrentView(view)} />
           </Suspense>
+        )}
+
+        {currentView === "lucky-number-no-active" && (
+          <motion.div
+            key="lucky-number-no-active-view"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="min-h-screen bg-[#020617] text-white flex flex-col justify-between pb-12"
+          >
+            <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+              <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer">
+                <ArrowLeft className="w-6 h-6 text-slate-400" />
+              </button>
+              <h2 className="text-xl font-bold text-white">Lucky Number Giveaway</h2>
+            </header>
+
+            <main className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+              <div className="max-w-sm bg-slate-900/60 border border-slate-800/80 p-8 rounded-3xl space-y-6 shadow-2xl relative">
+                <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-24 h-24 bg-gradient-to-br from-amber-500/20 to-red-500/20 rounded-full flex items-center justify-center border border-slate-800 backdrop-blur-md shadow-xl">
+                  <Gift className="w-10 h-10 text-amber-400 animate-bounce" />
+                </div>
+                <div className="pt-6 space-y-2">
+                  <h3 className="text-xl font-black text-white">No Active Giveaway</h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    There is currently no active lucky number giveaway board live. Please check back soon or tap Refresh to check for updates!
+                  </p>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    setLoadingGiveaways(true);
+                    try {
+                      const snap = await getDocs(collection(db, "lucky_number_campaigns"));
+                      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+                      setGiveaways(list);
+                      
+                      const active = list.find(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE");
+                      if (active) {
+                        setCurrentView(`upi-${active.id}`);
+                      }
+                    } catch (e) {
+                      console.error("Error refreshing campaigns:", e);
+                    } finally {
+                      setLoadingGiveaways(false);
+                    }
+                  }}
+                  disabled={loadingGiveaways}
+                  className="w-full py-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black rounded-xl transition text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-indigo-950/20"
+                >
+                  {loadingGiveaways ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    "Refresh 🔄"
+                  )}
+                </button>
+              </div>
+            </main>
+          </motion.div>
         )}
 
         {currentView === "my-links" && (
