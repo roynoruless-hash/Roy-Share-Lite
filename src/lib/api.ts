@@ -12,6 +12,9 @@ export const authenticatedFetch = async (url: string, options: RequestInit = {})
   const headers = new Headers(options.headers || {});
   headers.set("Content-Type", "application/json");
   headers.set("Authorization", `Bearer ${token}`);
+  
+  const currentBotId = localStorage.getItem("current_bot_id") || "default";
+  headers.set("x-bot-id", currentBotId);
 
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,

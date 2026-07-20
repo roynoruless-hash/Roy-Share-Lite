@@ -45,7 +45,12 @@ import { getStorage } from "firebase-admin/storage";
 fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] Vite import removed
 `);
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch, deleteField, serverTimestamp } from "firebase/firestore";
+import { getDoc as firestoreGetDoc, setDoc, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch, deleteField, serverTimestamp } from "firebase/firestore";
+import { doc, collection, botContextStorage, registerServerStorage } from "./src/lib/botDb";
+import { AsyncLocalStorage } from "async_hooks";
+
+const storage = new AsyncLocalStorage<{ botId: string }>();
+registerServerStorage(storage);
 import luckyNumberGiveawayRouter from "./src/routes/luckyNumberGiveaway";
 import rpsBattleRouter from "./src/routes/rpsBattle";
 import tttBattleRouter from "./src/routes/tttBattle";
@@ -306,6 +311,23 @@ async function startServer() {
 
   const app = express();
   app.use(express.json({ limit: '10mb' }));
+
+  // Bot Context Middleware
+  app.use((req, res, next) => {
+    let botId = (req.query.botId as string) || (req.headers["x-bot-id"] as string) || "";
+    if (!botId) {
+      const match = req.path.match(/^\/api\/telegram\/webhook\/([a-zA-Z0-9_-]+)/);
+      if (match) {
+        botId = match[1];
+      }
+    }
+    if (!botId) {
+      botId = "default";
+    }
+    botContextStorage.run({ botId }, () => {
+      next();
+    });
+  });
 
   // Neutralize deleted features' endpoints
   app.use([
@@ -8411,7 +8433,7 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
   });
 
   // Incoming Telegram Webhook handler endpoint
-  app.post("/api/telegram/webhook", (req, res) => {
+  app.post(["/api/telegram/webhook", "/api/telegram/webhook/:botId"], (req, res) => {
     // ALWAYS return 200 immediately to Telegram to prevent retries and timeouts
     res.status(200).json({ ok: true });
 
@@ -9633,6 +9655,200 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
         response: text,
         testUrl
       });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // --- MULTI-BOT BOT MANAGER API ROUTES ---
+
+  // 1. Get All Bots
+  app.get("/api/admin/bots", async (req, res) => {
+    try {
+      // a) Load default/existing bot settings
+      const defRef = doc(db, "settings", "telegram");
+      const defSnap = await getDoc(defRef);
+      let defaultBot: any = null;
+      if (defSnap.exists()) {
+        const dData = defSnap.data() || {};
+        defaultBot = {
+          id: "default",
+          botId: "default",
+          botName: dData.botName || "Roy Share Bot",
+          botUsername: dData.botUsername || "royshare_bot",
+          botToken: dData.botToken ? "••••••••••••••" : "",
+          status: "Active",
+          createdAt: dData.createdAt || dData.updatedAt || new Date("2026-01-01").toISOString(),
+          photoUrl: dData.photoUrl || ""
+        };
+      } else {
+        defaultBot = {
+          id: "default",
+          botId: "default",
+          botName: "Roy Share Bot",
+          botUsername: "royshare_bot",
+          botToken: "",
+          status: "Active",
+          createdAt: new Date("2026-01-01").toISOString(),
+          photoUrl: ""
+        };
+      }
+
+      // b) Load all bots from "telegram_bots" collection
+      const botsCol = collection(db, "telegram_bots");
+      const botsSnap = await getDocs(botsCol);
+      const customBots = botsSnap.docs.map(docSnap => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          botId: docSnap.id,
+          botName: d.botName || "Unnamed Bot",
+          botUsername: d.botUsername || "unknown_bot",
+          botToken: d.botToken ? "••••••••••••••" : "",
+          status: d.status || "Active",
+          createdAt: d.createdAt || new Date().toISOString(),
+          photoUrl: d.photoUrl || ""
+        };
+      });
+
+      res.json({
+        success: true,
+        bots: [defaultBot, ...customBots]
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 2. Create Bot
+  app.post("/api/admin/bots/create", async (req, res) => {
+    try {
+      const { botToken } = req.body;
+      if (!botToken) {
+        return res.status(400).json({ success: false, error: "Bot Token is required." });
+      }
+
+      // Validate the token and detect info using getMe from Telegram
+      const getMeUrl = `https://api.telegram.org/bot${botToken}/getMe`;
+      const meResponse = await fetch(getMeUrl);
+      const meData = await meResponse.json();
+
+      if (!meData.ok || !meData.result) {
+        return res.status(400).json({ success: false, error: `Invalid Bot Token: ${meData.description || "Verification failed."}` });
+      }
+
+      const botResult = meData.result;
+      const botId = String(botResult.id);
+      const botName = botResult.first_name || "Telegram Bot";
+      const botUsername = botResult.username || "";
+
+      // Fetch Bot Profile Photo if available
+      let photoUrl = "";
+      try {
+        const getPhotosUrl = `https://api.telegram.org/bot${botToken}/getUserProfilePhotos?user_id=${botId}&limit=1`;
+        const photosResponse = await fetch(getPhotosUrl);
+        const photosData = await photosResponse.json();
+        if (photosData.ok && photosData.result && photosData.result.photos && photosData.result.photos.length > 0) {
+          const fileId = photosData.result.photos[0][0].file_id;
+          const getFileUrl = `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`;
+          const fileResponse = await fetch(getFileUrl);
+          const fileData = await fileResponse.json();
+          if (fileData.ok && fileData.result) {
+            const filePath = fileData.result.file_path;
+            photoUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch bot profile photo:", err);
+      }
+
+      // Encrypt the token to store it securely
+      const encToken = encryptSecret(botToken);
+
+      // Save bot inside "telegram_bots" collection
+      const botRef = doc(db, "telegram_bots", botId);
+      const botData = {
+        botId,
+        botName,
+        botUsername,
+        botToken: encToken,
+        photoUrl,
+        status: "Active",
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(botRef, botData);
+
+      // Initialize default settings inside the bot's private namespace
+      const botSettingsRef = doc(db, "bots", botId, "settings", "telegram");
+      await setDoc(botSettingsRef, {
+        botId,
+        botName,
+        botUsername,
+        botToken: encToken,
+        createdAt: new Date().toISOString()
+      });
+
+      // Register the Webhook with Telegram
+      const rawAppUrl = process.env.APP_URL || "";
+      if (rawAppUrl) {
+        try {
+          const webhookUrl = `${rawAppUrl}/api/telegram/webhook/${botId}`;
+          const setWebhookUrl = `https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
+          const webhookResponse = await fetch(setWebhookUrl);
+          const webhookData = await webhookResponse.json();
+          console.log(`Webhook set for bot ${botId}:`, webhookData);
+        } catch (webhookErr: any) {
+          console.error("Failed to register webhook with Telegram:", webhookErr);
+        }
+      }
+
+      res.json({
+        success: true,
+        bot: {
+          botId,
+          botName,
+          botUsername,
+          photoUrl,
+          status: "Active",
+          createdAt: botData.createdAt
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 3. Toggle Bot Status
+  app.post("/api/admin/bots/toggle", async (req, res) => {
+    try {
+      const { botId, status } = req.body;
+      if (!botId) return res.status(400).json({ success: false, error: "Bot ID is required." });
+
+      if (botId === "default") {
+        return res.status(400).json({ success: false, error: "Cannot disable or toggle the default bot." });
+      }
+
+      const botRef = doc(db, "telegram_bots", botId);
+      await setDoc(botRef, { status }, { merge: true });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 4. Delete Bot
+  app.post("/api/admin/bots/delete", async (req, res) => {
+    try {
+      const { botId } = req.body;
+      if (!botId) return res.status(400).json({ success: false, error: "Bot ID is required." });
+
+      if (botId === "default") {
+        return res.status(400).json({ success: false, error: "Cannot delete the default bot." });
+      }
+
+      const botRef = doc(db, "telegram_bots", botId);
+      await deleteDoc(botRef);
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
     }

@@ -1,5 +1,6 @@
 import LinkAnalyticsPage from "./LinkAnalyticsPage";
 import { useState, useEffect, useRef } from "react";
+import BotDashboardView from "../components/BotDashboardView";
 import { authenticatedFetch } from "../lib/api";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
@@ -119,6 +120,102 @@ export default function AdminDashboard() {
 
 function AdminDashboardContent() {
   const [activeTab, setActiveTab] = useState("Overview");
+  const [currentBot, setCurrentBot] = useState<any>(null);
+  const [botsList, setBotsList] = useState<any[]>([]);
+  const [botsLoading, setBotsLoading] = useState(false);
+  const [botManagerSubTab, setBotManagerSubTab] = useState<"all" | "create">("all");
+  const [newBotToken, setNewBotToken] = useState("");
+  const [newBotLoading, setNewBotLoading] = useState(false);
+  const [newBotError, setNewBotError] = useState("");
+  const [botActionLoading, setBotActionLoading] = useState<string | null>(null);
+
+  const fetchBotsList = async () => {
+    setBotsLoading(true);
+    try {
+      const res = await authenticatedFetch("/api/admin/bots");
+      const data = await res.json();
+      if (data.success) {
+        setBotsList(data.bots || []);
+      }
+    } catch (err) {
+      console.error("Error fetching bots list:", err);
+    } finally {
+      setBotsLoading(false);
+    }
+  };
+
+  const handleCreateBot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBotToken) {
+      setNewBotError("Please enter a bot token.");
+      return;
+    }
+    setNewBotLoading(true);
+    setNewBotError("");
+    try {
+      const res = await authenticatedFetch("/api/admin/bots/create", {
+        method: "POST",
+        body: JSON.stringify({ botToken: newBotToken })
+      });
+      const resData = await res.json();
+      if (resData.success) {
+        setNewBotToken("");
+        setBotManagerSubTab("all");
+        fetchBotsList();
+      } else {
+        setNewBotError(resData.error || "Failed to create bot.");
+      }
+    } catch (err: any) {
+      setNewBotError(err.message || "An unexpected error occurred.");
+    } finally {
+      setNewBotLoading(false);
+    }
+  };
+
+  const handleToggleBotStatus = async (botId: string, currentStatus: string) => {
+    setBotActionLoading(botId);
+    try {
+      const newStatus = currentStatus === "Active" ? "Disabled" : "Active";
+      const res = await authenticatedFetch("/api/admin/bots/toggle", {
+        method: "POST",
+        body: JSON.stringify({ botId, status: newStatus })
+      });
+      const resData = await res.json();
+      if (resData.success) {
+        fetchBotsList();
+      }
+    } catch (err) {
+      console.error("Error toggling bot status:", err);
+    } finally {
+      setBotActionLoading(null);
+    }
+  };
+
+  const handleDeleteBot = async (botId: string) => {
+    if (!window.confirm("Are you sure you want to delete this Telegram bot? This action is permanent and cannot be undone.")) return;
+    setBotActionLoading(botId);
+    try {
+      const res = await authenticatedFetch("/api/admin/bots/delete", {
+        method: "POST",
+        body: JSON.stringify({ botId })
+      });
+      const resData = await res.json();
+      if (resData.success) {
+        fetchBotsList();
+      }
+    } catch (err) {
+      console.error("Error deleting bot:", err);
+    } finally {
+      setBotActionLoading(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "🤖 Bot Manager") {
+      fetchBotsList();
+    }
+  }, [activeTab]);
+
   const [data, setData] = useState<any>(null);
 
 
@@ -5138,9 +5235,11 @@ Environment: ${isProduction ? "Production" : "Development"}`;
       ) : data ? (
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
-          <div className="flex flex-wrap gap-3">
+          {currentBot === null && (
+            <div className="flex flex-wrap gap-3">
             {[
               "Overview",
+              "🤖 Bot Manager",
               "👥 Users",
               "💸 Withdrawals",
               "🎫 Support",
@@ -5190,6 +5289,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               </button>
             ))}
           </div>
+          )}
 
           {activeTab === "🚀 Referral System" && (
             <div className="p-8 text-center text-slate-500">
@@ -5677,6 +5777,168 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               )}
             </div>
           )}
+
+          {currentBot ? (
+            <BotDashboardView
+              currentBot={currentBot}
+              onBack={() => {
+                setCurrentBot(null);
+                localStorage.setItem("current_bot_id", "default");
+                if (typeof (globalThis as any).setClientBotId === "function") {
+                  (globalThis as any).setClientBotId("default");
+                }
+                setActiveTab("Overview");
+              }}
+            />
+          ) : activeTab === "🤖 Bot Manager" ? (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    🤖 Multi Bot Manager
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Deploy, manage, and scale up to unlimited custom Telegram bots natively from one dashboard.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setBotManagerSubTab("all")}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      botManagerSubTab === "all" 
+                        ? "bg-blue-600 text-white" 
+                        : "bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-200"
+                    }`}
+                  >
+                    📋 All Bots
+                  </button>
+                  <button
+                    onClick={() => setBotManagerSubTab("create")}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      botManagerSubTab === "create" 
+                        ? "bg-blue-600 text-white" 
+                        : "bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-200"
+                    }`}
+                  >
+                    ➕ Create Bot
+                  </button>
+                </div>
+              </div>
+
+              {botManagerSubTab === "create" ? (
+                <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4 max-w-2xl">
+                  <h3 className="text-lg font-bold text-white">Create New Telegram Bot</h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Enter your Telegram Bot Token obtained from <b>@BotFather</b>. We will automatically connect, query its parameters, download its avatar, register the webhook, and initialize its database.
+                  </p>
+                  
+                  <form onSubmit={handleCreateBot} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Bot Token</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 52918451:AAFl-X6z99..."
+                        value={newBotToken}
+                        onChange={(e) => setNewBotToken(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+                      />
+                    </div>
+
+                    {newBotError && (
+                      <div className="p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-medium">
+                        ⚠️ {newBotError}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={newBotLoading}
+                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs transition disabled:opacity-55 cursor-pointer shadow-lg shadow-blue-900/15"
+                    >
+                      {newBotLoading ? "Connecting & Initializing..." : "➕ Create & Deploy Bot"}
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {botsLoading ? (
+                    <div className="flex justify-center py-12">
+                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                  ) : botsList.length === 0 ? (
+                    <div className="text-center py-12 bg-slate-900/40 border border-slate-850 rounded-2xl">
+                      <p className="text-sm text-slate-400">No custom bots found. Click <b>Create Bot</b> to deploy one!</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {botsList.map((bot) => (
+                        <div key={bot.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between gap-4 shadow-lg hover:border-slate-700 transition">
+                          <div className="flex items-start gap-3">
+                            {bot.photoUrl ? (
+                              <img src={bot.photoUrl} alt={bot.botName} className="w-12 h-12 rounded-full border border-slate-850 object-cover shrink-0" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="w-12 h-12 rounded-full bg-blue-600/10 text-blue-400 flex items-center justify-center font-bold text-sm shrink-0 border border-blue-500/20">
+                                {bot.botName.substring(0, 2).toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <h4 className="font-bold text-white text-sm leading-tight flex items-center gap-1.5 flex-wrap">
+                                🤖 {bot.botName}
+                                <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full font-black tracking-wider border ${
+                                  bot.status === "Active" 
+                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/10" 
+                                    : "bg-red-500/10 text-red-400 border-red-500/10"
+                                }`}>
+                                  {bot.status}
+                                </span>
+                              </h4>
+                              <p className="text-xs text-slate-400 font-mono mt-1">@{bot.botUsername}</p>
+                              <p className="text-[10px] text-slate-500 font-mono mt-0.5">ID: {bot.botId}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 border-t border-slate-800 pt-3.5">
+                            <button
+                              onClick={() => {
+                                setCurrentBot(bot);
+                                localStorage.setItem("current_bot_id", bot.id);
+                                if (typeof (globalThis as any).setClientBotId === "function") {
+                                  (globalThis as any).setClientBotId(bot.id);
+                                }
+                              }}
+                              className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs transition cursor-pointer select-none"
+                            >
+                              ⚙️ Manage Bot
+                            </button>
+                            {bot.id !== "default" && (
+                              <>
+                                <button
+                                  onClick={() => handleToggleBotStatus(bot.id, bot.status)}
+                                  disabled={botActionLoading === bot.id}
+                                  className="px-2.5 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold rounded-xl text-xs transition cursor-pointer border border-slate-700"
+                                  title={bot.status === "Active" ? "Disable Bot" : "Enable Bot"}
+                                >
+                                  {bot.status === "Active" ? "⏸" : "▶️"}
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteBot(bot.id)}
+                                  disabled={botActionLoading === bot.id}
+                                  className="px-2.5 py-2 bg-red-950/20 hover:bg-red-900/30 text-red-400 hover:text-red-300 font-bold rounded-xl text-xs transition cursor-pointer border border-red-500/10"
+                                  title="Delete Bot"
+                                >
+                                  🗑️
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : null}
 
           {activeTab === "Overview" && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

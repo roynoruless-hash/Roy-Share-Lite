@@ -1,6 +1,7 @@
 import express from "express";
 import { getDb } from "../lib/firebase";
-import { doc, getDoc, runTransaction, collection, addDoc, serverTimestamp, query, where, getDocs, updateDoc, increment } from "firebase/firestore";
+import { getDoc, runTransaction, addDoc, serverTimestamp, query, where, getDocs, updateDoc, increment } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 import crypto from "crypto";
 import rateLimit from "express-rate-limit";
 

@@ -1,6 +1,7 @@
 import { getDb } from "./lib/firebase";
 import { REWARD_TASKS } from "./lib/tasks";
-import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, deleteDoc, limit } from "firebase/firestore";
+import { getDoc, setDoc, query, where, getDocs, addDoc, orderBy, deleteDoc, limit } from "firebase/firestore";
+import { doc, collection } from "./lib/botDb";
 import { GoogleGenAI } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./lib/gemini";
 import crypto from "crypto";

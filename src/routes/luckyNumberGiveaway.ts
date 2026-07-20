@@ -5,8 +5,6 @@ import { getStorage } from "firebase-admin/storage";
 import { db } from "../lib/firebase";
 import { parseInKolkata } from "../lib/dateUtils";
 import { 
-  collection, 
-  doc, 
   getDoc, 
   getDocs, 
   setDoc, 
@@ -17,6 +15,7 @@ import {
   writeBatch,
   runTransaction
 } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 
 // Helper to split prize amount among total winners randomly such that sum is exactly prizeAmount and all are positive integers
 function splitPrizeBudget(totalAmount: number, numWinners: number): number[] {
