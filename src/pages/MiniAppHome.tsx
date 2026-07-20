@@ -445,7 +445,7 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
 };
 
 export const MiniAppHome: React.FC = () => {
-  const { user, loading, error, startParam } = useTelegramAuth();
+  const { user, loading, error, startParam, isInsideTelegram } = useTelegramAuth();
   const [tgSettings, setTgSettings] = useState<any>(null);
   const [giveaways, setGiveaways] = useState<any[]>([]);
   const [loadingGiveaways, setLoadingGiveaways] = useState<boolean>(true);
@@ -498,10 +498,9 @@ export const MiniAppHome: React.FC = () => {
     setUploadType("select");
   }, [currentView]);
 
-  const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const queryUserId = searchParams?.get("userId");
-  const isMiniApp = !!(tg?.initData || queryUserId);
+  const isMiniApp = isInsideTelegram || !!queryUserId;
 
   const activeUser: any = user || null;
   const [isPhoneVerified, setIsPhoneVerified] = useState<boolean>(!isMiniApp);
@@ -739,15 +738,9 @@ export const MiniAppHome: React.FC = () => {
     }
   }, [currentView, activeUser]);
 
-  if (loading && isMiniApp) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
-  if (isMiniApp && (error || !activeUser || !activeUser.id)) {
+  // Remove blocking loader, let UI render with skeleton/placeholders
+  // Only show Authentication Failed if NOT loading, and error exists, and no user
+  if (isMiniApp && !loading && (error || !activeUser || !activeUser.id)) {
     return (
       <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 text-center text-red-400">
         <div>
@@ -758,7 +751,9 @@ export const MiniAppHome: React.FC = () => {
     );
   }
 
-  if (!activeUser?.membershipVerified) {
+  // If we are still loading the active user, bypass these verification screens
+  // They will be rendered later if verification is actually missing
+  if (activeUser && !activeUser.membershipVerified) {
     return (
       <MembershipVerification 
         user={activeUser} 
@@ -770,7 +765,7 @@ export const MiniAppHome: React.FC = () => {
     );
   }
 
-  if (!isPhoneVerified) {
+  if (activeUser && activeUser.membershipVerified && !isPhoneVerified) {
     return (
       <PhoneVerification 
         user={activeUser} 
@@ -882,7 +877,7 @@ export const MiniAppHome: React.FC = () => {
   if (activeTaskId) {
     return (
       <RewardTasksPage 
-        userIdProp={activeUser.id} 
+        userIdProp={activeUser?.id || ""} 
         taskIdProp={activeTaskId} 
         onBack={() => setActiveTaskId(null)} 
       />
@@ -890,7 +885,7 @@ export const MiniAppHome: React.FC = () => {
   }
 
   const cleanBotUser = tgSettings?.botUsername ? tgSettings.botUsername.replace(/^@/, '') : "Roysharearn_bot";
-  const referralLink = `https://t.me/${cleanBotUser}?start=ref_${activeUser.id}`;
+  const referralLink = activeUser?.id ? `https://t.me/${cleanBotUser}?start=ref_${activeUser.id}` : "";
 
   const earningButtons = [
     { id: "lucky-number", label: "Lucky Number Giveaway", icon: Gift, color: "bg-gradient-to-r from-red-500 to-amber-500", shadow: "shadow-red-500/20" },
@@ -988,8 +983,8 @@ export const MiniAppHome: React.FC = () => {
                   className="w-20 h-20 rounded-full border-2 border-slate-800 p-0.5 bg-slate-900 mb-4 shadow-xl"
                 >
                   <img 
-                    src={user.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`} 
-                    alt={user.username}
+                    src={activeUser?.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`} 
+                    alt={activeUser?.username || "user"}
                     className="w-full h-full rounded-full object-cover"
                   />
                 </motion.div>
@@ -1005,14 +1000,14 @@ export const MiniAppHome: React.FC = () => {
                   animate={{ opacity: 1 }}
                   className="text-slate-400 text-sm mb-4"
                 >
-                  Welcome, {displayName} (@{user.username || "user"})
+                  Welcome, {displayName} (@{activeUser?.username || "user"})
                 </motion.p>
                 
                 <div className="flex gap-2">
                   <span className="flex items-center gap-1 px-3 py-1 bg-amber-500/10 text-amber-400 text-xs font-bold rounded-full border border-amber-500/20">
-                    <Star className="w-3 h-3 fill-amber-400" /> {user.level || 1} Level
+                    <Star className="w-3 h-3 fill-amber-400" /> {activeUser?.level || 1} Level
                   </span>
-                  {user.isPremium && (
+                  {activeUser?.isPremium && (
                     <span className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold rounded-full border border-indigo-500/20">
                       Premium
                     </span>
@@ -1041,7 +1036,7 @@ export const MiniAppHome: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-800/50">
                   <div>
                     <p className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mb-0.5">Today's Earnings</p>
-                    <p className="text-emerald-400 font-bold text-sm">+₹{user.todayEarnings}</p>
+                    <p className="text-emerald-400 font-bold text-sm">+₹{activeUser?.todayEarnings || 0}</p>
                   </div>
                   <div>
                     <p className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mb-0.5">Total Earnings</p>

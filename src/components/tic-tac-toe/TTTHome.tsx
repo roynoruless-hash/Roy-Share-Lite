@@ -62,8 +62,14 @@ export default function TTTHome({ onBack, onJoinMatch, userId }: TTTHomeProps) {
       if (docSnap.exists()) {
         const qData = docSnap.data();
         if (qData.status === "matched" && qData.matchId) {
-          stopMatchmaking();
-          onJoinMatch(qData.matchId);
+          const completedMatches = JSON.parse(sessionStorage.getItem("ttt_completed") || "[]");
+          if (!completedMatches.includes(qData.matchId)) {
+            stopMatchmaking();
+            onJoinMatch(qData.matchId);
+          } else {
+            console.log("[TTT QUEUE] Ignoring completed match:", qData.matchId);
+            setSearching(false);
+          }
         } else if (qData.status === "searching") {
           setSearching(true);
           setPublicCode(qData.publicCode);

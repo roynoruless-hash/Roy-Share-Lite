@@ -9,29 +9,14 @@ interface TelegramAuthGuardProps {
 }
 
 export const TelegramAuthGuard: React.FC<TelegramAuthGuardProps> = ({ children, setupComponent }) => {
-  const { user, loading, error, verifyAuth } = useTelegramAuth();
+  const { user, loading, error, verifyAuth, isBackgroundLoading, isInsideTelegram } = useTelegramAuth();
 
-  // Check if we are actually in a Telegram Mini App context
-  const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
+  // Use the state-managed isInsideTelegram to avoid race conditions
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const queryUserId = params?.get("userId");
-  const isMiniApp = !!(tg?.initData || queryUserId);
+  const isMiniApp = isInsideTelegram || !!queryUserId;
 
-  if (loading && isMiniApp) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6 text-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-          className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full mb-6"
-        />
-        <h2 className="text-xl font-semibold text-white mb-2">Authenticating</h2>
-        <p className="text-slate-400">Verifying your secure Telegram session...</p>
-      </div>
-    );
-  }
-
-  if (error && isMiniApp) {
+  if (error && isMiniApp && !loading && !isBackgroundLoading) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6 text-center">
         <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mb-6">
@@ -50,8 +35,8 @@ export const TelegramAuthGuard: React.FC<TelegramAuthGuardProps> = ({ children, 
     );
   }
 
-  if (isMiniApp && !user) {
-    return setupComponent ? <>{setupComponent}</> : null;
+  if (isMiniApp && !user && !loading && !isBackgroundLoading && setupComponent) {
+    return <>{setupComponent}</>;
   }
 
   return <>{children}</>;

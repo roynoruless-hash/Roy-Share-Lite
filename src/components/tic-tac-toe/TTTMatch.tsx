@@ -174,6 +174,21 @@ export default function TTTMatch({ matchId, onBack, userId }: TTTMatchProps) {
     };
   }, [matchId]);
 
+  // Track completed match in sessionStorage to prevent auto-rejoining
+  useEffect(() => {
+    if (match?.status === "completed") {
+      try {
+        const completed = JSON.parse(sessionStorage.getItem("ttt_completed") || "[]");
+        if (!completed.includes(matchId)) {
+          completed.push(matchId);
+          sessionStorage.setItem("ttt_completed", JSON.stringify(completed));
+        }
+      } catch (e) {
+        console.error("Failed to save completed match id:", e);
+      }
+    }
+  }, [match?.status, matchId]);
+
   // Turn count timer ticking
   useEffect(() => {
     if (!match || match.status !== "active") return;

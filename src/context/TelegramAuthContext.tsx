@@ -16,6 +16,7 @@ interface TelegramAuthContextType {
   verifyAuth: () => Promise<void>;
   completeProfile: (details: Partial<User>) => Promise<void>;
   waitForTelegramParams: (timeoutSeconds?: number) => Promise<boolean>;
+  isBackgroundLoading: boolean;
 }
 
 const TelegramAuthContext = createContext<TelegramAuthContextType | undefined>(undefined);
@@ -58,6 +59,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [initData, setInitData] = useState<string | null>(null);
   const [tg, setTg] = useState<any>(null);
   const [isInsideTelegram, setIsInsideTelegram] = useState<boolean>(false);
+  const [isBackgroundLoading, setIsBackgroundLoading] = useState<boolean>(false);
   const isVerifyingRef = React.useRef(false);
 
   const waitForTelegramParams = async (timeoutSeconds = 5): Promise<boolean> => {
@@ -107,11 +109,12 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   };
 
   const verifyAuth = async () => {
-    console.log("[TelegramAuthContext] verifyAuth execution started");
+    const startTime = Date.now();
+    console.log("[TelegramAuthContext] [PERFORMANCE] verifyAuth execution started at:", new Date(startTime).toISOString());
     
     // Prevent concurrent duplicate executions of verifyAuth
     if (isVerifyingRef.current) {
-      console.log("[TelegramAuthContext] verifyAuth is already in progress. Skipping duplicate execution to prevent race conditions.");
+      console.log("[TelegramAuthContext] verifyAuth is already in progress. Skipping duplicate execution.");
       return;
     }
     isVerifyingRef.current = true;
@@ -126,98 +129,141 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       return hasTgParams || hasTgHash || isAppPath || hasTgObject;
     };
 
-    // Wait for TG to be ready - if not in a Telegram env, skip/timed-out immediately (0.1s) to avoid blocking non-Telegram startup
-    const tgReady = await waitForTelegramParams(isTgEnv() ? 4 : 0.1);
-    const currentTg = (window as any).Telegram?.WebApp;
-    
-    if (currentTg) {
-      setTg(currentTg);
-      console.log("[TelegramAuthContext] WebApp detailed metadata - version:", currentTg.version, "platform:", currentTg.platform, "colorScheme:", currentTg.colorScheme);
-    }
+    const inTg = isTgEnv();
+    console.log("[TelegramAuthContext] [PERFORMANCE] isTgEnv evaluated in", Date.now() - startTime, "ms. Value:", inTg);
 
-    const params = new URLSearchParams(window.location.search);
-    const queryUserId = params.get("userId");
-    console.log("[TelegramAuthContext] [STEP 3] Checked query parameters. queryUserId:", queryUserId);
+    // Timeout release mechanism: if verification takes > 5 seconds, let the app render in background.
+    let isReleased = false;
+    const releaseTimeout = setTimeout(() => {
+      if (isVerifyingRef.current) {
+        console.warn(`[TelegramAuthContext] [PERFORMANCE WARNING] Authentication has taken > 5000ms. Elapsed: ${Date.now() - startTime}ms. Releasing loading block so first screen can render, and continuing auth in background.`);
+        isReleased = true;
+        setLoading(false);
+        setIsBackgroundLoading(true);
+      }
+    }, 5000);
 
-    // If no Telegram object AND no queryUserId in query param, we are not in a Mini App context
-    if (!currentTg && !queryUserId) {
-      console.log("[TelegramAuthContext] Early return: No Telegram WebApp object found and no queryUserId parameter found. App is not running inside Telegram Mini App context.");
-      setLoading(false);
-      isVerifyingRef.current = false;
-      return;
-    }
+    try {
+      // 1. Wait for TG WebApp SDK to be ready
+      const tgReadyStart = Date.now();
+      const tgReady = await waitForTelegramParams(inTg ? 4 : 0.1);
+      const tgReadyDuration = Date.now() - tgReadyStart;
+      console.log(`[TelegramAuthContext] [PERFORMANCE] waitForTelegramParams resolved in ${tgReadyDuration}ms. Success: ${tgReady}`);
 
-    const currentInitData = currentTg?.initData;
-    setInitData(currentInitData || null);
-    setIsInsideTelegram(!!(currentTg && (currentInitData || currentTg.platform)));
-    console.log("[TelegramAuthContext] [STEP 2] Check initData availability. initData exists:", !!currentInitData, "initData length:", currentInitData ? currentInitData.length : 0);
+      const currentTg = (window as any).Telegram?.WebApp;
+      if (currentTg) {
+        setTg(currentTg);
+        console.log("[TelegramAuthContext] WebApp detailed metadata - version:", currentTg.version, "platform:", currentTg.platform);
+      }
 
-    // Fallback: If we have queryUserId but no initData, use the direct user retrieval API
-    if (!currentInitData && queryUserId) {
-      console.log("[TelegramAuthContext] Fallback scenario: queryUserId is available but initData is missing. Triggering direct user profile retrieval flow.");
-      setLoading(true);
-      setError(null);
-      try {
+      const params = new URLSearchParams(window.location.search);
+      const queryUserId = params.get("userId");
+      console.log("[TelegramAuthContext] [STEP 3] Checked query parameters. queryUserId:", queryUserId);
+
+      // If no Telegram object AND no queryUserId in query param, we are not in a Mini App context
+      if (!currentTg && !queryUserId) {
+        console.log("[TelegramAuthContext] Early return: Not inside Telegram Mini App context. Elapsed:", Date.now() - startTime, "ms");
+        clearTimeout(releaseTimeout);
+        setLoading(false);
+        setIsBackgroundLoading(false);
+        isVerifyingRef.current = false;
+        return;
+      }
+
+      const currentInitData = currentTg?.initData;
+      setInitData(currentInitData || null);
+      setIsInsideTelegram(!!(currentTg && (currentInitData || currentTg.platform)));
+      console.log("[TelegramAuthContext] [STEP 2] Check initData availability. initData exists:", !!currentInitData, "initData length:", currentInitData ? currentInitData.length : 0);
+
+      // Fallback scenarios:
+      if (!currentInitData && queryUserId) {
+        console.log("[TelegramAuthContext] Fallback scenario: queryUserId available, initData missing. Fetching user profile directly.");
+        const fallbackStart = Date.now();
         const profileUrl = `${API_BASE}/api/user/profile/${queryUserId}`;
-        const response = await fetchWithTimeout(profileUrl);
+        const response = await fetchWithTimeout(profileUrl, {}, 5000);
         const data = await response.json();
-        console.log("[TelegramAuthContext] Fallback user profile JSON response parsed:", { success: data.success, hasUser: !!data.user });
-        
+        console.log(`[TelegramAuthContext] [PERFORMANCE] Fallback API resolved in ${Date.now() - fallbackStart}ms. Success: ${data.success}`);
+
         if (data.success && data.user) {
-          console.log("[TelegramAuthContext] Fallback profile retrieval succeeded. Authenticated user ID:", data.user.id);
           setUser(data.user);
         } else {
           throw new Error(data.error || "User not found in database");
         }
-      } catch (err: any) {
-        console.error("[TelegramAuthContext] Fallback profile retrieval flow failed:", err);
-        setError(err.message || "Failed to load user profile");
-      } finally {
-        console.log("[TelegramAuthContext] Fallback profile retrieval flow finished. Setting loading to false.");
+        
+        clearTimeout(releaseTimeout);
         setLoading(false);
+        setIsBackgroundLoading(false);
         isVerifyingRef.current = false;
+        return;
       }
-      return;
-    }
 
-    // If no initData and no queryUserId, skipping verification
-    if (!currentInitData) {
-      console.log("[TelegramAuthContext] Early return: initData is empty and queryUserId is missing. Skipping verification.");
-      setLoading(false);
-      isVerifyingRef.current = false;
-      return;
-    }
+      // If no initData and no queryUserId, skipping verification
+      if (!currentInitData) {
+        console.warn("[TelegramAuthContext] Early return: initData is empty. Skipping verification. Elapsed:", Date.now() - startTime, "ms");
+        clearTimeout(releaseTimeout);
+        setLoading(false);
+        setIsBackgroundLoading(false);
+        isVerifyingRef.current = false;
+        return;
+      }
 
-    console.log("[TelegramAuthContext] Standard Telegram Mini App authentication flow starting with initData...");
-    setLoading(true);
-    setError(null);
-    try {
+      // Standard verification flow
+      console.log("[TelegramAuthContext] Standard Telegram verification starting...");
+      const verifyStart = Date.now();
       const urlParams = new URLSearchParams(window.location.search);
       const sp = currentTg?.initDataUnsafe?.start_param || urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start_param") || "";
       setStartParam(sp);
 
       const verifyUrl = `${API_BASE}/api/auth/telegram-verify`;
-      const response = await fetchWithTimeout(verifyUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData: currentInitData, startParam: sp }),
-      });
+      
+      // We will perform retry logic if it fails or times out
+      let attempts = 0;
+      let authenticated = false;
+      let lastError: any = null;
 
-      const data: TelegramAuthResponse = await response.json();
-      console.log("[TelegramAuthContext] Standard Telegram verification JSON response parsed:", { success: data.success, hasUser: !!data.user });
+      while (attempts < 3 && !authenticated) {
+        attempts++;
+        try {
+          console.log(`[TelegramAuthContext] Sending verification request (Attempt ${attempts}/3)...`);
+          const response = await fetchWithTimeout(verifyUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ initData: currentInitData, startParam: sp }),
+          }, 4000); // 4s timeout per request
 
-      if (data.success && data.user) {
-        console.log("[TelegramAuthContext] Standard verification succeeded. Authenticated user ID:", data.user.id);
-        setUser(data.user);
-      } else {
-        throw new Error(data.error || "Authentication failed");
+          const data: TelegramAuthResponse = await response.json();
+          console.log(`[TelegramAuthContext] [PERFORMANCE] Verification attempt ${attempts} resolved in ${Date.now() - verifyStart}ms. Success: ${data.success}`);
+
+          if (data.success && data.user) {
+            setUser(data.user);
+            authenticated = true;
+          } else {
+            throw new Error(data.error || "Authentication failed");
+          }
+        } catch (err: any) {
+          lastError = err;
+          console.error(`[TelegramAuthContext] Verification attempt ${attempts} failed:`, err.message || err);
+          if (attempts < 3) {
+            await new Promise(r => setTimeout(r, 1000)); // wait 1s before retry
+          }
+        }
       }
+
+      if (!authenticated) {
+        throw lastError || new Error("Failed to authenticate after retries");
+      }
+
     } catch (err: any) {
-      console.error("[TelegramAuthContext] Standard verification flow failed with error:", err);
-      setError(err.message || "Failed to authenticate with Telegram");
+      console.error("[TelegramAuthContext] [PERFORMANCE ERROR] Complete verification flow failed. Total elapsed:", Date.now() - startTime, "ms. Error:", err);
+      // Only set error if we haven't already released the UI (to avoid overwriting fallback state with an intrusive error page)
+      if (!isReleased) {
+        setError(err.message || "Failed to authenticate with Telegram");
+      }
     } finally {
-      console.log("[TelegramAuthContext] Standard verification flow finished. Setting loading to false.");
+      clearTimeout(releaseTimeout);
+      console.log(`[TelegramAuthContext] [PERFORMANCE] verifyAuth finally complete. Total duration: ${Date.now() - startTime}ms. Released UI state: ${isReleased}`);
       setLoading(false);
+      setIsBackgroundLoading(false);
       isVerifyingRef.current = false;
     }
   };
@@ -318,6 +364,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         verifyAuth,
         completeProfile,
         waitForTelegramParams,
+        isBackgroundLoading,
       }}
     >
       {children}

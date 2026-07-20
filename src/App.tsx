@@ -5,18 +5,19 @@
 
 import { useState, useEffect, lazy, Suspense } from "react";
 import { API_BASE } from "./config/api";
-import AnimatedBackground from "./components/AnimatedBackground";
-import Hero from "./components/Hero";
-import Stats from "./components/Stats";
-import Features from "./components/Features";
-import HowItWorks from "./components/HowItWorks";
-import WhyChooseUs from "./components/WhyChooseUs";
-import FAQ from "./components/FAQ";
-import SupportCommunity from "./components/SupportCommunity";
-import CTA from "./components/CTA";
-import Footer from "./components/Footer";
 import { TelegramAuthProvider } from "./context/TelegramAuthContext";
 import { TelegramAuthGuard } from "./components/TelegramAuthGuard";
+
+const AnimatedBackground = lazy(() => import("./components/AnimatedBackground"));
+const Hero = lazy(() => import("./components/Hero"));
+const Stats = lazy(() => import("./components/Stats"));
+const Features = lazy(() => import("./components/Features"));
+const HowItWorks = lazy(() => import("./components/HowItWorks"));
+const WhyChooseUs = lazy(() => import("./components/WhyChooseUs"));
+const FAQ = lazy(() => import("./components/FAQ"));
+const SupportCommunity = lazy(() => import("./components/SupportCommunity"));
+const CTA = lazy(() => import("./components/CTA"));
+const Footer = lazy(() => import("./components/Footer"));
 
 const AdvertiserPanel = lazy(() => import("./pages/AdvertiserPanel"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
