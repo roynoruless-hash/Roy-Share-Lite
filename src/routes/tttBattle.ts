@@ -787,11 +787,32 @@ async function resolveTTTMatchInternal(matchId: string): Promise<{ success: bool
     if (match.winnerId === "draw") {
       const drawPolicy = settings.drawPolicy || "refund";
       await runTransaction(db, async (t) => {
+        console.log(`[TTT SERVER] resolveTTTMatchInternal (DRAW) - TX START for matchId: ${matchId}`);
+        const startTime = Date.now();
+        const p1Id = decryptId(match.player1.encTelegramId);
+        const p2Id = decryptId(match.player2.encTelegramId);
+
+        // READS
+        let u1Data: any = {};
+        if (!match.player1.isAI) {
+          console.log(`[TTT SERVER] resolveTTTMatchInternal (DRAW) - READ p1 uRef (${p1Id})`);
+          const u1Snap = await t.get(doc(db, "users", p1Id));
+          u1Data = u1Snap.exists() ? u1Snap.data() : {};
+        }
+
+        let u2Data: any = {};
+        if (!match.player2.isAI) {
+          console.log(`[TTT SERVER] resolveTTTMatchInternal (DRAW) - READ p2 uRef (${p2Id})`);
+          const u2Snap = await t.get(doc(db, "users", p2Id));
+          u2Data = u2Snap.exists() ? u2Snap.data() : {};
+        }
+
+        console.log(`[TTT SERVER] resolveTTTMatchInternal (DRAW) - ALL READS COMPLETED. STARTING WRITES.`);
+
+        // WRITES
         t.update(matchRef, { resultProcessed: true });
 
         // Delete queues
-        const p1Id = decryptId(match.player1.encTelegramId);
-        const p2Id = decryptId(match.player2.encTelegramId);
         t.delete(doc(db, "ttt_queue", p1Id));
         if (!match.player2.isAI) {
           t.delete(doc(db, "ttt_queue", p2Id));
@@ -805,7 +826,10 @@ async function resolveTTTMatchInternal(matchId: string): Promise<{ success: bool
         }, { merge: true });
 
         // Save History
-        await saveHistory(t, matchId, "draw", null, match);
+        saveHistory(t, matchId, "draw", null, match, u1Data, u2Data);
+
+        const duration = Date.now() - startTime;
+        console.log(`[TTT SERVER] resolveTTTMatchInternal (DRAW) - TX SUCCESS. Duration: ${duration}ms`);
       });
       return { success: true };
     }
@@ -829,21 +853,54 @@ async function finalizePayout(matchId: string, winnerId: string, adCompleted: bo
   const db = getDb();
   try {
     await runTransaction(db, async (t) => {
+      console.log(`[TTT SERVER] finalizePayout - TX START for matchId: ${matchId}`);
+      const startTime = Date.now();
       const matchRef = doc(db, "ttt_matches", matchId);
+      console.log(`[TTT SERVER] finalizePayout - READ matchRef`);
       const matchSnap = await t.get(matchRef);
       if (!matchSnap.exists()) throw new Error("Match not found");
 
       const match = matchSnap.data();
-      if (match.resultProcessed) return;
+      if (match.resultProcessed) {
+        console.log(`[TTT SERVER] finalizePayout - Match already processed`);
+        return;
+      }
 
       const p1Id = decryptId(match.player1.encTelegramId);
       const p2Id = decryptId(match.player2.encTelegramId);
 
+      // Perform all other reads first!
+      const uRef = doc(db, "users", winnerId);
+      console.log(`[TTT SERVER] finalizePayout - READ winner uRef (${winnerId})`);
+      const uSnap = await t.get(uRef);
+      
+      let u1Data: any = {};
+      if (!match.player1.isAI) {
+        if (p1Id === winnerId) {
+          u1Data = uSnap.exists() ? uSnap.data() : {};
+        } else {
+          console.log(`[TTT SERVER] finalizePayout - READ p1 uRef (${p1Id})`);
+          const u1Snap = await t.get(doc(db, "users", p1Id));
+          u1Data = u1Snap.exists() ? u1Snap.data() : {};
+        }
+      }
+
+      let u2Data: any = {};
+      if (!match.player2.isAI) {
+        if (p2Id === winnerId) {
+          u2Data = uSnap.exists() ? uSnap.data() : {};
+        } else {
+          console.log(`[TTT SERVER] finalizePayout - READ p2 uRef (${p2Id})`);
+          const u2Snap = await t.get(doc(db, "users", p2Id));
+          u2Data = u2Snap.exists() ? u2Snap.data() : {};
+        }
+      }
+
+      console.log(`[TTT SERVER] finalizePayout - ALL READS COMPLETED. STARTING WRITES.`);
+
       const prizePool = match.prizePool || 20;
 
       // Credit the winner
-      const uRef = doc(db, "users", winnerId);
-      const uSnap = await t.get(uRef);
       if (uSnap.exists()) {
         t.update(uRef, { balance: increment(prizePool) });
         t.set(doc(collection(db, "transactions")), {
@@ -880,7 +937,10 @@ async function finalizePayout(matchId: string, winnerId: string, adCompleted: bo
       }, { merge: true });
 
       // Save game history records
-      await saveHistory(t, matchId, "win", winnerId, match);
+      saveHistory(t, matchId, "win", winnerId, match, u1Data, u2Data);
+
+      const duration = Date.now() - startTime;
+      console.log(`[TTT SERVER] finalizePayout - TX SUCCESS. Duration: ${duration}ms`);
     });
 
     return { success: true };
@@ -890,16 +950,13 @@ async function finalizePayout(matchId: string, winnerId: string, adCompleted: bo
   }
 }
 
-async function saveHistory(t: any, matchId: string, type: "win" | "draw", winnerId: string | null, match: any) {
+function saveHistory(t: any, matchId: string, type: "win" | "draw", winnerId: string | null, match: any, u1Data: any, u2Data: any) {
   const db = getDb();
   const p1Id = decryptId(match.player1.encTelegramId);
   const p2Id = decryptId(match.player2.encTelegramId);
 
   // Player 1 history
   if (!match.player1.isAI) {
-    const u1Ref = doc(db, "users", p1Id);
-    const u1Snap = await t.get(u1Ref);
-    const u1Data = u1Snap.exists() ? u1Snap.data() : {};
     const result1 = type === "draw" ? "Draw" : (winnerId === p1Id ? "Win" : "Loss");
     const reward1 = result1 === "Win" ? (match.prizePool || 20) : 0;
 
@@ -921,9 +978,6 @@ async function saveHistory(t: any, matchId: string, type: "win" | "draw", winner
 
   // Player 2 history
   if (!match.player2.isAI) {
-    const u2Ref = doc(db, "users", p2Id);
-    const u2Snap = await t.get(u2Ref);
-    const u2Data = u2Snap.exists() ? u2Snap.data() : {};
     const result2 = type === "draw" ? "Draw" : (winnerId === p2Id ? "Win" : "Loss");
     const reward2 = result2 === "Win" ? (match.prizePool || 20) : 0;
 
