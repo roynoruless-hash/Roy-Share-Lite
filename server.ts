@@ -92,8 +92,23 @@ const getDoc = async (ref: any, attempts = 5, initialDelay = 500): Promise<any> 
   let delay = initialDelay;
   for (let i = 0; i < attempts; i++) {
     try {
-      const snap = await firestoreGetDoc(ref);
-      if (ref && ref.path === "settings/telegram" && snap.exists()) {
+      // Establish a strict 4000ms timeout guard for server-side Firestore operations to prevent deadlocks/infinite hangs
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error("Firestore operation timed out after 4000ms")), 4000);
+        // Ensure Node's event loop can exit if only this timer remains
+        if (timer && typeof timer.unref === 'function') {
+          timer.unref();
+        }
+      });
+      const snap = await Promise.race([firestoreGetDoc(ref), timeoutPromise]);
+
+      const isTgSettings = ref && (
+        ref.path === "settings/telegram" || 
+        ref.path.endsWith("/settings/telegram") || 
+        ref.path.endsWith("settings/telegram")
+      );
+
+      if (isTgSettings && snap.exists()) {
         const originalData = snap.data;
         if (originalData) {
           snap.data = function() {
@@ -288,11 +303,11 @@ process.on('uncaughtException', (err) => {
 async function startServer() {
   debugLog("startServer: Beginning startup sequence...");
   
-  // Initialize dynamic website verification tag cache
-  await initializeVerificationTag();
+  // Initialize dynamic website verification tag cache in background (non-blocking server boot)
+  initializeVerificationTag().catch(err => debugLog(`Error initializing verification tag cache: ${err.message}`));
   
-  // Initialize dynamic AdsBitvex settings cache
-  await initializeAdsbitvexSettings();
+  // Initialize dynamic AdsBitvex settings cache in background (non-blocking server boot)
+  initializeAdsbitvexSettings().catch(err => debugLog(`Error initializing adsbitvex settings cache: ${err.message}`));
   
   // Run cleanup on startup (non-blocking)
   debugLog("startServer: Launching cleanupDemoTasks (non-blocking)...");
