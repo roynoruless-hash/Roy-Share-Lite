@@ -42,6 +42,7 @@ import {
   Coins,
   Clock,
   Trophy,
+  Grid,
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, updateDoc, onSnapshot } from "firebase/firestore";
@@ -63,6 +64,10 @@ const PublicLuckyDrawPage = lazy(() => import("./PublicLuckyDrawPage"));
 const RPSHome = lazy(() => import("../components/rock-paper-scissors/RPSHome"));
 const RPSMatch = lazy(() => import("../components/rock-paper-scissors/RPSMatch"));
 import RPSErrorBoundary from "../components/rock-paper-scissors/RPSErrorBoundary";
+
+const TTTHome = lazy(() => import("../components/tic-tac-toe/TTTHome"));
+const TTTMatch = lazy(() => import("../components/tic-tac-toe/TTTMatch"));
+import TTTErrorBoundary from "../components/tic-tac-toe/TTTErrorBoundary";
 
 // Lazy loaded views
 const SurveyPage = lazy(() => import("./SurveyPage").then(m => ({ default: m.SurveyPage })));
@@ -890,6 +895,7 @@ export const MiniAppHome: React.FC = () => {
   const earningButtons = [
     { id: "lucky-number", label: "Lucky Number Giveaway", icon: Gift, color: "bg-gradient-to-r from-red-500 to-amber-500", shadow: "shadow-red-500/20" },
     { id: "rps-battle", label: "RPS Battle", icon: Gamepad2, color: "bg-gradient-to-r from-indigo-600 to-orange-500", shadow: "shadow-indigo-500/20" },
+    { id: "ttt-battle", label: "Tic Tac Toe Battle", icon: Grid, color: "bg-gradient-to-r from-emerald-600 to-indigo-500", shadow: "shadow-emerald-500/20" },
     { id: "lucky-spin", label: "Lucky Spin Live", icon: Sparkles, color: "bg-gradient-to-r from-pink-550 to-violet-600", shadow: "shadow-pink-500/20" },
     { id: "earn-rewards", label: "Reward Tasks", icon: ClipboardList, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
   ];
@@ -1056,7 +1062,9 @@ export const MiniAppHome: React.FC = () => {
               >
                 {earningButtons.map((btn, idx) => {
                   const isActiveGiveaway = btn.id === "lucky-number" && giveaways.some(g => g.status === "Live" && getGiveawayStatus(g) === "LIVE");
-                  const badgeText = btn.id === "lucky-number" ? (isActiveGiveaway ? "LIVE" : "NEW") : null;
+                  const badgeText = btn.id === "lucky-number" 
+                    ? (isActiveGiveaway ? "LIVE" : "NEW") 
+                    : (btn.id === "ttt-battle" ? "MULTIPLAYER" : null);
                   
                   return (
                     <motion.button
@@ -1067,8 +1075,8 @@ export const MiniAppHome: React.FC = () => {
                       className="flex flex-col items-center justify-center p-5 rounded-2xl bg-slate-900/40 border border-slate-800/50 hover:border-slate-700 hover:bg-slate-900/60 transition-all group relative cursor-pointer"
                     >
                       {badgeText && (
-                        <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-red-500/10 border border-red-500/20 text-red-500 flex items-center gap-1 z-10">
-                          <span className="w-1 h-1 rounded-full bg-red-500 animate-pulse" />
+                        <span className={`absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider ${btn.id === 'ttt-battle' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border border-red-500/20 text-red-500'} flex items-center gap-1 z-10`}>
+                          {btn.id !== 'ttt-battle' && <span className="w-1 h-1 rounded-full bg-red-500 animate-pulse" />}
                           {badgeText}
                         </span>
                       )}
@@ -1228,8 +1236,6 @@ export const MiniAppHome: React.FC = () => {
           </Suspense>
         )}
 
-
-
         {currentView === "rps-battle" && (
           <RPSErrorBoundary onReset={() => setCurrentView("home")}>
             <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
@@ -1244,6 +1250,22 @@ export const MiniAppHome: React.FC = () => {
               <RPSMatch matchId={currentView.replace("rps-match-", "")} onBack={() => setCurrentView("rps-battle")} userId={activeUser?.id} />
             </Suspense>
           </RPSErrorBoundary>
+        )}
+
+        {currentView === "ttt-battle" && (
+          <TTTErrorBoundary onReset={() => setCurrentView("home")}>
+            <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+              <TTTHome onBack={() => setCurrentView("home")} onJoinMatch={(matchId) => setCurrentView(`ttt-match-${matchId}`)} userId={activeUser?.id} />
+            </Suspense>
+          </TTTErrorBoundary>
+        )}
+
+        {currentView.startsWith("ttt-match-") && (
+          <TTTErrorBoundary onReset={() => setCurrentView("ttt-battle")}>
+            <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+              <TTTMatch matchId={currentView.replace("ttt-match-", "")} onBack={() => setCurrentView("ttt-battle")} userId={activeUser?.id} />
+            </Suspense>
+          </TTTErrorBoundary>
         )}
 
         {currentView.startsWith("lucky-") && (

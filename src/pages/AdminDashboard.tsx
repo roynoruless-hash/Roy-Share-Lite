@@ -81,6 +81,7 @@ import UserDetailsModal from "../components/UserDetailsModal";
 import TelegramBroadcastCenter from "../components/TelegramBroadcastCenter";
 import LuckyNumberGiveawayAdminManager from "../components/LuckyNumberGiveawayAdminManager";
 import RPSAdminManager from "../components/rock-paper-scissors/RPSAdminManager";
+import TTTAdminManager from "../components/tic-tac-toe/TTTAdminManager";
 import { LuckySpinAdminView } from "../components/LuckySpinAdminView";
 import { FraudInvestigationCenter } from "../components/FraudInvestigationCenter";
 import buildInfo from '../build-info.json';
@@ -5166,6 +5167,7 @@ Environment: ${isProduction ? "Production" : "Development"}`;
               "🎁 Lucky Draw Winner",
               "🎡 Lucky Spin Live Event",
               "✊ RPS Battle",
+              "❌ Tic Tac Toe Battle",
             ].filter(Boolean).map((btn) => (
               <button
                 key={btn}
@@ -13084,6 +13086,10 @@ Environment: ${isProduction ? "Production" : "Development"}`;
 
           {activeTab === "✊ RPS Battle" && (
             <RPSAdminManager />
+          )}
+
+          {activeTab === "❌ Tic Tac Toe Battle" && (
+            <TTTAdminManager />
           )}
 
           {activeTab === "💰 AdsBitvex Monetization" && (
