@@ -16,7 +16,8 @@ import {
   Filter
 } from "lucide-react";
 import { db } from "../lib/firebase";
-import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
+import { query, where, getDocs, getDoc } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 
 interface UrlShortenerAnalyticsPageProps {
   linkId: string;

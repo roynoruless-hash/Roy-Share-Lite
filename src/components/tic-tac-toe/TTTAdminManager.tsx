@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Settings, Save, AlertCircle, Loader2, Users, TrendingUp, History, RefreshCw, Grid } from "lucide-react";
 import { db } from "../../lib/firebase";
-import { doc, getDoc, setDoc, collection, getDocs, query } from "firebase/firestore";
+import { getDoc, setDoc, getDocs, query } from "firebase/firestore";
+import { doc, collection } from "../../lib/botDb";
 
 export default function TTTAdminManager() {
   const [settings, setSettings] = useState<any>({

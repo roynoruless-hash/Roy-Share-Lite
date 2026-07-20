@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { db } from "../lib/firebase";
 import { API_BASE } from "../config/api";
-import { doc, collection, query, where, onSnapshot } from "firebase/firestore";
+import { query, where, onSnapshot } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 import { 
   Trophy, 
   ArrowLeft, 

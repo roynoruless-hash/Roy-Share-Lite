@@ -1,4 +1,5 @@
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, increment } from "firebase/firestore";
+import { getDoc, setDoc, updateDoc, addDoc, getDocs, query, where, increment } from "firebase/firestore";
+import { doc, collection } from "./botDb";
 import { db } from "./firebase";
 import { adjustTrustScore } from "./trustScore";
 

@@ -18,10 +18,17 @@ export function registerServerStorage(storage: any) {
 }
 
 if (typeof window !== "undefined") {
-  // Client-side uses localized state / localStorage
+  // Client-side uses localized state / localStorage / query param
   let currentClientBotId = "default";
   try {
-    currentClientBotId = localStorage.getItem("current_bot_id") || "default";
+    const params = new URLSearchParams(window.location.search);
+    const urlBotId = params.get("botId");
+    if (urlBotId) {
+      currentClientBotId = urlBotId;
+      localStorage.setItem("current_bot_id", urlBotId);
+    } else {
+      currentClientBotId = localStorage.getItem("current_bot_id") || "default";
+    }
   } catch (e) {}
 
   getActiveBotIdFunc = () => {

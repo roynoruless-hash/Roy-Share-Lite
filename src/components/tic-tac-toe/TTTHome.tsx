@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Shield, Coins, Play, X, UserCheck, Loader2, ArrowLeft, Grid, Compass, AlertCircle, RefreshCw, Trophy, HelpCircle } from "lucide-react";
 import { db } from "../../lib/firebase";
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { getDoc, onSnapshot } from "firebase/firestore";
+import { doc } from "../../lib/botDb";
 import { API_BASE } from "../../config/api";
 
 interface TTTHomeProps {

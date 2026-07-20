@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Shield, Sparkles, Coins, HelpCircle, Loader2, RefreshCw, Trophy, AlertCircle, ArrowLeft } from "lucide-react";
 import { db } from "../../lib/firebase";
-import { doc, onSnapshot } from "firebase/firestore";
+import { onSnapshot } from "firebase/firestore";
+import { doc } from "../../lib/botDb";
 import { API_BASE } from "../../config/api";
 
 // -----------------------------------------------------------------------------

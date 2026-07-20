@@ -3,7 +3,8 @@ import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, ShieldCheck, AlertCircle, Sparkles, CheckCircle2, Zap, Award, ArrowLeft } from "lucide-react";
 import { db } from "../lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { getDoc } from "firebase/firestore";
+import { doc } from "../lib/botDb";
 
 interface Task {
   id: string;

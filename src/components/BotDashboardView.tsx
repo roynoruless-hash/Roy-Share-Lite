@@ -7,9 +7,10 @@ import {
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { 
-  doc, getDoc, setDoc, collection, getDocs, query, where, deleteDoc, updateDoc, 
+  getDoc, setDoc, getDocs, query, where, deleteDoc, updateDoc, 
   serverTimestamp, addDoc, orderBy, limit 
 } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 import { motion, AnimatePresence } from "motion/react";
 
 interface BotDashboardViewProps {

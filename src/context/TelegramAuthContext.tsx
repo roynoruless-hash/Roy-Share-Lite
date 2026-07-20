@@ -2,7 +2,10 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User, TelegramAuthResponse } from "../types";
 import { API_BASE } from "../config/api";
 import { db } from "../lib/firebase";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { onSnapshot, setDoc } from "firebase/firestore";
+import { doc } from "../lib/botDb";
+import { watchdog } from "../lib/startupWatchdog";
+
 
 interface TelegramAuthContextType {
   user: User | null;
@@ -28,13 +31,21 @@ const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutM
     controller.abort();
   }, timeoutMs);
   try {
+    const headers = new Headers(options.headers || {});
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const botId = params.get("botId") || localStorage.getItem("current_bot_id") || "default";
+      headers.set("x-bot-id", botId);
+    } catch (e) {}
+
     console.log(`[TelegramAuthContext] [API Request] Sending fetch request to: ${url}`, {
       method: options.method || "GET",
-      headers: options.headers,
+      headers,
       body: options.body ? (String(options.body).length > 500 ? `${String(options.body).slice(0, 500)}...` : options.body) : undefined
     });
     const response = await fetch(url, {
       ...options,
+      headers,
       signal: controller.signal
     });
     clearTimeout(id);
@@ -52,6 +63,7 @@ const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutM
 };
 
 export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  watchdog.trackComponentRender("TelegramAuthProvider");
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +123,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   const verifyAuth = async () => {
     const startTime = Date.now();
     console.log("[TelegramAuthContext] [PERFORMANCE] verifyAuth execution started at:", new Date(startTime).toISOString());
+    watchdog.updateStep('4', 'IN_PROGRESS', 'Beginning user verification sequence...');
     
     // Prevent concurrent duplicate executions of verifyAuth
     if (isVerifyingRef.current) {
@@ -154,6 +167,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       if (currentTg) {
         setTg(currentTg);
         console.log("[TelegramAuthContext] WebApp detailed metadata - version:", currentTg.version, "platform:", currentTg.platform);
+        watchdog.updateStep('1', 'COMPLETED', `Telegram WebApp initialized on ${currentTg.platform || 'unknown'} platform.`);
       }
 
       const params = new URLSearchParams(window.location.search);
@@ -167,6 +181,8 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         setLoading(false);
         setIsBackgroundLoading(false);
         isVerifyingRef.current = false;
+        watchdog.updateStep('4', 'COMPLETED', 'Bypassed authentication: Not in Mini App / Telegram context.');
+        watchdog.markAppReady();
         return;
       }
 
@@ -178,6 +194,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       // Fallback scenarios:
       if (!currentInitData && queryUserId) {
         console.log("[TelegramAuthContext] Fallback scenario: queryUserId available, initData missing. Fetching user profile directly.");
+        watchdog.updateStep('4', 'IN_PROGRESS', `queryUserId ${queryUserId} present. Querying profile API directly...`);
         const fallbackStart = Date.now();
         const profileUrl = `${API_BASE}/api/user/profile/${queryUserId}`;
         const response = await fetchWithTimeout(profileUrl, {}, 5000);
@@ -186,6 +203,8 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
 
         if (data.success && data.user) {
           setUser(data.user);
+          watchdog.updateStep('4', 'COMPLETED', `Bypassed token verification: Authenticated with direct profile query.`);
+          watchdog.markAppReady();
         } else {
           throw new Error(data.error || "User not found in database");
         }
@@ -204,11 +223,14 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         setLoading(false);
         setIsBackgroundLoading(false);
         isVerifyingRef.current = false;
+        watchdog.updateStep('4', 'COMPLETED', 'Bypassed verification: initData is empty.');
+        watchdog.markAppReady();
         return;
       }
 
       // Standard verification flow
       console.log("[TelegramAuthContext] Standard Telegram verification starting...");
+      watchdog.updateStep('4', 'IN_PROGRESS', 'Standard token verification via telegram-verify API endpoint...');
       const verifyStart = Date.now();
       const urlParams = new URLSearchParams(window.location.search);
       const sp = currentTg?.initDataUnsafe?.start_param || urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start_param") || "";
@@ -225,6 +247,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         attempts++;
         try {
           console.log(`[TelegramAuthContext] Sending verification request (Attempt ${attempts}/3)...`);
+          watchdog.updateStep('4', 'IN_PROGRESS', `Requesting telegram-verify on server (Attempt ${attempts}/3)...`);
           const response = await fetchWithTimeout(verifyUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -237,12 +260,15 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
           if (data.success && data.user) {
             setUser(data.user);
             authenticated = true;
+            watchdog.updateStep('4', 'COMPLETED', `Successfully authenticated Telegram ID: ${data.user.id}`);
+            watchdog.markAppReady();
           } else {
             throw new Error(data.error || "Authentication failed");
           }
         } catch (err: any) {
           lastError = err;
           console.error(`[TelegramAuthContext] Verification attempt ${attempts} failed:`, err.message || err);
+          watchdog.updateStep('4', 'IN_PROGRESS', `Attempt ${attempts}/3 failed: ${err.message || err}. Retrying in 1s...`);
           if (attempts < 3) {
             await new Promise(r => setTimeout(r, 1000)); // wait 1s before retry
           }
@@ -255,6 +281,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
 
     } catch (err: any) {
       console.error("[TelegramAuthContext] [PERFORMANCE ERROR] Complete verification flow failed. Total elapsed:", Date.now() - startTime, "ms. Error:", err);
+      watchdog.updateStep('4', 'FAILED', `Authentication failed completely: ${err.message || err}`);
       // Only set error if we haven't already released the UI (to avoid overwriting fallback state with an intrusive error page)
       if (!isReleased) {
         setError(err.message || "Failed to authenticate with Telegram");
@@ -305,6 +332,19 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     let active = true;
     console.log("[TelegramAuthContext] [Mount] Provider mounted. Starting 10-second authentication guard timeout.");
     
+    // Report Firebase and Firestore status
+    try {
+      if (db) {
+        watchdog.updateStep('5', 'COMPLETED', 'Firebase SDK initialized successfully.');
+        watchdog.updateStep('6', 'COMPLETED', 'Firestore Database successfully initialized.');
+      } else {
+        throw new Error('Firestore db object is undefined.');
+      }
+    } catch (e: any) {
+      watchdog.updateStep('5', 'FAILED', `Firebase Initialization Error: ${e.message}`);
+      watchdog.updateStep('6', 'FAILED', `Firestore Initialization Error: ${e.message}`);
+    }
+
     // 10s timeout for auth
     const authTimeout = setTimeout(() => {
       if (active) {
@@ -330,8 +370,10 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   useEffect(() => {
     if (!user || !user.id) return;
 
+    watchdog.updateStep('19', 'IN_PROGRESS', `Subscribing to Firestore updates for user: ${user.id}`);
     const userDocRef = doc(db, "users", String(user.id));
     const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+      watchdog.updateStep('19', 'COMPLETED', `Received live Firestore user update for ID: ${user.id}`);
       if (docSnap.exists()) {
         const updatedData = docSnap.data();
         setUser((prevUser) => {
@@ -345,9 +387,13 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       }
     }, (err) => {
       console.error("[TelegramAuthContext] Real-time user listener error:", err);
+      watchdog.updateStep('19', 'FAILED', `Real-time user listener failed: ${err.message}`);
     });
 
-    return () => unsubscribe();
+    return () => {
+      watchdog.updateStep('19', 'COMPLETED', `Unsubscribed from Firestore user ${user.id}`);
+      unsubscribe();
+    };
   }, [user?.id]);
 
   return (

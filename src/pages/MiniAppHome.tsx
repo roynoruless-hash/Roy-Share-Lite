@@ -45,7 +45,8 @@ import {
   Grid,
 } from "lucide-react";
 import { db } from "../lib/firebase";
-import { collection, getDocs, query, where, doc, updateDoc, onSnapshot } from "firebase/firestore";
+import { getDocs, query, where, updateDoc, onSnapshot } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 import { getGiveawayStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
 import { StandardTaskCard } from "../components/StandardTaskCard";
 import { ShortenerTaskCard } from "../components/ShortenerTaskCard";
@@ -53,6 +54,8 @@ import { ShortenerTaskCard } from "../components/ShortenerTaskCard";
 import { API_BASE } from "../config/api";
 import { RouteErrorBoundary } from "../components/RouteErrorBoundary";
 import { navigate } from "../lib/navigation";
+import { watchdog } from "../lib/startupWatchdog";
+
 
 const DriveUploadPage = lazy(() => import("./DriveUploadPage"));
 const CustomerSupportPage = lazy(() => import("./CustomerSupportPage"));
@@ -446,6 +449,7 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
 };
 
 export const MiniAppHome: React.FC = () => {
+  watchdog.trackComponentRender("MiniAppHome");
   const { user, loading, error, startParam, isInsideTelegram } = useTelegramAuth();
   const [tgSettings, setTgSettings] = useState<any>(null);
   const [giveaways, setGiveaways] = useState<any[]>([]);
@@ -455,20 +459,27 @@ export const MiniAppHome: React.FC = () => {
   useEffect(() => {
     console.log("[MiniAppHome] Mounted. Initial state: ", { user, loading, error, isInsideTelegram });
     setIsRendered(true);
-  }, []);
+    // Mark App Ready when MiniAppHome mounts and has a user session loaded
+    if (user) {
+      watchdog.markAppReady();
+    }
+  }, [user]);
 
   console.log("[MiniAppHome] Render start. loading:", loading, "user:", user?.id, "error:", error);
 
 
   useEffect(() => {
+    watchdog.updateStep('19', 'IN_PROGRESS', 'Subscribing to lucky_number_campaigns snapshot stream...');
     const q = collection(db, "lucky_number_campaigns");
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       setGiveaways(list);
       setLoadingGiveaways(false);
+      watchdog.updateStep('19', 'COMPLETED', `Successfully fetched and synchronized ${snap.docs.length} lucky_number_campaigns.`);
     }, (err) => {
       console.error("Error listening to lucky_number_campaigns:", err);
       setLoadingGiveaways(false);
+      watchdog.updateStep('19', 'FAILED', `Failed to subscribe to lucky_number_campaigns: ${err.message}`);
     });
     return unsub;
   }, []);

@@ -1,5 +1,6 @@
-import { doc, getDoc, updateDoc, addDoc, collection } from "firebase/firestore";
+import { getDoc, updateDoc, addDoc } from "firebase/firestore";
 import { db } from "./firebase";
+import { doc, collection } from "./botDb";
 
 /**
  * Adjusts the user's trust score and manages logs/alerts.

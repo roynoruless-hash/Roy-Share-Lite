@@ -8,6 +8,9 @@ import { API_BASE } from "./config/api";
 import { TelegramAuthProvider } from "./context/TelegramAuthContext";
 import { TelegramAuthGuard } from "./components/TelegramAuthGuard";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
+import { watchdog } from "./lib/startupWatchdog";
+import { StartupWatchdogOverlay } from "./components/StartupWatchdogOverlay";
+
 
 const AnimatedBackground = lazy(() => import("./components/AnimatedBackground"));
 const Hero = lazy(() => import("./components/Hero"));
@@ -63,20 +66,44 @@ import MoreMenu from "./components/MoreMenu";
 const ADMIN_AUTH_ENABLED = true;
 
 export default function App() {
+  watchdog.trackComponentRender("App");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loadingConfig] = useState(false);
   const [, setDummyState] = useState(false);
 
   useEffect(() => {
     console.log("[App Startup] React Entry Point Initialized");
+    watchdog.updateStep('3', 'COMPLETED', `Current Path: ${window.location.pathname}`);
+    watchdog.updateStep('13', 'COMPLETED', 'TelegramAuthProvider context provider successfully mounted.');
+    watchdog.updateStep('12', 'COMPLETED', 'Suspense lazy loading boundaries registered and active.');
+
+    // Step 9: Service Worker Verification
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then(registrations => {
+          if (registrations.length === 0) {
+            watchdog.updateStep('9', 'COMPLETED', 'No active service worker interference detected (Clean browser caching).');
+          } else {
+            watchdog.updateStep('9', 'COMPLETED', `${registrations.length} service worker registrations verified.`);
+          }
+        })
+        .catch(err => {
+          watchdog.updateStep('9', 'FAILED', `Failed to query service worker state: ${err.message}`);
+        });
+    } else {
+      watchdog.updateStep('9', 'COMPLETED', 'Service worker API not supported/required by client browser.');
+    }
+
     // Initialize Telegram WebApp
     const tg = (window as any).Telegram?.WebApp;
     if (tg) {
       console.log("[App Startup] Telegram SDK Found. Calling ready/expand...");
       tg.ready();
       tg.expand();
+      watchdog.updateStep('1', 'COMPLETED', 'Telegram SDK found and initialized.');
     } else {
       console.log("[App Startup] Telegram SDK NOT found on window object.");
+      watchdog.updateStep('1', 'IN_PROGRESS', 'Telegram WebApp script not yet loaded, waiting for async script tag.');
     }
 
     const handleLocationChange = () => {
@@ -91,10 +118,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Step 8: Environment variables assessment
+    const mode = import.meta.env.MODE || 'production';
+    watchdog.updateStep('8', 'COMPLETED', `Environment parameters assessed: API_BASE is "${API_BASE || 'origin'}", App Mode is "${mode}".`);
+
+    // Step 7: Backend API Connectivity Check
+    watchdog.updateStep('7', 'IN_PROGRESS', 'Verifying backend REST API connectivity...');
+
     // Prefetch system settings in background to warm up connection/cache without blocking render
     fetch(`${API_BASE}/api/system-settings`)
+      .then(() => {
+        watchdog.updateStep('7', 'COMPLETED', 'REST API connectivity test succeeded.');
+        watchdog.updateStep('20', 'COMPLETED', 'Successfully prefetched system settings.');
+      })
       .catch(err => {
         console.error("Failed to prefetch system settings:", err);
+        watchdog.updateStep('7', 'FAILED', `Backend API connectivity failed: ${err.message}`);
+        watchdog.updateStep('20', 'FAILED', `Prefetch failed: ${err.message}`);
       });
   }, []);
 
@@ -444,6 +484,7 @@ export default function App() {
 
   return (
     <TelegramAuthProvider>
+      <StartupWatchdogOverlay />
       <MoreMenu />
       <Suspense fallback={
         <div className="min-h-screen bg-[#020617] flex items-center justify-center">

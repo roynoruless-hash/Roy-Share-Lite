@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { ArrowLeft, Clock, Trophy, Users, Info, Calendar, CheckCircle, AlertCircle, Loader2, Lock, Sparkles, RefreshCw } from "lucide-react";
 import { db } from "../lib/firebase";
-import { doc, onSnapshot, collection, query, where, getDocs } from "firebase/firestore";
+import { onSnapshot, query, where, getDocs } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { parseInKolkata, formatFriendlyKolkata, getGiveawayStatus, getGiveawayTimeLeft } from "../lib/dateUtils";
 

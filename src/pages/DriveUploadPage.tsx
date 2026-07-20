@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { db } from "../lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { getDoc } from "firebase/firestore";
+import { doc } from "../lib/botDb";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { 
   Cloud, 

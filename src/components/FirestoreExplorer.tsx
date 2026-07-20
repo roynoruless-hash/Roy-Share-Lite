@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getDb } from "../lib/firebase";
-import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { getDocs, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 
 export default function FirestoreExplorer() {
   const [status, setStatus] = useState<"loading" | "connected" | "failed">("loading");

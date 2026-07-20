@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Shield, Sparkles, Coins, HelpCircle, Loader2, RefreshCw, Trophy, AlertCircle, ArrowLeft, Grid, Wifi, WifiOff } from "lucide-react";
 import { db } from "../../lib/firebase";
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { getDoc, onSnapshot } from "firebase/firestore";
+import { doc } from "../../lib/botDb";
 import { API_BASE } from "../../config/api";
 
 // Pure JavaScript SHA-256 for secure client public code calculation

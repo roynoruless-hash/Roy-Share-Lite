@@ -8437,43 +8437,47 @@ Length: ${length} (short = ~1-2 sentences, medium = ~2-4 sentences with bullet p
     // ALWAYS return 200 immediately to Telegram to prevent retries and timeouts
     res.status(200).json({ ok: true });
 
-    // Process in background
-    (async () => {
-      const db = getDb();
-      try {
-        const update = req.body;
-        if (!update || typeof update !== "object") return;
+    const botId = req.params.botId || "default";
 
-        console.log(`📥 Webhook Processing Update ID: ${update.update_id}`);
-
-        // Load Bot Token from Firestore
-        const settingsSnap = await getDoc(doc(db, "settings", "telegram"));
-        if (!settingsSnap.exists()) {
-          console.error("🔴 Fatal: settings/telegram document missing in Firestore");
-          return;
-        }
-        const botToken = settingsSnap.data()?.botToken;
-        if (!botToken) {
-          console.error("🔴 Fatal: Bot Token missing in Firestore");
-          return;
-        }
-
-        // Handle the update
-        await handleUpdate(botToken, update);
-
-      } catch (err: any) {
-        console.error("🔴 Webhook Background Processing Fatal Error:");
-        console.error(err.stack || err);
-        
+    // Process in background inside correct bot context
+    botContextStorage.run({ botId }, () => {
+      (async () => {
+        const db = getDb();
         try {
-          await setDoc(doc(db, "settings", "telegram"), {
-            lastWebhookError: err.message || String(err),
-            lastWebhookErrorTime: new Date().toISOString(),
-            lastWebhookErrorStack: err.stack || ""
-          }, { merge: true });
-        } catch (dbErr) {}
-      }
-    })();
+          const update = req.body;
+          if (!update || typeof update !== "object") return;
+
+          console.log(`📥 Webhook Processing Update ID: ${update.update_id} for botId: ${botId}`);
+
+          // Load Bot Token from Firestore
+          const settingsSnap = await getDoc(doc(db, "settings", "telegram"));
+          if (!settingsSnap.exists()) {
+            console.error(`🔴 Fatal: settings/telegram document missing in Firestore for bot: ${botId}`);
+            return;
+          }
+          const botToken = settingsSnap.data()?.botToken;
+          if (!botToken) {
+            console.error(`🔴 Fatal: Bot Token missing in Firestore for bot: ${botId}`);
+            return;
+          }
+
+          // Handle the update
+          await handleUpdate(botToken, update);
+
+        } catch (err: any) {
+          console.error(`🔴 Webhook Background Processing Fatal Error for bot ${botId}:`);
+          console.error(err.stack || err);
+          
+          try {
+            await setDoc(doc(db, "settings", "telegram"), {
+              lastWebhookError: err.message || String(err),
+              lastWebhookErrorTime: new Date().toISOString(),
+              lastWebhookErrorStack: err.stack || ""
+            }, { merge: true });
+          } catch (dbErr) {}
+        }
+      })();
+    });
   });
 
   // Polling infrastructure

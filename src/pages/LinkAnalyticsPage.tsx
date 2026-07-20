@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { ArrowLeft, MousePointerClick, Calendar, Globe, Monitor, Smartphone, Layout, ArrowRight } from "lucide-react";
 import { db } from "../lib/firebase";
-import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
+import { query, where, getDocs, getDoc } from "firebase/firestore";
+import { doc, collection } from "../lib/botDb";
 
 const LinkAnalyticsPage = ({ linkId, onBack }: { linkId: string, onBack: () => void }) => {
   const [loading, setLoading] = useState(true);

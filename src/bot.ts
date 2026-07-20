@@ -1,7 +1,7 @@
 import { getDb } from "./lib/firebase";
 import { REWARD_TASKS } from "./lib/tasks";
 import { getDoc, setDoc, query, where, getDocs, addDoc, orderBy, deleteDoc, limit } from "firebase/firestore";
-import { doc, collection } from "./lib/botDb";
+import { doc, collection, getActiveBotId } from "./lib/botDb";
 import { GoogleGenAI } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./lib/gemini";
 import crypto from "crypto";
@@ -42,7 +42,16 @@ function getAppUrl(): string {
 
 function getMiniAppUrl(pathAndQuery: string): string {
     const rawAppUrl = process.env.APP_URL || "https://royshare.online";
-    return `${rawAppUrl.replace(/\/$/, "")}${pathAndQuery}`;
+    let url = `${rawAppUrl.replace(/\/$/, "")}${pathAndQuery}`;
+    const botId = getActiveBotId();
+    if (botId && botId !== "default" && botId !== "undefined") {
+        if (url.includes("?")) {
+            url += `&botId=${botId}`;
+        } else {
+            url += `?botId=${botId}`;
+        }
+    }
+    return url;
 }
 
 async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
