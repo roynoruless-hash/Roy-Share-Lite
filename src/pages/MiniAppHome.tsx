@@ -51,6 +51,7 @@ import { StandardTaskCard } from "../components/StandardTaskCard";
 import { ShortenerTaskCard } from "../components/ShortenerTaskCard";
 
 import { API_BASE } from "../config/api";
+import { RouteErrorBoundary } from "../components/RouteErrorBoundary";
 import { navigate } from "../lib/navigation";
 
 const DriveUploadPage = lazy(() => import("./DriveUploadPage"));
@@ -449,6 +450,15 @@ export const MiniAppHome: React.FC = () => {
   const [tgSettings, setTgSettings] = useState<any>(null);
   const [giveaways, setGiveaways] = useState<any[]>([]);
   const [loadingGiveaways, setLoadingGiveaways] = useState<boolean>(true);
+  const [isRendered, setIsRendered] = useState(false);
+
+  useEffect(() => {
+    console.log("[MiniAppHome] Mounted. Initial state: ", { user, loading, error, isInsideTelegram });
+    setIsRendered(true);
+  }, []);
+
+  console.log("[MiniAppHome] Render start. loading:", loading, "user:", user?.id, "error:", error);
+
 
   useEffect(() => {
     const q = collection(db, "lucky_number_campaigns");
@@ -811,7 +821,13 @@ export const MiniAppHome: React.FC = () => {
   }
 
   if (currentView === "upload") {
-    return <DriveUploadPage onBack={() => setCurrentView("home")} />;
+    return (
+      <RouteErrorBoundary componentName="DriveUploadPage">
+        <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+          <DriveUploadPage onBack={() => setCurrentView("home")} />
+        </Suspense>
+      </RouteErrorBoundary>
+    );
   }
 
   if (currentView === "lucky-spin") {
@@ -829,16 +845,34 @@ export const MiniAppHome: React.FC = () => {
   }
 
   if (currentView === "dashboard") {
-    return <DashboardPage onBack={() => setCurrentView("home")} onNavigate={setCurrentView} />;
+    return (
+      <RouteErrorBoundary componentName="DashboardPage">
+        <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+          <DashboardPage onBack={() => setCurrentView("home")} onNavigate={setCurrentView} />
+        </Suspense>
+      </RouteErrorBoundary>
+    );
   }
 
   if (currentView === "surveys") {
-    return <SurveyPage onBack={() => setCurrentView("home")} />;
+    return (
+      <RouteErrorBoundary componentName="SurveyPage">
+        <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+          <SurveyPage onBack={() => setCurrentView("home")} />
+        </Suspense>
+      </RouteErrorBoundary>
+    );
   }
 
   if (currentView === "wallet" || currentView === "balance" || currentView === "withdraw" || currentView === "history") {
     const initialTab = currentView === "balance" || currentView === "wallet" ? "wallet" : currentView;
-    return <WalletPage onBack={() => setCurrentView("home")} initialTab={initialTab} />;
+    return (
+      <RouteErrorBoundary componentName="WalletPage">
+        <Suspense fallback={<div className="min-h-screen bg-[#020617] flex items-center justify-center"><div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+          <WalletPage onBack={() => setCurrentView("home")} initialTab={initialTab} />
+        </Suspense>
+      </RouteErrorBoundary>
+    );
   }
 
 
@@ -1474,7 +1508,7 @@ export const MiniAppHome: React.FC = () => {
               ) : (
                 <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-850">
                   {leaderboardData.map((leader, index) => {
-                    const isCurrentUser = leader.id === user.id;
+                    const isCurrentUser = user && leader.id === user.id;
                     return (
                       <div 
                         key={leader.id} 

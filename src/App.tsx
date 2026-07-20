@@ -7,6 +7,7 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { API_BASE } from "./config/api";
 import { TelegramAuthProvider } from "./context/TelegramAuthContext";
 import { TelegramAuthGuard } from "./components/TelegramAuthGuard";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 
 const AnimatedBackground = lazy(() => import("./components/AnimatedBackground"));
 const Hero = lazy(() => import("./components/Hero"));
@@ -67,11 +68,15 @@ export default function App() {
   const [, setDummyState] = useState(false);
 
   useEffect(() => {
+    console.log("[App Startup] React Entry Point Initialized");
     // Initialize Telegram WebApp
     const tg = (window as any).Telegram?.WebApp;
     if (tg) {
+      console.log("[App Startup] Telegram SDK Found. Calling ready/expand...");
       tg.ready();
       tg.expand();
+    } else {
+      console.log("[App Startup] Telegram SDK NOT found on window object.");
     }
 
     const handleLocationChange = () => {
@@ -445,7 +450,9 @@ export default function App() {
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
       }>
-        {renderContent()}
+        <RouteErrorBoundary componentName="AppRootContent">
+          {renderContent()}
+        </RouteErrorBoundary>
       </Suspense>
     </TelegramAuthProvider>
   );
